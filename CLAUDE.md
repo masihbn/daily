@@ -6,10 +6,18 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-Currently mid-build: hosting, backend, and the data schema are live and
-verified; the actual skill-tracking UI (calendar, weekly chart, add/edit
-skill, log an entry) has not been built yet — today's app is still the
+Currently mid-build: hosting and backend plumbing are live and verified;
+the actual tracking UI has not been built yet — today's app is still the
 placeholder tap-counter used to prove the plumbing.
+
+**The concept is under active design discussion and has moved beyond
+what's described below.** It's evolving from a narrow "skill/habit
+tracker" into a more general personal logging + charts platform (generic
+bounded-metric "two bars" tracking, flexible aggregation, etc.). See
+**docs/APP_CONCEPT.md** for the current state of that discussion before
+assuming the schema/data model sections below are still the target — the
+schema live on Supabase (`docs/DATA_MODEL.md`) predates this reframing
+and hasn't been migrated to match it yet.
 
 ## Stack
 
@@ -37,7 +45,11 @@ icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (numbered, e.g. 0001_..., 0002_...) — see docs/DATA_MODEL.md
 docs/                 all notes/reference docs live here (see below)
-  DATA_MODEL.md        full schema reference + design rationale
+  APP_CONCEPT.md       CURRENT design discussion — read this first, it
+                        supersedes the data model below in spirit even
+                        though the schema hasn't caught up yet
+  DATA_MODEL.md        schema reference for what's actually live (pre-dates
+                        the reframing in APP_CONCEPT.md)
   PROJECT_NOTES.md      deployment/ops history and the GitHub blueprint
                         (gh auth mechanics, Pages setup, keepalive workflow,
                         security posture) — read before touching CI/deploy/git
