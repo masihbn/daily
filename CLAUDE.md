@@ -36,13 +36,19 @@ js/app.js            all client JS (will split into modules as features grow)
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (numbered, e.g. 0001_..., 0002_...) — see docs/DATA_MODEL.md
-docs/DATA_MODEL.md   full schema reference + design rationale
-PROJECT_NOTES.md     deployment/ops history and the GitHub blueprint
-                      (gh auth mechanics, Pages setup, keepalive workflow,
-                      security posture) — read before touching CI/deploy/git
+docs/                 all notes/reference docs live here (see below)
+  DATA_MODEL.md        full schema reference + design rationale
+  PROJECT_NOTES.md      deployment/ops history and the GitHub blueprint
+                        (gh auth mechanics, Pages setup, keepalive workflow,
+                        security posture) — read before touching CI/deploy/git
 .github/workflows/   supabase-keepalive.yml — pings the DB every ~5 days
                       so the free Supabase project doesn't auto-pause
 ```
+
+**Convention: all notes/reference `.md` files live in `docs/`.** `CLAUDE.md`
+is the one exception — it must stay at the repo root because Claude Code
+auto-loads it from there. Any new project notes, design docs, or history
+files go in `docs/`, not the root.
 
 ## Data model (high level — see docs/DATA_MODEL.md for full detail)
 
@@ -80,5 +86,5 @@ want exposed if the URL or key leaked. Don't add more sensitive fields
   via the dashboard without adding the matching migration file here.
 
 Full history, every gotcha hit so far, and the exact `gh`/GitHub Pages/
-keepalive setup steps live in **PROJECT_NOTES.md** — read it before doing
-anything with git, GitHub, or CI on this project.
+keepalive setup steps live in **docs/PROJECT_NOTES.md** — read it before
+doing anything with git, GitHub, or CI on this project.

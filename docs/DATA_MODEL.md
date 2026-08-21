@@ -77,7 +77,7 @@ needs no further optimization.
   client-side by ISO week — count rows (boolean) or sum `value`
   (numeric) per week, plot as a bar/line chart.
 
-## Security status (see also PROJECT_NOTES.md → "Security posture")
+## Security status (see also docs/PROJECT_NOTES.md → "Security posture")
 
 Both tables currently have a single permissive RLS policy each
 (`for all using (true) with check (true)`) — the anon/publishable key

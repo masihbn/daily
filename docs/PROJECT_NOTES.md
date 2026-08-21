@@ -5,7 +5,7 @@ Last updated: 2026-08-21
 This is a reference doc, not an auto-loaded file — it is NOT named
 CLAUDE.md on purpose, so it won't be pulled into context automatically at
 the start of every session. Point a future session at it explicitly (e.g.
-"read PROJECT_NOTES.md") when you want the full history. Keep it updated
+"read docs/PROJECT_NOTES.md") when you want the full history. Keep it updated
 as the project evolves — append to the Test Log rather than deleting past
 entries, so the reasoning trail stays intact.
 
@@ -283,7 +283,7 @@ personal**:
   target the "real" tables.)
 - `.gitignore` — excludes `.mcp.json` (local Claude Code MCP connector
   config, not app code, not needed to build/run/deploy the app).
-- `PROJECT_NOTES.md` — this file.
+- `docs/PROJECT_NOTES.md` — this file.
 
 **Not tracked / not present in the repo:**
 - `.mcp.json` exists locally (points the Supabase MCP server at project
@@ -440,7 +440,7 @@ Two things done in response:
    forward the same open-RLS pattern as `counter` (`using (true)`),
    tracked explicitly as a gap to close before storing anything the
    user would mind being exposed — see `docs/DATA_MODEL.md`'s Security
-   status section and PROJECT_NOTES.md's own Security posture section
+   status section and docs/PROJECT_NOTES.md's own Security posture section
    above.
 2. **Reorganized the flat repo root** into `css/`, `js/`, `icons/`,
    `supabase/migrations/`, `docs/` — done with `git mv` to preserve file
