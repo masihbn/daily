@@ -15,6 +15,13 @@ the every-5-days Supabase keepalive workflow runs, and the `gh` CLI
 mechanics that weren't obvious the first time through. See "GitHub &
 deployment blueprint" below before touching any of that again.
 
+**As of 2026-08-21, `CLAUDE.md` (repo root) is the auto-loaded high-level
+reference** for what the app is and how it's structured — read that
+first in a new session. `docs/DATA_MODEL.md` has the full schema detail.
+This file stays focused on deployment/ops history and the GitHub
+mechanics; app/data-model content now lives in those two files instead of
+here, to avoid duplicating it in two places.
+
 ## Goal
 
 Build a personal app the user can run on their iPhone 15 without ever
@@ -243,33 +250,37 @@ personal**:
 ## Current repo state
 
 **Is now a real git repository**, initialized 2026-08-21, default branch
-`main`, pushed to `github.com/masihbn/memory-test-pwa`. Tracked files:
+`main`, pushed to `github.com/masihbn/memory-test-pwa`. Reorganized
+2026-08-21 (Attempt 4 below) from a flat root into folders — see
+`CLAUDE.md` for the folder map. Tracked files:
 
-- `index.html` — the entire app. A "Memory Test" page: big tap counter,
-  `+1` / `Reset` buttons. Reads/writes the count via Supabase's REST API
-  (PostgREST) with plain `fetch` — `SUPABASE_URL` / `SUPABASE_ANON_KEY`
-  constants at the top of the `<script>` block are **filled in and
-  live** (see GitHub & deployment blueprint above for the values).
-  `localStorage` (`lastKnownCount`) is only an offline-view fallback if
-  the Supabase fetch fails — never the primary store. Registers the
-  service worker, includes `apple-mobile-web-app-capable` meta tags and
-  an `apple-touch-icon` link (what iOS actually uses for the home screen
-  icon — separate from the manifest's `icons` array).
-- `manifest.json` — PWA manifest: name "Memory Test", `display:
-  standalone`, references `icon-192.png` / `icon-512.png`.
-- `sw.js` — minimal service worker: network-first with cache fallback on
-  fetch (tries the network, caches a copy of successful responses, falls
-  back to cache only if the network fetch fails/offline), cleans up any
-  cache not matching the current `CACHE` constant on activate. **Bump
-  `CACHE` when shipping asset changes** — see deploy pipeline above.
-- `icon-192.png`, `icon-512.png` — solid blue-square placeholder icons,
-  generated with a hand-rolled PNG encoder in Python (no text/logo yet,
-  purely functional placeholders).
-- `supabase-schema.sql` — creates the `counter` table (single row, id=1)
-  and its RLS policies. Already applied to the live project — this file
-  is now a record of what was run, not a pending step.
+- `index.html` — entry point, still the placeholder tap-counter UI (the
+  real skill-tracker UI hasn't been built yet). Links `css/styles.css`
+  and `js/app.js` instead of inline `<style>`/`<script>`.
+- `css/styles.css`, `js/app.js` — extracted from what used to be inline
+  in `index.html`. `app.js` has the `SUPABASE_URL`/`SUPABASE_ANON_KEY`
+  constants, **filled in and live** (see GitHub & deployment blueprint
+  above for the values), reads/writes the `counter` table, and falls
+  back to a `localStorage` cache (`lastKnownCount`) only if the Supabase
+  fetch fails.
+- `manifest.json` — PWA manifest, icons now point at `icons/`.
+- `sw.js` — network-first-with-cache-fallback service worker; `CACHE`
+  bumped to `memtest-v2` after the folder reorg changed its `ASSETS`
+  list. **Bump `CACHE` again on any future asset change** — see deploy
+  pipeline above.
+- `icons/icon-192.png`, `icons/icon-512.png` — solid blue-square
+  placeholder icons (hand-rolled PNG encoder, no text/logo yet).
+- `supabase/migrations/0001_init_counter.sql` — the original `counter`
+  table + RLS (renamed from the old root-level `supabase-schema.sql`).
+- `supabase/migrations/0002_skills_tracker.sql` — the `skills` +
+  `skill_entries` tables for the real app concept (see Attempt 4 below
+  and `docs/DATA_MODEL.md` for the full design). Applied live.
+- `CLAUDE.md` — new, auto-loaded high-level project reference.
+- `docs/DATA_MODEL.md` — new, full schema reference and rationale.
 - `.github/workflows/supabase-keepalive.yml` — see keepalive section
-  above. Live and verified working.
+  above. Live and verified working. (Still pings `counter` specifically
+  — harmless, its only job is to generate DB activity, doesn't need to
+  target the "real" tables.)
 - `.gitignore` — excludes `.mcp.json` (local Claude Code MCP connector
   config, not app code, not needed to build/run/deploy the app).
 - `PROJECT_NOTES.md` — this file.
@@ -414,6 +425,38 @@ Sources: eesel.ai/blog/github-pricing, costbench.com/.../github/free-plan,
 itpathsolutions.com/supabase-free-tier-limits, jetadmin.io/blog/supabase-
 pricing-2026-guide.
 
+### Attempt 4 — 2026-08-21, project pivot: skill/habit tracker + reorg
+
+User specified the real app concept: a skill/habit tracker. Log skills
+that aren't necessarily daily (e.g. "workout" 3-4x/week), some
+boolean/done-not-done (workout) and some numeric (calories, cigarette
+count), with two planned views: a monthly calendar (days marked when
+logged) and a weekly trend chart (count/amount per week over time).
+
+Two things done in response:
+1. **Designed and applied the real schema** — `skills` +
+   `skill_entries` tables, live on Supabase (verified via
+   `list_tables`). Full rationale in `docs/DATA_MODEL.md`. Carries
+   forward the same open-RLS pattern as `counter` (`using (true)`),
+   tracked explicitly as a gap to close before storing anything the
+   user would mind being exposed — see `docs/DATA_MODEL.md`'s Security
+   status section and PROJECT_NOTES.md's own Security posture section
+   above.
+2. **Reorganized the flat repo root** into `css/`, `js/`, `icons/`,
+   `supabase/migrations/`, `docs/` — done with `git mv` to preserve file
+   history. `index.html`/`manifest.json`/`sw.js` stayed at root (PWA/
+   GitHub Pages convention; service worker scope depends on where it's
+   served from). `sw.js`'s `CACHE` constant bumped to `memtest-v2` per
+   the deploy-pipeline rule above, since its `ASSETS` list changed.
+   Added `CLAUDE.md` (new, auto-loaded) as the high-level project
+   reference, and `docs/DATA_MODEL.md` for full schema detail — see the
+   pointer note near the top of this file.
+
+**The actual skill-tracking UI (calendar view, weekly chart, add/edit
+skill, log an entry) has NOT been built yet.** `index.html` is still the
+placeholder tap-counter, just moved into the new file layout. That's the
+next real chunk of work.
+
 ## Next steps (in order)
 
 - [ ] **User opens https://masihbn.github.io/memory-test-pwa/ on the
@@ -423,19 +466,15 @@ pricing-2026-guide.
       deployment has already been independently confirmed from this
       machine (see Test log Attempts 2–3); this specific step needs the
       real device and hasn't been reported back yet.
-- [ ] **Decide the real app concept/features.** Reason: everything built
-      so far is plumbing (hosting, backend, installability) proven with
-      a placeholder counter — the user hasn't yet specified what the app
-      should actually do day-to-day, and that decision drives every
-      structural choice from here (data model, pages/routes, whether
-      auth is needed).
-- [ ] **Decide and document a project structure** before adding real
-      features. Reason: requested explicitly by the user this session —
-      a single flat `index.html` won't scale once there's real feature
-      logic, and deciding this before writing more code avoids a messy
-      mid-project refactor.
-- [ ] **Harden Supabase RLS (or add auth) before storing anything
-      personal.** Reason: current policies allow anyone with the public
-      URL to read/write data with no restriction — acceptable for a
-      throwaway counter, not acceptable the moment real user data is
-      involved (see Security posture above).
+- [ ] **Build the actual skill-tracker UI**: skill list, add/edit a
+      skill, log an entry for today, monthly calendar view, weekly trend
+      chart. Reason: this is the real app now that the concept is
+      decided (Attempt 4) and the schema is live — everything before
+      this was plumbing (hosting/backend/reorg), not the product itself.
+- [ ] **Harden Supabase RLS (or add auth) before adding more sensitive
+      skills.** Reason: `skills`/`skill_entries` currently carry forward
+      the same wide-open `using (true)` policy as the test counter —
+      acceptable for the current placeholder data, but should be fixed
+      before logging anything (health specifics, journal-style notes)
+      the user would mind being exposed if the URL/key leaked. See
+      `docs/DATA_MODEL.md` → Security status.
