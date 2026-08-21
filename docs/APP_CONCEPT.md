@@ -130,16 +130,97 @@ All four selected by the user (multi-select, all chosen):
 a fast way to log today's entry for each. Tapping into a trackable shows
 its enabled chart(s).
 
+## Numeric input (resolved)
+
+Native numeric keypad — `inputmode="decimal"` (or `type="number"`), never
+the full QWERTY keyboard. Decimals allowed by default (needed for things
+like weight, e.g. `78.4`); no per-trackable integer-only restriction
+requested.
+
+## Correlation/comparison charts — turned out bigger than first scoped
+
+Originally scoped (earlier in this doc) as "overlay habit markers on a
+bounded metric's chart" — e.g. gym-day dots drawn on the weight chart.
+The user's calorie-vs-money example is a different, harder case: two
+independent numeric trackables with completely different units and
+scales (calories ~2000/day, money ~$50/day) that need to be compared for
+*correlated movement over time*, not just marker placement.
+
+This is really **two distinct features** under one name:
+1. **Marker overlay on a bounded-metric chart** — discrete events (e.g.
+   "logged gym today") drawn as markers on a continuous metric's chart.
+   Originally scoped, still wanted.
+2. **Normalized multi-series comparison chart** — **resolved**: any
+   number of numeric trackables (not capped at 2) can be selected at
+   once, each aggregated to a common period via its own aggregation
+   function (count/sum/average), then normalized to its own historical
+   min–max range (0–100%) — reusing the same min/max mechanism already
+   designed for the bounded-metric feature — so differently-scaled
+   series (calories vs. dollars) share one chart. Raw values stay
+   visible via tooltip/legend; only the plotted line position is
+   normalized. Note for later UI design: readability will degrade as
+   more series are added at once — worth a "recommended max" or visual
+   decluttering pass when building this, but no hard cap.
+
+## Target lines (refines the earlier "forgiving weekly rollup" framing)
+
+Targets are a **reference line drawn directly on the trackable's chart**
+— e.g. a horizontal line at `3` on the weekly workout-count bar chart, or
+at `2000` on the calories chart — not just an abstract streak counter.
+Hitting/missing is visually obvious from where the bar/point falls
+relative to the line. (This is the concrete visual form of the earlier
+"forgiving weekly rollup" decision, not a contradiction of it.)
+
+**Resolved**: per-trackable choice, reusing the `build`/`break` field
+already in the live schema — `build` = floor (hit-or-exceed is good, e.g.
+workouts), `break` = ceiling (stay under is good, e.g. a calorie diet
+limit).
+
+## Face ID / auth — needs scope clarification before building
+
+Read of the request: a **lightweight local app-lock** (WebAuthn platform
+authenticator — Face ID — gating the installed PWA when it's opened),
+not full Supabase user accounts. Important distinction to confirm before
+building either piece: **a local Face ID lock does not, by itself, make
+the backend secure.** The anon key + open RLS policies (tracked as a
+known gap in `docs/DATA_MODEL.md`) would still let anyone who obtained
+the key read/write the data over the network — Face ID only stops
+someone picking up the unlocked phone from opening the installed app.
+These are two separate problems (device-level access vs. data-level
+security) and may need two separate answers.
+
+**Researched and confirmed feasible**: Apple supports WebAuthn for PWAs
+added to the Home Screen specifically, with Face ID/Touch ID as the
+platform authenticator and automatic fallback to device passcode if
+biometrics aren't available. One caveat: since 2024, standalone PWA mode
+is disabled entirely in the EU under the Digital Markets Act (installed
+PWAs there just open as a Safari tab) — irrelevant unless used from the
+EU. (Source: [Biometric Login for PWAs —
+weblogtrips.com](https://weblogtrips.com/technology/biometric-login-pwa-facial-recognition-2026/))
+
+## Face ID / auth scope (resolved)
+
+Local app-lock only, confirmed. Backend stays as-is (anon key + open
+RLS) for now — explicitly not treated as a substitute for the still-open
+RLS-hardening item below.
+
+## Product name: "Daily" (chosen)
+
+Not yet decided: whether to also rename the GitHub repo/Pages URL
+(currently `memory-test-pwa` / `masihbn.github.io/memory-test-pwa`) to
+match — a bigger, disruptive change since it breaks the URL already
+tested on the phone — versus just using "Daily" as the in-app display
+name/title while leaving the repo name as-is.
+
+## Rolling window (confirmed)
+
+Global setting (not per-metric), default 90 days, changeable in
+settings. No change from the earlier decision.
+
 ## Open questions — not yet decided, come back to these
 
-- Numeric input UX per trackable: keypad entry vs. +/- stepper vs.
-  letting each trackable choose. Leaning toward defaulting to keypad
-  entry unless discussed further.
-- Exact correlation-overlay UI: how many trackables can be overlaid on
-  one chart at once, and how the user picks which ones.
-- Whether the auto-threshold rolling-window length is a single global
-  setting or configurable per bounded metric (leaning per-metric, with
-  a global default of 90 days, but not confirmed).
+- **Product rename scope** — in-app name only, or also the GitHub
+  repo/Pages URL?
 - How "specific days of week" targets actually render/feel in the UI
   (calendar-exact scheduling wasn't picked as the sole model, but is
   available per-trackable — needs its own design pass).
@@ -152,9 +233,8 @@ its enabled chart(s).
 - RLS/auth hardening — still an open item from `docs/DATA_MODEL.md`'s
   Security status section, now more urgent given this app will hold
   actual personal health/financial data (weight, expenses), not just a
-  placeholder counter.
-- Product name — still called "memory-test-pwa" / "Memory Test"
-  everywhere; not yet renamed to reflect the real concept.
+  placeholder counter. Separate from the Face ID app-lock question above
+  — see the distinction drawn in that section.
 
 ## Decision log (dated, append rather than rewrite)
 
@@ -172,3 +252,24 @@ its enabled chart(s).
 - **2026-08-21** — v1 chart types confirmed: calendar heatmap, weekly
   bar/trend chart, two-bars threshold chart, correlation overlay.
 - **2026-08-21** — Home layout = trackable list + quick-log.
+- **2026-08-21** — Numeric input = native numeric keypad
+  (`inputmode="decimal"`), decimals allowed. Rolling window confirmed
+  global (not per-metric), 90-day default stands.
+- **2026-08-21** — Targets are reference lines drawn on the chart, not
+  just an abstract streak number — direction (ceiling/floor) still
+  needs a per-trackable setting.
+- **2026-08-21** — Correlation overlay split into two features: marker
+  overlay (as originally scoped) + a new normalized multi-series
+  comparison chart (from the calorie-vs-money example) — normalization
+  method proposed (own-history min–max) but not yet confirmed.
+- **2026-08-21** — Face ID requested; scoped as likely a local app-lock
+  only, not full account auth — flagged that this doesn't replace the
+  still-needed RLS hardening. Researched and confirmed technically
+  feasible (WebAuthn on installed iOS PWAs); scope (local-lock only vs.
+  also wanting account-level security) still needs confirmation.
+- **2026-08-21** — Product name chosen: "Daily." Repo/URL rename scope
+  not yet decided.
+- **2026-08-21** — Target direction = per-trackable choice, reusing
+  build/break. Comparison-chart normalization confirmed (own min–max,
+  0–100%), uncapped number of series comparable at once. Face ID scope
+  confirmed as local app-lock only, not a substitute for RLS hardening.
