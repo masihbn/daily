@@ -1,0 +1,3 @@
+# Local Claude Code MCP config — points at this machine's Supabase project setup,
+# not app code. Not needed to run or deploy the PWA.
+.mcp.json

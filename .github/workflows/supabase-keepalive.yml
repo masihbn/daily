@@ -1,0 +1,29 @@
+name: Supabase keepalive
+
+# Supabase free-tier projects auto-pause after 7 days with no database
+# activity. This pings the counter table every 5 days so the project
+# never goes idle long enough to trigger that. Also runnable manually
+# (workflow_dispatch) to verify it works without waiting for the schedule.
+on:
+  schedule:
+    - cron: '0 0 */5 * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query the counter table
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/counter?id=eq.1&select=value" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "Supabase responded with HTTP $status"
+          if [ "$status" -ge 400 ]; then
+            echo "Keepalive request failed"
+            exit 1
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
