@@ -206,35 +206,51 @@ RLS-hardening item below.
 
 ## Product name: "Daily" (chosen)
 
-Not yet decided: whether to also rename the GitHub repo/Pages URL
-(currently `memory-test-pwa` / `masihbn.github.io/memory-test-pwa`) to
-match — a bigger, disruptive change since it breaks the URL already
-tested on the phone — versus just using "Daily" as the in-app display
-name/title while leaving the repo name as-is.
+**Resolved**: yes, rename the repo and Pages URL to match (not just the
+in-app name). **Not yet executed** — this is a real, disruptive action
+(breaks the URL already tested/added to the home screen; needs
+redoing on the phone afterward) and is being held until we move from
+discussion into actually building, per the explicit instruction to not
+implement yet. When it happens: rename the GitHub repo (currently
+`memory-test-pwa`), which changes the Pages URL to match, update
+`.mcp.json`'s local reference if needed, and re-verify the deploy
+pipeline end to end (see `docs/PROJECT_NOTES.md`'s GitHub blueprint).
 
 ## Rolling window (confirmed)
 
 Global setting (not per-metric), default 90 days, changeable in
 settings. No change from the earlier decision.
 
+## Data export (resolved)
+
+Simple CSV export wanted — a way to dump entries (per-trackable or
+everything) to a downloadable CSV. Scoped as a real v1 feature, not
+"someday."
+
+## Reminders/notifications (resolved)
+
+No reminders for v1. Purely pull-based — open the app when you want to
+log. Revisit only if the no-reminders approach turns out to hurt actual
+usage.
+
+## RLS/auth hardening timing (resolved — with a noted tradeoff)
+
+Decided: build v1 features first against the current open-RLS setup,
+harden RLS afterward, once the feature set stabilizes. **Accepted
+tradeoff, not an oversight**: this means real personal data (weight,
+expenses, calories) will sit behind the same wide-open `using (true)`
+policy as the original test counter for the duration of v1 development
+— acceptable because only the user has the URL/key and it's solo use,
+but this should not be treated as "fine indefinitely." Revisit before
+this is ever shared, exposed more broadly, or treated as finished.
+
 ## Open questions — not yet decided, come back to these
 
-- **Product rename scope** — in-app name only, or also the GitHub
-  repo/Pages URL?
 - How "specific days of week" targets actually render/feel in the UI
   (calendar-exact scheduling wasn't picked as the sole model, but is
-  available per-trackable — needs its own design pass).
-- Data export/backup format (mentioned as a general concern in
-  `docs/PROJECT_NOTES.md`'s Security posture section, not yet discussed
-  for this app specifically).
-- Notifications/reminders strategy — explicitly deferred out of v1 for
-  the bounded-metric feature; whether it's wanted anywhere else in the
-  app (e.g. a daily reminder to log) hasn't been discussed.
-- RLS/auth hardening — still an open item from `docs/DATA_MODEL.md`'s
-  Security status section, now more urgent given this app will hold
-  actual personal health/financial data (weight, expenses), not just a
-  placeholder counter. Separate from the Face ID app-lock question above
-  — see the distinction drawn in that section.
+  available per-trackable — needs its own design pass). Lower priority:
+  no trackable discussed so far actually needs this over a weekly-count
+  target.
 
 ## Decision log (dated, append rather than rewrite)
 
@@ -273,3 +289,8 @@ settings. No change from the earlier decision.
   build/break. Comparison-chart normalization confirmed (own min–max,
   0–100%), uncapped number of series comparable at once. Face ID scope
   confirmed as local app-lock only, not a substitute for RLS hardening.
+- **2026-08-21** — Repo/URL rename to "Daily" confirmed but deliberately
+  not executed yet (holding for the move from discussion to building).
+  CSV export scoped in for v1. No reminders/notifications for v1. RLS
+  hardening deferred until after v1 features stabilize — explicitly
+  flagged as an accepted tradeoff, not indefinite.
