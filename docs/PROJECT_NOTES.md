@@ -384,15 +384,24 @@ later the same day — see **Attempt 5** below.
   **DONE 2026-08-21** — confirmed working end-to-end on the device by
   the user. See Test log, Attempt 5. This was the last unverified link
   in the deployment chain.
-- **The app's actual feature set is undecided.** Everything so far is
+- ~~**The app's actual feature set is undecided.**~~ **RESOLVED
+  2026-08-21** — the concept is settled and recorded in
+  `docs/APP_CONCEPT.md` (product name "Daily"; generic trackables,
+  re-log semantics, four chart types, bounded metrics), and broken into
+  an ordered build plan in `docs/BUILD_PLAN.md`.
+- **The app itself is still not built.** Everything shipped so far is
   plumbing (a tap counter proving hosting + backend + installability).
-  The user has not yet specified what the real day-to-day app should do.
-- **RLS/security hardening is not done** and shouldn't be treated as
-  "later cleanup" — it needs to happen *before* any real/personal data
-  is stored, not after. See Security posture above.
-- **Project structure is still a single flat `index.html`** — fine for
-  a one-page plumbing test, not the shape the real app should take. See
-  "Restructuring the project" — to be filled in once decided.
+  This is the actual remaining work — see `docs/BUILD_PLAN.md`.
+- **RLS/security hardening is not done.** Deliberately deferred to
+  `BUILD_PLAN.md` Step 5.3, after the v1 feature set stabilizes — this
+  is a recorded, accepted tradeoff (`APP_CONCEPT.md` → "RLS/auth
+  hardening timing"), not an oversight. It still must happen before the
+  app is shared, exposed more broadly, or treated as finished. See
+  Security posture above.
+- ~~**Project structure is still a single flat `index.html`.**~~
+  **RESOLVED 2026-08-21** — reorganized into folders in Attempt 4 (see
+  `CLAUDE.md` for the map). The JS will split further into ES modules
+  at `BUILD_PLAN.md` Step 0.3.
 
 ## Hosting & backend architecture (cost, and where data actually lives)
 

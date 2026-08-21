@@ -19,12 +19,23 @@ before assuming the schema/data model sections below are still the
 target — the schema live on Supabase (`docs/DATA_MODEL.md`) predates
 this reframing and hasn't been migrated to match it yet.
 
-**→ If you are here to build something, read `docs/BUILD_PLAN.md`.**
-That's the step-by-step execution plan that turns the concept into code:
-numbered steps with per-step preconditions, deliverables, technical
-notes, and a status field. Find the first step that isn't `DONE` and
-work that one. Don't start implementing from `APP_CONCEPT.md` directly —
-it's the *what*, `BUILD_PLAN.md` is the *how* and the *in what order*.
+**→ If you are here to build something, read `docs/ORCHESTRATION.md`
+first, then `docs/BUILD_PLAN.md`.**
+
+- `ORCHESTRATION.md` — **how the session runs.** Model policy (this
+  session must be **Opus**; all subagents **Sonnet**), the four
+  subagent roles, the implement→test→fix loop, prompt templates,
+  escalation rules. Read it before spawning anything.
+- `BUILD_PLAN.md` — **what to build, in order.** Numbered steps with
+  preconditions, deliverables, technical notes, and a status field.
+  Find the first step that isn't `DONE` and work that one.
+
+Don't implement from `APP_CONCEPT.md` directly — it's the *what*;
+`BUILD_PLAN.md` is the *how* and the *in what order*.
+
+**Two rules that override normal autonomy:** phase gates are hard stops
+(deploy, hand the user a manual checklist, wait for their verdict), and
+no subagent may weaken or delete a test to make it pass.
 
 ## Stack
 
@@ -51,7 +62,19 @@ js/app.js            all client JS (will split into modules as features grow)
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (numbered, e.g. 0001_..., 0002_...) — see docs/DATA_MODEL.md
+tests/               test-only, never deployed (see ORCHESTRATION.md)
+  unit/                node --test, pure functions, zero dependencies
+  integration/         real PostgREST calls against __test__* rows
+  e2e/                 Playwright (test-only devDependency)
+  helpers/             static server + Supabase test-row lifecycle
+package.json         TEST-ONLY (Playwright devDep + scripts). Does NOT
+                      make this a Node project — there is still no build
+                      step; GitHub Pages ignores it. node_modules/ is
+                      gitignored and must never reach Pages.
 docs/                 all notes/reference docs live here (see below)
+  ORCHESTRATION.md     HOW SESSIONS RUN — Opus orchestrator, Sonnet
+                        subagents, the implement→test→fix loop, phase
+                        gates. Read before executing any build step.
   BUILD_PLAN.md        THE EXECUTION PLAN — numbered, ordered steps from
                         today's placeholder to shipped v1. Read this to
                         find out what to build next. Update step statuses

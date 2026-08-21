@@ -102,6 +102,18 @@ viewed at a coarser grain (week/month):
 - Auto-derivation method: **rolling window**, default **90 days**, but
   the window length should be **changeable in settings** (per the
   user's explicit answer — not a hardcoded global constant).
+- **Auto-derivation statistic: 10th / 90th percentile of the window**
+  (resolved 2026-08-21). The window's raw `min`/`max` was rejected: it
+  is determined by exactly two readings — the single highest and single
+  lowest day in 90 days — which are precisely the readings most likely
+  to be measurement noise rather than signal (weighing post-meal, while
+  dehydrated, on a different scale). One bad reading would permanently
+  widen the band and make the whole chart lie. Percentiles describe the
+  range the metric *actually lives in*, which is what the dual
+  intervention point model is about: where compensating behavior kicks
+  in, not the absolute extremes ever recorded. With a typical sparse
+  series (~25 weigh-ins per 90 days) p10/p90 still sits ~2-3 readings in
+  from each end, so it stays responsive without being noise-driven.
 - Bound behavior for v1: **visual only** — the chart shades zones as
   the value approaches a bound (e.g. color gradient toward a bound
   color). No push notifications for v1 (noted as a possible future
@@ -294,3 +306,14 @@ this is ever shared, exposed more broadly, or treated as finished.
   CSV export scoped in for v1. No reminders/notifications for v1. RLS
   hardening deferred until after v1 features stabilize — explicitly
   flagged as an accepted tradeoff, not indefinite.
+- **2026-08-21** — Moved from design into execution. `docs/BUILD_PLAN.md`
+  (ordered steps) and `docs/ORCHESTRATION.md` (how sessions run those
+  steps) created. Charting resolved: Chart.js v4 + annotation plugin via
+  pinned CDN tags, calendar heatmap hand-rolled in CSS Grid.
+- **2026-08-21** — Auto-bound statistic resolved as **p10/p90 of the
+  rolling window**, closing the one gap the bounded-metrics section had
+  left unspecified. Rationale recorded above under Bounded metrics.
+- **2026-08-21** — "Specific days of week" targets stay the single open
+  design question. Resolution for v1: ship the schema column
+  (`target_days`), defer the UI. Nothing discussed so far needs it over
+  a weekly-count target, so it must not block v1.

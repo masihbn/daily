@@ -164,23 +164,94 @@ subtle bugs will live.
   and use it as the only grouping key. Do not hand-roll week math per
   chart.
 
-### Open design questions to resolve during the relevant step
+### Testing
 
-- **Auto-derived bound statistic is unspecified.** `APP_CONCEPT.md`
-  says bounds can be auto-derived over a rolling window (default 90
-  days) but never says *which statistic*. Raw `min`/`max` over the
-  window is trivially skewed by a single bad reading. Proposal to
-  confirm at Step 3.3: use the **10th and 90th percentiles** of the
-  window, which resists outliers and still describes the oscillation
-  band. Flag this to the user before implementing.
-- **"Specific days of week" targets** are the one item `APP_CONCEPT.md`
-  leaves open, and it notes nothing discussed so far actually needs it.
-  **Ship the schema support, defer the UI** (Step 2.2) — do not let it
-  block the weekly-count target that everything actually uses.
+Full protocol in **`docs/ORCHESTRATION.md`**. The short version:
+
+- **Unit tests** (`tests/unit/`) — Node's built-in runner, `node --test`,
+  zero dependencies. Covers `dates.js` / `aggregate.js`, where the real
+  bugs live. Bias heavily toward these.
+- **Integration tests** (`tests/integration/`) — real PostgREST calls
+  against rows named `__test__*`, torn down after.
+- **E2E** (`tests/e2e/`) — Playwright, a **test-only devDependency**.
+  Never shipped; the deploy path stays pure vanilla. Small, high-value
+  smoke checks only.
+- **The suite is cumulative and always run in full.** A step is not
+  `DONE` until every test from every prior step still passes.
+- **Nothing may ever modify a Supabase row not prefixed `__test__`.**
+  That guardrail is what protects real logged data.
+
+### Resolved design questions
+
+- **Auto-derived bound statistic: 10th / 90th percentile** of the
+  rolling window (resolved 2026-08-21, rationale in `APP_CONCEPT.md` →
+  Bounded metrics). Raw min/max was rejected — it is set by exactly two
+  readings, which are the two most likely to be measurement noise, and
+  one bad weigh-in would permanently widen the band.
+- **"Specific days of week" targets** remain the single open design
+  question in `APP_CONCEPT.md`. Resolution for v1: **ship the schema
+  column, defer the UI** (Step 2.2). Nothing discussed so far needs it
+  over a weekly-count target, so it must not block v1.
 
 ---
 
 # PHASE 0 — Foundation
+
+## Step 0.0 — Test harness & regression suite scaffold
+
+**Status:** TODO
+
+**Goal.** `npm test` exists, runs green against an empty-but-real suite,
+and every later step has somewhere to add tests. Nothing else in this
+plan can be verified until this exists.
+
+**Preconditions.** None. This is genuinely first.
+
+**Deliverables.**
+- `package.json` — test-only. Playwright as the sole devDependency,
+  `"private": true`, npm scripts for each tier plus an aggregate `test`.
+- `.gitignore` — add `node_modules/`, Playwright's `test-results/` and
+  `playwright-report/`.
+- `tests/unit/`, `tests/integration/`, `tests/e2e/`, `tests/helpers/`.
+- `tests/helpers/server.mjs` — zero-dependency static file server.
+- `tests/helpers/supabase.mjs` — `__test__` row helpers + stale sweep.
+- `playwright.config.mjs`.
+- One trivial smoke test per tier, proving the tier actually runs.
+
+**Implementation notes.**
+- **`package.json` at the repo root does not make this a Node project
+  and does not affect the deploy.** GitHub Pages serves static files and
+  ignores it. Say so in a `"description"` field so a future reader
+  doesn't think a build step appeared. `node_modules/` must be
+  gitignored — it must never reach Pages.
+- **Run tests from PowerShell, not the Bash tool.** Bash on this machine
+  runs in an isolated network namespace; a server it starts is
+  unreachable, which will make Playwright hang confusingly.
+  (`PROJECT_NOTES.md` → Environment notes.)
+- `server.mjs`: use Node's built-in `http` + `fs`. Do not add a
+  dependency for this. **It must send `Content-Type:
+  text/javascript` for `.js`** — native ES modules are rejected outright
+  by the browser under a wrong MIME type, and the resulting error does
+  not obviously point at the server.
+- Wire it through Playwright's `webServer` config so the suite starts
+  and stops it automatically.
+- `supabase.mjs` exports `createTestTrackable()`, `cleanupTestRows()`,
+  and `sweepStaleTestRows()`. **Every delete must be filtered to names
+  starting `__test__`** — PostgREST `?name=like.__test__*`. A teardown
+  that can match a real row is a data-loss bug, so write it defensively
+  and test the filter itself.
+- Keys come from `js/config.js` so there is one source of truth.
+- Tiers run fast → slow (`unit` → `integration` → `e2e`), failing at the
+  first broken tier so a logic bug doesn't cost a full browser run.
+- The three smoke tests exist to prove the *harness* works. A tier that
+  silently runs zero tests and reports success is the worst possible
+  outcome here — assert each tier actually executed something.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
 
 ## Step 0.1 — Rename repo and Pages URL to "Daily"
 
@@ -371,6 +442,15 @@ _(To be filled in by the executing session.)_
 
 ---
 
+## ⛔ PHASE 0 GATE — hard stop
+
+Full suite green, pushed, Pages live. Hand the user a manual checklist:
+the renamed URL loads, Add to Home Screen works from the **new** URL
+(the old icon is dead and must be deleted), and the app shell renders
+with working navigation. **Wait for their verdict before Phase 1.**
+
+---
+
 # PHASE 1 — Data layer
 
 ## Step 1.1 — PostgREST client (`api.js`) + offline store (`store.js`)
@@ -476,6 +556,16 @@ That is far cheaper than driving the UI, so favor it heavily here.
 **Test Subjects.**
 
 _(To be filled in by the executing session.)_
+
+---
+
+## ⛔ PHASE 1 GATE — hard stop
+
+Mostly invisible to the user (no UI yet), so the gate is evidence-based
+rather than tap-based: show the unit test results for `dates.js` /
+`aggregate.js` — especially the ISO-week year boundary, the three re-log
+semantics, and the `min === max` normalization guard — plus a
+demonstrated round-trip write to Supabase. **Wait before Phase 2.**
 
 ---
 
@@ -586,6 +676,17 @@ applicable chart. Charts themselves come in Phase 3.
 **Test Subjects.**
 
 _(To be filled in by the executing session.)_
+
+---
+
+## ⛔ PHASE 2 GATE — hard stop
+
+**The most important gate — this is the first time the app is actually
+usable.** Ask the user to create one real trackable of each shape (a
+boolean like "workout", a numeric like "weight"), log both from their
+phone, re-log the same day to confirm the cumulative/state behavior
+reads correctly, and edit a past day. Their feel for the quick-log flow
+matters more here than any test result. **Wait before Phase 3.**
 
 ---
 
@@ -777,6 +878,17 @@ _(To be filled in by the executing session.)_
 
 ---
 
+## ⛔ PHASE 3 GATE — hard stop
+
+All four chart types on a real phone screen. Charts are the payoff of
+the whole reframing, so this gate is about *legibility*, not
+correctness: are they readable on a phone-sized viewport, do the CDN
+chart scripts load, and does the two-bars chart actually make the
+oscillation visible the way `APP_CONCEPT.md` describes? **Wait before
+Phase 4.**
+
+---
+
 # PHASE 4 — Settings & data ownership
 
 ## Step 4.1 — Settings screen
@@ -839,6 +951,15 @@ feature, not "someday."
 **Test Subjects.**
 
 _(To be filled in by the executing session.)_
+
+---
+
+## ⛔ PHASE 4 GATE — hard stop
+
+The user changes the rolling window and confirms bounds visibly move,
+then exports a CSV **from the installed home-screen app, not a Safari
+tab** — iOS blob-download behavior differs between the two and this
+cannot be verified from this machine. **Wait before Phase 5.**
 
 ---
 
@@ -992,36 +1113,34 @@ _(To be filled in by the executing session.)_
 
 ## Orchestration model
 
-How this plan is meant to be executed across sessions.
+**→ The full protocol lives in `docs/ORCHESTRATION.md`. Read it before
+executing any step.** It defines the model policy (Opus orchestrator,
+Sonnet subagents), the four roles, the implement→test→fix loop, the
+prompt templates, and the escalation rules. Only the plan-specific bits
+are repeated here.
 
 **One step = one subagent task.** Each step above is scoped to be
-completable by a single agent with a bounded context: the step's own
-entry, the Ground Rules, the Architecture decisions, and the specific
-files it names. That is the reason the steps carry redundant technical
-detail rather than cross-referencing each other heavily — a cold
-subagent should not need to read the whole plan to do one step.
+completable by an agent with a bounded context: the step's own entry,
+the Ground Rules, the Architecture decisions, and the files it names.
+That is why steps carry redundant detail rather than cross-referencing
+heavily — a cold subagent should not need to read the whole plan to do
+one step.
 
-**The orchestrator's job** (the session holding this file):
-1. Pick the first non-`DONE` step; confirm its preconditions really are
-   `DONE`, not just marked so.
-2. Hand the subagent: the step text verbatim, the Ground Rules, the
-   Architecture decisions, and a pointer to `CLAUDE.md` +
-   `docs/APP_CONCEPT.md`.
-3. On completion, **verify rather than trust** — read the diff, confirm
-   the Test Subjects section was actually filled in with real results,
-   and check that `sw.js`'s `CACHE` was bumped if assets changed.
-4. Update the step status here and commit.
+**Parallelism.** Within a step, the Implementer and Test Author always
+run in parallel (see `ORCHESTRATION.md` §2). Across steps, most are
+strictly sequential. The genuinely parallel-safe pairs: 0.1 ∥ 0.2
+(rename vs. schema touch nothing in common), and 3.1 ∥ 3.2 once their
+shared plumbing exists. **Do not parallelize Phase 1** — later steps
+depend on the exact function signatures earlier ones establish.
 
-**Parallelism.** Most steps are strictly sequential. The genuinely
-parallel-safe pairs: 0.1 ∥ 0.2 (rename vs. schema touch nothing in
-common), and 3.1 ∥ 3.2 only after their shared plumbing exists. Do not
-parallelize Phase 1 — later steps depend on the exact function
-signatures earlier ones establish.
+**Phase gates are hard stops.** Every phase ends with a ⛔ gate block
+above. Deploy, hand the user a concrete manual checklist, and wait for
+their verdict before starting the next phase. Within a phase, keep
+moving without pausing between steps.
 
-**When a subagent hits a gray area**, it should stop and surface it to
-the orchestrator rather than guessing — every guess that contradicts
-`APP_CONCEPT.md` costs more to unwind than to ask about. The known gray
-areas are listed under Architecture decisions → open questions.
+**When a subagent hits a gray area**, it stops and surfaces it rather
+than guessing — a guess that contradicts `APP_CONCEPT.md` costs more to
+unwind than to ask about.
 
 ---
 
@@ -1042,4 +1161,23 @@ areas are listed under Architecture decisions → open questions.
 - **2026-08-21** — Face ID app-lock sequenced after core features
   (Step 5.2); RLS hardening after that (5.3), per the recorded tradeoff.
 - **2026-08-21** — Test Subjects sections intentionally left empty; the
-  executing session designs and records its own verification per step.
+  orchestrator derives the required cases per step (`ORCHESTRATION.md`
+  §5) and the executing session records the results.
+- **2026-08-21** — Orchestration protocol defined in
+  `docs/ORCHESTRATION.md`: Opus orchestrator, Sonnet subagents,
+  Implementer and Test Author running in parallel behind a strict file
+  boundary so tests describe the contract rather than the
+  implementation.
+- **2026-08-21** — Test stack: Node's built-in runner for pure logic
+  (zero deps), Playwright as a **test-only** devDependency for E2E.
+  Permitted because the "no build step" rule governs the deploy path,
+  and nothing under `tests/` ever ships. Suite is cumulative and always
+  run in full.
+- **2026-08-21** — Test data isolated by `__test__*` naming convention
+  with teardown plus a stale-row sweep, rather than a second Supabase
+  project. Nothing may modify a row without that prefix.
+- **2026-08-21** — Phase gates are **hard stops** awaiting user
+  verification; momentum is preserved *within* a phase. Escalate to the
+  user after 5 failed fix cycles on the same failure.
+- **2026-08-21** — Added Step 0.0 (test harness) as the true first
+  step — nothing else in the plan is verifiable until it exists.
