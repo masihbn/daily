@@ -10,14 +10,21 @@ Currently mid-build: hosting and backend plumbing are live and verified;
 the actual tracking UI has not been built yet — today's app is still the
 placeholder tap-counter used to prove the plumbing.
 
-**The concept is under active design discussion and has moved beyond
-what's described below.** It's evolving from a narrow "skill/habit
-tracker" into a more general personal logging + charts platform (generic
-bounded-metric "two bars" tracking, flexible aggregation, etc.). See
-**docs/APP_CONCEPT.md** for the current state of that discussion before
-assuming the schema/data model sections below are still the target — the
-schema live on Supabase (`docs/DATA_MODEL.md`) predates this reframing
-and hasn't been migrated to match it yet.
+**The concept has moved beyond what's described below, and design is now
+resolved.** It was reframed from a narrow "skill/habit tracker" into a
+more general personal logging + charts platform (generic bounded-metric
+"two bars" tracking, flexible aggregation, etc.), and the product is
+named **"Daily."** See **docs/APP_CONCEPT.md** for the design decisions
+before assuming the schema/data model sections below are still the
+target — the schema live on Supabase (`docs/DATA_MODEL.md`) predates
+this reframing and hasn't been migrated to match it yet.
+
+**→ If you are here to build something, read `docs/BUILD_PLAN.md`.**
+That's the step-by-step execution plan that turns the concept into code:
+numbered steps with per-step preconditions, deliverables, technical
+notes, and a status field. Find the first step that isn't `DONE` and
+work that one. Don't start implementing from `APP_CONCEPT.md` directly —
+it's the *what*, `BUILD_PLAN.md` is the *how* and the *in what order*.
 
 ## Stack
 
@@ -45,9 +52,13 @@ icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (numbered, e.g. 0001_..., 0002_...) — see docs/DATA_MODEL.md
 docs/                 all notes/reference docs live here (see below)
-  APP_CONCEPT.md       CURRENT design discussion — read this first, it
-                        supersedes the data model below in spirit even
-                        though the schema hasn't caught up yet
+  BUILD_PLAN.md        THE EXECUTION PLAN — numbered, ordered steps from
+                        today's placeholder to shipped v1. Read this to
+                        find out what to build next. Update step statuses
+                        as you go.
+  APP_CONCEPT.md       resolved design decisions — the *what*. Supersedes
+                        the data model below in spirit even though the
+                        schema hasn't caught up yet
   DATA_MODEL.md        schema reference for what's actually live (pre-dates
                         the reframing in APP_CONCEPT.md)
   PROJECT_NOTES.md      deployment/ops history and the GitHub blueprint
