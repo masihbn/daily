@@ -961,11 +961,18 @@ the docs describe reality.
 **Preconditions.** All prior steps.
 
 **Implementation notes.**
-- This closes the **oldest outstanding item in the project**: the user
-  has still never confirmed the live HTTPS URL working on their iPhone
-  end-to-end (`PROJECT_NOTES.md` → "What's NOT done yet"). Add to Home
+- **The equivalent test for the plumbing already passed** — the live
+  HTTPS URL, Add to Home Screen, standalone launch, icon rendering and
+  persistence were all confirmed on the real device on 2026-08-21
+  (`PROJECT_NOTES.md` → Test log, Attempt 5). So the PWA shell is known
+  good; **what is unverified here is the "Daily" app itself**, which did
+  not exist at that point. Do not treat Attempt 5 as covering this step.
+- Repeat the same device checks against the real app: Add to Home
   Screen, standalone launch, icon rendering, log an entry over cellular,
-  kill and relaunch, confirm persistence.
+  kill and relaunch, confirm persistence — plus the things Attempt 5
+  could not have exercised: chart rendering on a phone-sized viewport,
+  the CDN chart scripts loading (and working offline from the SW cache),
+  the CSV download path, and the Face ID lock.
 - Some of this **cannot be verified from this machine** — Safari-specific
   service-worker behavior, Add-to-Home-Screen, standalone launch, and
   the CSV download path all need the real device and the user's report.

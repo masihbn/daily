@@ -374,19 +374,16 @@ counter at `5` from this test — cosmetic only, reset to `0` on request.)
 **Status: CONFIRMED** — repo, Pages, and keepalive workflow are all live
 and verified working.
 
-**Still outstanding**: the user has not yet personally opened the live
-HTTPS URL on their iPhone (Add to Home Screen, standalone launch, reload
-persistence over cellular). Instructions were given; result not yet
-reported back as of this writing.
+**Follow-up, now resolved**: at the time of writing, the user had not yet
+personally opened the live HTTPS URL on their iPhone. That gap was closed
+later the same day — see **Attempt 5** below.
 
 ## What's NOT done yet (important — don't assume it works)
 
-- **The real iPhone/Safari test against the live HTTPS URL** hasn't been
-  confirmed by the user yet — this is the one thing that can't be
-  verified from this machine (service worker registration behavior in
-  Safari specifically, Add to Home Screen icon rendering, standalone
-  launch). Everything else about the deployment has been independently
-  verified (see Test log, Attempts 2–3).
+- ~~**The real iPhone/Safari test against the live HTTPS URL.**~~
+  **DONE 2026-08-21** — confirmed working end-to-end on the device by
+  the user. See Test log, Attempt 5. This was the last unverified link
+  in the deployment chain.
 - **The app's actual feature set is undecided.** Everything so far is
   plumbing (a tap counter proving hosting + backend + installability).
   The user has not yet specified what the real day-to-day app should do.
@@ -457,20 +454,55 @@ skill, log an entry) has NOT been built yet.** `index.html` is still the
 placeholder tap-counter, just moved into the new file layout. That's the
 next real chunk of work.
 
+### Attempt 5 — 2026-08-21, live HTTPS iPhone test (closes the last plumbing gap)
+
+**Goal**: verify the one link in the chain that cannot be checked from
+this machine — real Safari on the real device, against the live GitHub
+Pages HTTPS URL rather than the LAN test server used in Attempt 1.
+
+**What was tested** (`https://masihbn.github.io/memory-test-pwa/`):
+1. Page loads in iOS Safari over HTTPS.
+2. Add to Home Screen — icon renders correctly.
+3. Launching from the home screen opens **standalone** (no Safari
+   chrome), i.e. the manifest's `display` mode is being honored.
+4. Tapping `+1` writes through to Supabase.
+5. Killing the app and reopening shows the persisted value.
+
+**Status: CONFIRMED** (user report, 2026-08-21). All five steps worked.
+
+**Why this mattered**: Attempt 1 only ever proved the *localStorage*
+version worked over a LAN HTTP server. Service worker registration
+behaves differently in Safari over real HTTPS, and Add-to-Home-Screen /
+standalone launch have no desktop equivalent to test against — so until
+this attempt, the deployment was verified everywhere *except* the one
+environment it actually has to run in.
+
+**What this does and does not prove**: it validates the full
+plumbing chain — GitHub Pages hosting, HTTPS, PWA installability,
+standalone launch, service worker, and Supabase read/write from the
+device. It says nothing about the real app, which doesn't exist yet;
+the thing tested here is the placeholder tap-counter, which Step 0.3 of
+`docs/BUILD_PLAN.md` deletes. Device verification of the *actual*
+"Daily" app is a separate, still-open item — `BUILD_PLAN.md` Step 5.4.
+
 ## Next steps (in order)
 
-- [ ] **User opens https://masihbn.github.io/memory-test-pwa/ on the
-      iPhone** (Safari, cellular or WiFi), Add to Home Screen, launch
-      standalone, tap +1, kill and reopen. Reason: the one remaining
-      unverified link in the chain — everything else about the
-      deployment has already been independently confirmed from this
-      machine (see Test log Attempts 2–3); this specific step needs the
-      real device and hasn't been reported back yet.
-- [ ] **Build the actual skill-tracker UI**: skill list, add/edit a
-      skill, log an entry for today, monthly calendar view, weekly trend
-      chart. Reason: this is the real app now that the concept is
-      decided (Attempt 4) and the schema is live — everything before
-      this was plumbing (hosting/backend/reorg), not the product itself.
+- [x] **User opens https://masihbn.github.io/memory-test-pwa/ on the
+      iPhone** (Safari, Add to Home Screen, standalone launch, tap +1,
+      kill and reopen). **DONE 2026-08-21 — see Test log, Attempt 5.**
+      Reason it mattered: it was the one remaining unverified link in
+      the chain — everything else about the deployment had already been
+      independently confirmed from this machine (Test log Attempts 2–3),
+      but Safari-specific service worker behavior, home-screen icon
+      rendering and standalone launch needed the real device. All
+      confirmed working.
+- [ ] **Build the actual "Daily" app** per **`docs/BUILD_PLAN.md`** —
+      that file is now the ordered, step-by-step execution plan (18
+      steps, 5 phases), superseding this one-line item. Start at the
+      first step not marked `DONE`. Reason: the concept is resolved
+      (`docs/APP_CONCEPT.md`), the plumbing is fully verified as of
+      Attempt 5, and everything built so far is scaffolding rather than
+      the product itself.
 - [ ] **Harden Supabase RLS (or add auth) before adding more sensitive
       skills.** Reason: `skills`/`skill_entries` currently carry forward
       the same wide-open `using (true)` policy as the test counter —
