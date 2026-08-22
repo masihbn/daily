@@ -31,6 +31,22 @@ html, body {
   margin: 0;
 }
 
+/* Fix (device-reported 2026-08-22): installed standalone PWA on iOS showed
+   a visible band of mismatched color below the fixed bottom nav. `html` had
+   no background of its own, so `body`'s color was propagating to the canvas
+   underneath it; and `height: 100%` resolves against the layout viewport,
+   which under `viewport-fit=cover` can be shorter than the physical screen,
+   leaving a gap beyond it that paints as canvas color. Giving `html` the
+   *elevated* color (matching #nav's background) makes that gap invisible
+   instead of a seam. This is a hypothesis pending device re-verification —
+   #nav's own rules (fixed position, safe-area padding) are already correct
+   and were ruled out as the cause. If banding persists after this, look at
+   the layout-viewport height itself next (e.g. `100dvh` or
+   `-webkit-fill-available` on `html, body`), not the nav rules. */
+html {
+  background: var(--bg-elevated);
+}
+
 body {
   background: var(--bg);
   color: var(--fg);
@@ -42,6 +58,9 @@ body {
 
 header {
   padding: 16px;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
   border-bottom: 1px solid var(--border);
 }
 
@@ -54,7 +73,9 @@ header h1 {
 #app {
   flex: 1;
   padding: 16px;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 16px);
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 16px);
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
 }
 
 #app h1 {
@@ -76,7 +97,9 @@ header h1 {
   display: flex;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 #nav a {

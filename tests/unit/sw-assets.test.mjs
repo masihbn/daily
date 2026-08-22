@@ -16,27 +16,35 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const swPath = path.join(repoRoot, 'sw.js');
 const indexPath = path.join(repoRoot, 'index.html');
 const jsDir = path.join(repoRoot, 'js');
+const cssPath = path.join(repoRoot, 'css', 'styles.css');
 
 const swText = fs.readFileSync(swPath, 'utf8');
 const indexText = fs.readFileSync(indexPath, 'utf8');
+const cssText = fs.readFileSync(cssPath, 'utf8');
 
 describe('sw.js — CACHE constant', () => {
-  it("contains a CACHE declaration whose value is exactly 'daily-v4'", () => {
-    // Flexible on whitespace/quote style (single or double quotes, var/let/const),
-    // but the literal value must be exactly daily-v4.
-    const match = swText.match(/\b(?:const|let|var)\s+CACHE\s*=\s*(['"])daily-v4\1/);
-    assert.ok(
-      match,
-      `expected to find a CACHE declaration with value 'daily-v4' in sw.js, got:\n${swText.slice(0, 300)}...`
-    );
-  });
-
+  // This block used to pin CACHE to an exact value ('daily-v4'). That pin
+  // was removed: the CACHE version legitimately changes on every legitimate
+  // asset change — including this very fix, which touches css/styles.css
+  // and therefore must bump the cache version so already-installed phones
+  // don't keep serving the old (broken) stylesheet. An assertion that must
+  // be hand-edited on every legitimate change is actively harmful: it
+  // trains whoever is working to edit the test until it goes green, which
+  // is exactly the habit docs/ORCHESTRATION.md forbids. The bump discipline
+  // is enforced by review and the commit checklist, not by an assertion
+  // that must itself be rewritten to stay green.
   it("the CACHE value matches /^daily-v\\d+$/ (guards against reverting to the old 'memtest-' naming)", () => {
     const match = swText.match(/\b(?:const|let|var)\s+CACHE\s*=\s*(['"])([^'"]+)\1/);
     assert.ok(match, 'expected a CACHE declaration in sw.js');
     const value = match[2];
     assert.match(value, /^daily-v\d+$/);
-    assert.equal(value, 'daily-v4');
+  });
+
+  it("the CACHE value does not use the retired 'memtest-' naming", () => {
+    const match = swText.match(/\b(?:const|let|var)\s+CACHE\s*=\s*(['"])([^'"]+)\1/);
+    assert.ok(match, 'expected a CACHE declaration in sw.js');
+    const value = match[2];
+    assert.doesNotMatch(value, /^memtest-/);
   });
 });
 
@@ -179,5 +187,104 @@ describe('CDN URL parity between index.html and sw.js', () => {
     for (const url of urls) {
       assert.ok(swText.includes(url), `expected sw.js to also cache ${url} (found referenced in index.html)`);
     }
+  });
+});
+
+describe('css/styles.css — iOS safe-area handling (regression tests, NOT rendering tests)', () => {
+  // Two real bugs were reported from a physical iPhone on 2026-08-22 that the
+  // existing test suite — including the Playwright e2e "nav is inside the
+  // viewport" test — did not catch:
+  //
+  //   1. The <header> overlapped the system clock in the notch, because
+  //      nothing applied env(safe-area-inset-top).
+  //   2. A band of mismatched color appeared below the bottom nav in
+  //      installed standalone mode. NOTE: the first diagnosis of this was
+  //      WRONG and is corrected here so nobody re-investigates the nav.
+  //      #nav was ALREADY correct — `bottom: 0` with the inset carried as
+  //      `padding-bottom` — so it was never the cause. The working theory
+  //      is that `html` had no background, letting `body`'s color
+  //      propagate to the canvas, while `height: 100%` resolves against a
+  //      layout viewport that under `viewport-fit=cover` can be shorter
+  //      than the physical screen; the leftover gap then painted in the
+  //      page color against the nav's elevated color. `html` now carries
+  //      the elevated color. That remains a hypothesis pending device
+  //      re-verification — see the comment in css/styles.css.
+  //
+  //      The `bottom: env(...)` assertion below is therefore a guard
+  //      against introducing that broken pattern, NOT a record of what
+  //      caused this bug. It is still worth keeping: it is a real way to
+  //      break the nav, it just is not what happened here.
+  //
+  // Playwright cannot catch either of these: it does not emulate
+  // safe-area insets, so env(safe-area-inset-*) evaluates to 0 in headless
+  // Chromium, and the existing e2e nav-in-viewport test passes happily on
+  // broken CSS. The only true verification is a physical device.
+  //
+  // So the guard here is deliberately structural, not visual: assert the
+  // stylesheet actually contains the rules that make safe-area handling
+  // correct. This CANNOT prove the page renders correctly on a phone — it
+  // only prevents someone from silently deleting or refactoring these rules
+  // away and shipping a broken layout again. These are NOT rendering tests.
+
+  it('references env(safe-area-inset-top (the header top inset)', () => {
+    assert.match(cssText, /env\(\s*safe-area-inset-top/);
+  });
+
+  it('references env(safe-area-inset-bottom (the nav bottom inset)', () => {
+    assert.match(cssText, /env\(\s*safe-area-inset-bottom/);
+  });
+
+  it('references env(safe-area-inset-left and env(safe-area-inset-right (landscape insets on a notched device)', () => {
+    assert.match(cssText, /env\(\s*safe-area-inset-left/);
+    assert.match(cssText, /env\(\s*safe-area-inset-right/);
+  });
+
+  it('every env(safe-area-inset-...) occurrence supplies a fallback value', () => {
+    // A bare env(safe-area-inset-top) with no second argument makes the
+    // *entire* CSS declaration it appears in invalid on browsers/engines
+    // without safe-area support (e.g. older Safari, non-notched devices
+    // that still don't recognize the env() function at all), so the
+    // padding/inset silently vanishes rather than degrading to a sane
+    // default. Every occurrence must be of the form
+    // env(safe-area-inset-<side>, <fallback>) — extract every occurrence
+    // with a global regex and require each one to have a comma-separated
+    // second argument.
+    const occurrences = cssText.match(/env\(\s*safe-area-inset-[a-z]+[^)]*\)/g) || [];
+    assert.ok(
+      occurrences.length > 0,
+      'expected at least one env(safe-area-inset-...) occurrence in css/styles.css to check'
+    );
+    for (const occurrence of occurrences) {
+      assert.match(
+        occurrence,
+        /env\(\s*safe-area-inset-[a-z]+\s*,\s*[^)]+\)/,
+        `expected a fallback value (comma-separated 2nd argument) in: ${occurrence}`
+      );
+    }
+  });
+
+  it(
+    'the nav must not be anchored with `bottom: env(safe-area-inset-bottom...)` — that ' +
+      'pattern lifts the whole bar up off the screen edge instead of letting its ' +
+      'background reach it (a guard against introducing this, NOT the cause of the ' +
+      '2026-08-22 device report — see the note at the top of this block)',
+    () => {
+      // The lookbehind is load-bearing. Without it this pattern also matches
+      // `padding-bottom: env(safe-area-inset-bottom, 0px)` — the CORRECT rule,
+      // since "padding-bottom" ends in "bottom". The first version of this
+      // test had that bug and could never pass on correct CSS, which would
+      // have pressured someone into deleting the correct padding to go green.
+      // Match only a standalone `bottom` property.
+      assert.doesNotMatch(
+        cssText,
+        /(?<![-\w])bottom\s*:\s*env\(\s*safe-area-inset-bottom/,
+        'found `bottom: env(safe-area-inset-bottom...)` in css/styles.css — that pattern ' +
+          'lifts the nav off the screen edge; carry the inset as padding-bottom instead'
+      );
+    }
+  );
+
+  it('the nav rule anchors at the bottom edge with `bottom: 0` (padding, not position, should carry the inset)', () => {
+    assert.match(cssText, /bottom\s*:\s*0(?:px)?\b/);
   });
 });

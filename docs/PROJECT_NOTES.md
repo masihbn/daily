@@ -315,6 +315,69 @@ personal**:
 
 ## Test log
 
+### Attempt 6 — 2026-08-22, Phase 0 gate on the real iPhone
+
+**Goal**: verify the renamed URL, the new app shell, and Add to Home
+Screen from `https://masihbn.github.io/daily/`. This is the first device
+check of the **"Daily" app itself** — Attempt 5 only ever exercised the
+placeholder tap-counter, so it does not cover any of this.
+
+**What passed** (user-confirmed): the new URL loads; nav between Home /
+Compare / Settings swaps content with no reload; taps feel immediate (no
+300ms delay); the `#/nope` route renders a real not-found view without
+silently redirecting; Add to Home Screen works from the new URL;
+standalone launch shows the correct icon and lands on Home; the shell
+still opens in Airplane Mode from the home screen.
+
+**Two layout bugs found — both invisible to the automated suite:**
+
+1. **Header overlapped the status bar.** "Daily" rendered on top of the
+   system clock (screenshot read "Daily8:40"). Cause: nothing applied
+   `env(safe-area-inset-top)`. `viewport-fit=cover` plus
+   `apple-mobile-web-app-status-bar-style: black-translucent` puts the
+   content *under* the status bar by design, so the CSS must inset its
+   own chrome. Fixed with `padding-top: calc(16px +
+   env(safe-area-inset-top, 0px))` on the header — padding, not margin,
+   so the header's background still paints up through the inset.
+2. **Band of mismatched colour below the bottom nav** in standalone
+   mode. **The first diagnosis was wrong** and is recorded here so it is
+   not repeated: the guess was that `#nav` used `bottom:
+   env(safe-area-inset-bottom)`, which would lift the bar and leave the
+   strip unpainted. Reading the CSS disproved it — `#nav` was already
+   `bottom: 0` with the inset carried as `padding-bottom`, which is the
+   correct pattern. Current working theory: `html` had no background, so
+   `body`'s `--bg` propagated to the canvas, while `height: 100%`
+   resolves against a layout viewport that under `viewport-fit=cover`
+   can be shorter than the physical screen — the leftover gap then
+   painted in the page colour against the nav's elevated colour. `html`
+   now carries `--bg-elevated` so any such gap blends. **Still a
+   hypothesis pending device re-verification.** If banding persists,
+   investigate the layout-viewport height (`100dvh` /
+   `-webkit-fill-available`) next — not the nav rules.
+
+**The lesson worth keeping: Playwright cannot see either bug.** It does
+not emulate safe-area insets, so `env(safe-area-inset-*)` evaluates to
+`0` in headless Chromium and the e2e "nav is inside the viewport" test
+passes happily on broken CSS. Safe-area layout is **device-only
+verification**. The suite now carries structural guards asserting the
+CSS *contains* correct safe-area rules (every `env()` has a `0px`
+fallback, etc.) — those cannot prove correct rendering, only prevent
+silent removal, and they are commented as such.
+
+**Also caught, worth remembering:** the first version of that guard used
+`/bottom\s*:\s*env\(/`, which also matches `padding-bottom: env(...)` —
+the *correct* rule — because "padding-bottom" ends in "bottom". It could
+never pass on correct CSS, and would have pressured someone into
+deleting the correct padding to go green. Fixed with a `(?<![-\w])`
+lookbehind. Same failure mode as an `@latest` check earlier the same day
+that matched a comment explaining why `@latest` is avoided: **a
+text-level assertion that does not anchor its match will eventually
+accuse correct code.**
+
+**Cache bumps this session**: `memtest-v2` → `daily-v3` (rename) →
+`daily-v4` (app shell) → `daily-v5` (safe-area fix) → `daily-v6` (canvas
+fix). Every one was required because a cached asset changed.
+
 ### Attempt 1 — 2026-08-21, local LAN test
 
 **Goal**: prove the core loop works before touching GitHub — localStorage
