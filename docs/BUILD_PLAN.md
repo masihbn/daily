@@ -1022,7 +1022,7 @@ rows, `entries` 0 rows, `app_settings` 1 row still at
 
 ## Step 1.2 — `dates.js` and `aggregate.js` (pure logic)
 
-**Status:** TODO
+**Status:** DONE (2026-08-22)
 
 **Goal.** All date math and all rollup/normalization/bound math exist as
 pure, dependency-free functions before any chart tries to use them.
@@ -1074,7 +1074,169 @@ That is far cheaper than driving the UI, so favor it heavily here.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **635 tests green** — 579 unit, 43 integration, 13
+e2e (up from 429 after Step 1.1). New this step: 109 unit cases for
+`dates.js`, 42 for the timezone tier, 55 for `aggregate.js`. `sw.js`
+`CACHE` bumped `daily-v10` → `daily-v11`.
+
+**Zero fix cycles.** Both agents converged on the contract exactly, with
+no fixture disagreements in either direction. That is attributable to the
+fixtures below being computed rather than asserted from memory — see the
+note on method.
+
+*Method note, worth repeating on future steps:* every ISO-week,
+month-grid and percentile expectation in the contract was **computed and
+cross-checked before the contract was written**, not recalled. A wrong
+expected value in an orchestrator's contract becomes a wrong test that
+both agents implement faithfully — which is precisely how the Step 0.0
+wildcard bug and the Step 1.1 payload-type mismatch happened. Both agents
+were also explicitly instructed that if their own reasoning disagreed
+with a fixture they must report it rather than silently "fix" it. Neither
+needed to. The ISO fixtures were additionally sanity-checked against
+independent anchors: 2026-01-01 is a Thursday, so its ISO week is
+2026-W01 starting Mon 2025-12-29; 2015, 2020 and 2026 are 53-week ISO
+years.
+
+*Additions beyond the plan's "at minimum" list, and why:*
+
+- **`startOfIsoWeek()` and `isoWeeksInRange()`** in `dates.js`. Step 3.2
+  requires zero-entry weeks to render as explicit gaps rather than
+  vanishing, which needs the weeks that *should* exist to be
+  enumerable. The plan also forbids hand-rolling week math per chart, so
+  this belongs here rather than in each chart module.
+- **`fillSeries(buckets, keys, fillValue)`** in `aggregate.js` — the
+  other half of that requirement. `rollup` deliberately does *not*
+  invent empty buckets; `fillSeries` projects real buckets onto a
+  complete key list, with `fillValue: null` for a true gap rather than a
+  misleading zero.
+- **`formatLocal()`** exported alongside `todayLocal()`, since
+  `todayLocal` is just `formatLocal(now)` and the inverse of
+  `parseLocal` is needed throughout.
+
+*Contract decisions made here:*
+
+- **`todayLocal(now = new Date())` takes an injectable clock.** Without
+  the parameter the function is untestable deterministically, and this is
+  the single function where the date trap bites hardest.
+- **`monthGrid(year, month)` is 1-based** (1 = January), deliberately
+  diverging from JS's 0-based `getMonth()`. The whole app speaks
+  `'YYYY-MM-DD'`, where the month is 1-based; a 0-based parameter here
+  would be a permanent off-by-one source. Documented loudly in the
+  module.
+- **`parseLocal` rejects dates that do not exist** instead of letting JS
+  roll them over. `new Date(2026, 1, 30)` silently becomes March 2, so
+  the constructed date's components are verified against the input.
+- **Percentile pinned to the "R-7" / Excel `PERCENTILE.INC`
+  definition** with worked examples in the contract. "10th percentile" is
+  ambiguous across at least nine standard definitions; leaving it
+  unpinned would have guaranteed a divergence.
+- **`deriveBounds`'s `asOf` defaults to the latest `entry_date` in the
+  data, not the real current date** — that is what keeps the function
+  pure and its tests deterministic.
+- **`rollup`'s per-bucket `count` field is the raw entry count, while
+  `count`/`average` *aggregation* divide by distinct logged days.** These
+  can differ, and the contract did not spell out that they were two
+  separate counters; the implementer resolved it as the only reading
+  consistent with all three requirements, and the test author
+  independently agreed. Recorded here because it is a genuine ambiguity a
+  later reader could trip on.
+
+*Verified by unit tests (`tests/unit/dates.test.mjs`, 109 cases):*
+
+- **Every row of the ISO-week fixture table asserted individually**,
+  including the year-boundary traps where the ISO week year differs from
+  the calendar year: `'2025-12-29'` → `'2026-W01'`, `'2027-01-03'` →
+  `'2026-W53'`, `'2021-01-01'` → `'2020-W53'`, `'2016-01-01'` →
+  `'2015-W53'`. Getting these wrong silently merges or splits New Year
+  weeks. Also asserted that a `Date` and its `'YYYY-MM-DD'` string give
+  the same key.
+- `parseLocal` rejects `'2026-02-30'`, `'2026-13-01'`, `'2026-00-10'`,
+  `'2026-01-00'`, `'2026-01-32'` and `'2026-02-29'` (2026 is not a leap
+  year) while accepting `'2024-02-29'`; and rejects malformed shapes
+  (`'2026-1-1'`, `'26-01-01'`, `'2026/01/01'`, `''`, `null`, a number, a
+  `Date`). Returned dates assert all four time components are zero.
+- `addDays` across month, year and leap-day boundaries, `n = 0`, and
+  ±400.
+- **Every row of the `monthGrid` fixture table** — first cell, last cell,
+  `inMonth` count, index of the first in-month cell — plus, per month:
+  exactly 42 cells, `dow` starting at 1 (Monday) and cycling 1..7, dates
+  consecutive with no gaps, and the `inMonth` cells being exactly that
+  month's days. Includes February 2021, which **begins on a Monday** and
+  therefore has no leading days at all — the case a naive implementation
+  special-cases wrongly.
+- `isoWeeksInRange` across the year boundary
+  (`'2026-12-21'`..`'2027-01-11'` → `['2026-W52','2026-W53','2027-W01','2027-W02']`),
+  and a full-year range asserted to be strictly ascending with no
+  duplicates and no gaps.
+
+*Verified by the timezone tier (`tests/unit/dates-tz.test.mjs`, 42
+cases) — the highest-value file in this step:*
+
+Each case runs in a **child Node process with `TZ` forced at process
+start**, across `UTC`, `America/Toronto`, `Pacific/Kiritimati` (UTC+14),
+`Pacific/Pago_Pago` (UTC-11), `Asia/Kolkata` (UTC+05:30) and
+`Australia/Lord_Howe` (a 30-minute DST shift). Failures are tagged with
+the zone. Covered per zone: `todayLocal` at local 23:30 and 00:30 landing
+on the correct day, `parseLocal`→`formatLocal` round-tripping without a
+shift, `isoWeekKey` being zone-independent, `rangeDays` returning exactly
+5 consecutive days across both 2026 `America/Toronto` DST transitions
+(spring-forward 2026-03-08 and fall-back 2026-11-01), and `addDays`
+straddling spring-forward.
+
+**This tier was verified to actually catch the trap, not merely to
+pass.** The orchestrator temporarily replaced `todayLocal` with the
+forbidden `new Date().toISOString().slice(0,10)`: `TZ=UTC` passed (as it
+must — the naive version is correct there, which is exactly why this bug
+survives on a developer machine), while **all five non-UTC zones failed**,
+and the failure direction confirmed the real mechanism — negative-offset
+zones failed the 23:30 case by rolling forward to tomorrow, positive-
+offset zones failed the 00:30 case by rolling back to yesterday.
+Separately, replacing `parseLocal`'s component construction with
+`new Date(str)` (UTC-midnight parsing) failed every non-UTC zone. The
+file was restored from backup and the full suite re-run green after each
+probe.
+
+*Verified by unit tests (`tests/unit/aggregate.test.mjs`, 55 cases):*
+
+- **`rollup` by week merges two entries from different calendar years
+  into one ISO-week bucket** (2025-12-31 and 2026-01-01 are both
+  `2026-W01`) — asserted to land in a single bucket.
+- **`count` vs `sum` asserted against the same data**: values `5` and `3`
+  yield `count = 2` and `sum = 8`. Conflating these is the easiest
+  mistake in the module.
+- **`average` divides by days-with-an-entry, not by 7**: `2000` and
+  `2400` in one week average `2200`, not `628.57` — the "starvation week"
+  bug the plan calls out.
+- `last` picks the latest `entry_date` from deliberately shuffled input
+  (not the last array element), with same-date ties going to the later
+  element; buckets return sorted ascending from shuffled input; entries
+  with `null`/`undefined`/`NaN`/`Infinity`/string values are ignored and
+  do not inflate `count`; no empty buckets are invented between two
+  distant entries; unknown period and aggregation each throw.
+- **`normalizeSeries` `min === max` guard**: both a flat multi-element
+  series and a single-element series return `50` for every element, with
+  `Number.isNaN` explicitly asserted false on every output. Non-finite
+  entries become `null` while output length is preserved so indices stay
+  aligned with their labels.
+- **`deriveBounds` percentile against the three worked examples**
+  (`[1..10]` → 1.9 / 9.1; `[70..80]` → 71 / 79; `[2,4]` → 2.2 / 3.8) at
+  ≤1e-9 tolerance; values outside the rolling window excluded even when
+  seeded to visibly move the bounds; `asOf` defaulting to the latest
+  entry date rather than today; `{lower: null, upper: null}` for zero
+  entries and for a single finite value; `minmax` mode; unknown method
+  throws; `lower <= upper` holds.
+- **`applyRelog`, all three semantics exhaustively** — boolean idempotent
+  (`(1,1)`, `(null,1)`, `(1,0)`, `(1,undefined)` all → `1`); numeric
+  cumulative adding (`320 + 500 = 820`, with null/undefined/NaN existing
+  treated as `0`, plus negatives and decimals); numeric state replacing
+  (`78.4` → `79.1`). Plus every error path: non-finite `newValue`,
+  missing/non-object trackable, unknown `value_shape`, unknown
+  `relog_semantic`.
+
+*Not wired into the UI yet, deliberately:* like Step 1.1's modules,
+neither file is imported by `js/main.js`. They are consumed from Phase 2
+onward, and are in `sw.js`'s `ASSETS` so an installed phone caches them
+ahead of that.
 
 ---
 
