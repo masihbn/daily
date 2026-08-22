@@ -7,7 +7,19 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Do NOT set this to "black-translucent". Measured on-device (2026-08-22)
+     in the installed standalone PWA on iOS: black-translucent makes iOS
+     draw the web view at the physical top of the screen (content under the
+     notch) but SIZE it as (screen height - status bar height), leaving a
+     59pt strip of bare screen uncovered at the bottom (screen.height 852 -
+     window.innerHeight 793 = 59, exactly safe-area-inset-top). That strip
+     is outside the web view entirely, so no CSS can paint it. This is
+     invisible in Safari because Safari's own toolbar covers that region —
+     it only shows up in installed standalone mode. "black" positions the
+     web view below the status bar and sizes it correctly, so it reaches
+     the true bottom of the screen. Restoring "black-translucent" for
+     aesthetics will silently reintroduce the bug. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#111111">
 <link rel="stylesheet" href="css/styles.css">
 </head>

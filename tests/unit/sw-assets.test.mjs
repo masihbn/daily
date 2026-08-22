@@ -288,3 +288,78 @@ describe('css/styles.css — iOS safe-area handling (regression tests, NOT rende
     assert.match(cssText, /bottom\s*:\s*0(?:px)?\b/);
   });
 });
+
+describe('index.html — status bar style (regression test, NOT a rendering test)', () => {
+  // Confirmed on a physical iPhone on 2026-08-22 — the installed standalone
+  // PWA left a 59pt strip of bare screen uncovered at the bottom. Measured:
+  //
+  //   screen.height:       852.0
+  //   window.innerHeight:  793.0    (852 - 793 = 59, exactly safe-area-inset-top)
+  //   safe-area-inset-top: 59.0
+  //   #nav: top=714.0 bottom=793.0
+  //   gap below nav (innerHeight - nav.bottom): 0.0
+  //
+  // That last line rules out the nav: it was flush with the bottom of the
+  // layout viewport the whole time, so no nav CSS could have been at fault.
+  //
+  // Mechanism: <meta name="apple-mobile-web-app-status-bar-style"
+  // content="black-translucent"> makes iOS position the web view at the
+  // physical top of the screen (y=0) but size it as
+  // `screenHeight - statusBarHeight`. The 59pt deficit that results falls
+  // off the BOTTOM of the view — outside it entirely, which is why no CSS
+  // fix, however correct, could ever paint it. The fix is to use
+  // content="black" instead, which makes iOS position the view below the
+  // status bar and size it correctly, eliminating the deficit.
+  //
+  // This is invisible in Safari (Safari's own toolbar covers the region)
+  // and invisible to Playwright (which does not emulate standalone display
+  // mode or safe-area insets at all). A structural, text-level assertion
+  // against the markup is therefore the only guard available — there is no
+  // way to catch this by rendering.
+  //
+  // WARNING: someone will eventually want the translucent status bar back
+  // for aesthetic reasons (it looks nicer than a solid black bar). Restoring
+  // `black-translucent` silently reintroduces this exact bug. Don't do it
+  // without also solving the view-sizing problem some other way first.
+
+  it('no <meta> tag sets content="black-translucent" (the regression guard)', () => {
+    // Assert on META TAGS, not on the raw file text. A bare
+    // /black-translucent/ search over indexText also matches the HTML
+    // comment directly above the tag that documents why the value must
+    // not be used — i.e. it fails on the very documentation of the fix.
+    //
+    // That is the THIRD time in one day a text-level assertion here has
+    // accused correct code by matching prose or a longer token: an
+    // @latest check matched a comment explaining why @latest is avoided,
+    // and a /bottom:/ check matched `padding-bottom:`. The lesson is
+    // general — anchor the match to the construct you actually care
+    // about (here, a meta tag's content attribute), never to a substring
+    // that can occur in a comment.
+    const metaTags = indexText.match(/<meta\b[^>]*>/gi) || [];
+    assert.ok(metaTags.length > 0, 'expected at least one <meta> tag in index.html');
+    for (const tag of metaTags) {
+      assert.doesNotMatch(
+        tag,
+        /content=["'][^"']*black-translucent[^"']*["']/i,
+        `found a meta tag using black-translucent, which reintroduces the ` +
+          `59pt uncovered strip in standalone mode: ${tag}`
+      );
+    }
+  });
+
+  it('contains an apple-mobile-web-app-status-bar-style meta tag with content="black"', () => {
+    // Tolerant of attribute order (name before/after content) and quote style.
+    const nameFirst =
+      /<meta\b[^>]*name=["']apple-mobile-web-app-status-bar-style["'][^>]*content=["']black["'][^>]*>/i;
+    const contentFirst =
+      /<meta\b[^>]*content=["']black["'][^>]*name=["']apple-mobile-web-app-status-bar-style["'][^>]*>/i;
+    assert.ok(
+      nameFirst.test(indexText) || contentFirst.test(indexText),
+      'expected a <meta name="apple-mobile-web-app-status-bar-style" content="black"> tag in index.html'
+    );
+  });
+
+  it('viewport meta still contains viewport-fit=cover (required for the fix — it still provides the bottom home-indicator inset and landscape left/right insets)', () => {
+    assert.match(indexText, /viewport-fit=cover/);
+  });
+});
