@@ -122,6 +122,71 @@ export async function createTestTrackable(fields = {}) {
   return rows[0];
 }
 
+function withoutUndefined(obj) {
+  const out = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) out[key] = val;
+  }
+  return out;
+}
+
+// entries have no `name` column of their own, so the only way to
+// guarantee an entry belongs to test data is to verify its parent
+// trackable's name BEFORE issuing any network call. Both functions
+// below take the trackable row object (not a bare id) for exactly this
+// reason.
+export async function createTestEntry(trackable, { entry_date, value, note } = {}) {
+  assertTestName(trackable && trackable.name);
+  if (!trackable || trackable.id === undefined || trackable.id === null) {
+    throw new Error('createTestEntry requires a trackable row object with an id');
+  }
+
+  const body = withoutUndefined({ trackable_id: trackable.id, entry_date, value, note });
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/entries`, {
+    method: 'POST',
+    headers: { ...standardHeaders(), Prefer: 'return=representation' },
+    body: JSON.stringify(body),
+  });
+  const { text, json } = await parseBody(res);
+
+  if (!res.ok) {
+    throwHttpError(res.status, text, json);
+  }
+
+  const rows = json;
+  return rows[0];
+}
+
+export async function upsertTestEntry(trackable, { entry_date, value, note } = {}) {
+  assertTestName(trackable && trackable.name);
+  if (!trackable || trackable.id === undefined || trackable.id === null) {
+    throw new Error('upsertTestEntry requires a trackable row object with an id');
+  }
+
+  const body = withoutUndefined({ trackable_id: trackable.id, entry_date, value, note });
+
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/entries?on_conflict=trackable_id,entry_date`,
+    {
+      method: 'POST',
+      headers: {
+        ...standardHeaders(),
+        Prefer: 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  const { text, json } = await parseBody(res);
+
+  if (!res.ok) {
+    throwHttpError(res.status, text, json);
+  }
+
+  const rows = json;
+  return rows[0];
+}
+
 export async function deleteTestTrackablesByName(name) {
   assertTestName(name);
   const url = buildDeleteByNameUrl(name);

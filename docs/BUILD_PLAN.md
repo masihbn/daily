@@ -471,44 +471,7 @@ the standalone launch is correct. Deferred to the Phase 0 gate checklist.
 
 ## Step 0.2 — Migration `0003`: generalize schema to Trackables/Entries
 
-**Status:** IN PROGRESS — started 2026-08-21, interrupted by a session
-limit before the migration was applied. **Nothing was applied to the live
-database; it is untouched and still on the `skills`/`skill_entries`
-schema.** Verified after the interruption: `list_tables` shows only
-`counter`, `skills`, `skill_entries`; no `0003_trackables.sql` exists;
-`tests/helpers/supabase.mjs` is unmodified.
-
-**What DOES exist, ready to use:**
-`tests/integration/schema.test.mjs.pending-step-0.2` — the complete test
-file for this step (472 lines, syntax-checked, covers blocks A–J below).
-It is deliberately named `.pending-step-0.2` so the tier runner, which
-discovers `*.test.mjs`, does not pick it up — it imports
-`createTestEntry`/`upsertTestEntry`, which do not exist yet, so the
-integration tier would throw on import and the suite would be red.
-**To resume: implement the migration and the two helpers, then rename the
-file back to `schema.test.mjs`.** It is not weakened or skipped coverage;
-it is coverage for a step that has not been built yet.
-
-Its cases: (A) new tables exist / old ones gone / `counter` untouched;
-(B) `app_settings` seeded singleton — reads only, never written to, since
-it has no `name` column and therefore no `__test__` guard; (C) the
-create→read→delete round-trip, which is the **first end-to-end proof of
-the teardown path** (untestable before this step, because `trackables` did
-not exist); (D) every column default pinned; (E) all nine check
-constraints reject bad values; (F) `target_value` is numeric, not the old
-smallint that overflows at 32767; (G) the `(trackable_id, entry_date)`
-unique constraint plus the `merge-duplicates` upsert Step 1.1 depends on;
-(H) entries cascade on parent delete, so teardown leaves no orphans;
-(I) the `updated_at` trigger fires; (J) the entry guard rejects a
-non-`__test__` parent.
-
-**Still to do:** write and apply `0003_trackables.sql`, add
-`createTestEntry`/`upsertTestEntry` to `tests/helpers/supabase.mjs`
-(preserving its one-DELETE invariant — no new delete path; entries
-cascade), rewrite `docs/DATA_MODEL.md` to match what is live, run
-`get_advisors`, and **verify by introspection that the
-`(trackable_id, entry_date)` unique constraint survived the rename** —
-that constraint is what the whole re-log-semantics design rests on.
+**Status:** DONE (2026-08-22)
 
 **Goal.** The live database matches the entity model in
 `APP_CONCEPT.md`, replacing the narrower `skills`/`skill_entries`
@@ -590,7 +553,83 @@ so the client never has to handle a missing-settings case.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Applied 2026-08-22 as a single `apply_migration` call (one transaction, so
+a mid-way error would have rolled back rather than leaving a half-renamed
+database). Suite after this step: **150 tests green** — 113 unit, 34
+integration (up from 6), 3 e2e.
+
+Note on sequencing: this step was interrupted by a session limit on
+2026-08-21 *after* its tests were written but *before* the migration was
+applied. The test file was parked as `schema.test.mjs.pending-step-0.2`
+so the tier runner would not discover it and turn the suite red against a
+schema that did not exist yet, then renamed back once the migration
+landed. The tests were therefore written entirely blind to the
+implementation — stronger evidence than the usual parallel run, since
+they were authored a day earlier and not touched afterward.
+
+*Verified live by orchestrator introspection (`list_tables` verbose,
+`pg_constraint`, `pg_indexes`):*
+
+- Every renamed and added column matches the contract exactly, including
+  defaults, check constraints, and column comments.
+- **`entries_trackable_id_entry_date_key` — `UNIQUE (trackable_id,
+  entry_date)`** confirmed present by name, as both a constraint and its
+  backing index. This is the constraint the entire re-log-semantics
+  design rests on; it was verified rather than assumed to have survived
+  the table rename.
+- `counter` untouched — 1 row, original columns, original policy. The
+  keepalive workflow depends on it and was separately re-run green after
+  the Step 0.1 rename.
+- `get_advisors(security)`: **empty**. Notably the known permissive-RLS
+  gap did not appear, because permissive policies exist on every table
+  including the new `app_settings` — a table with RLS *disabled* would
+  have been flagged, which is why enabling it mattered.
+- `get_advisors(performance)`: one INFO `unused_index` on
+  `entries_trackable_date_idx` — expected on a 0-row table nobody has
+  queried yet, not a new gap.
+
+*Verified by the test suite (`tests/integration/schema.test.mjs`, 28
+cases):*
+
+- **(A)** `trackables` and `entries` return 200; `skills` and
+  `skill_entries` no longer resolve; `counter` still returns its row.
+- **(B)** `app_settings` is a correctly seeded singleton — exactly one
+  row, `id = 1`, `rolling_window_days = 90`. Never written to by the
+  suite: it has no `name` column and therefore no `__test__` guard, so
+  its single-row `check (id = 1)` was verified by introspection instead.
+- **(C)** create → read back → `cleanupTestRows` → read back empty. **The
+  first end-to-end proof that the teardown path actually deletes what it
+  claims to** — impossible to test before this step, since `trackables`
+  did not exist and only the guard and table-missing paths were covered.
+- **(D)** Every column default pinned: `value_shape='boolean'`,
+  `relog_semantic='cumulative'`, `aggregation='sum'`, `direction='build'`,
+  `target_type='none'`, `bounds_enabled=false`, `bounds_mode='auto'`,
+  `sort_order=0`, `archived=false`, and the five nullable columns null.
+  Step 2.2's "name and two taps" flow depends on these.
+- **(E)** All nine check constraints reject bad values with a 4xx —
+  including `target_days: [0]` and `[8]` (invalid ISO weekdays) and
+  `bound_lower > bound_upper`; a valid `[1,3,5]` is accepted.
+- **(F)** `target_value` accepts `2000.5` and `50000`. The old column was
+  `smallint`, which overflows at 32767 — a calorie or step target would
+  have silently failed.
+- **(G)** A second plain insert for the same `(trackable_id, entry_date)`
+  is rejected **409**; the `Prefer: resolution=merge-duplicates` upsert
+  succeeds and updates the value. This de-risks Step 1.1, whose core
+  operation is exactly that upsert.
+- **(H)** Entries cascade on parent delete — two entries, delete the
+  trackable, zero entries remain. This is what stops orphaned rows
+  accumulating in the live database run after run.
+- **(I)** The `updated_at` trigger fires: a re-upsert produces a strictly
+  later `updated_at`. `DATA_MODEL.md` previously told the app to set this
+  by hand; that footgun is now removed and the doc corrected.
+- **(J)** The entry guard rejects a non-`__test__` parent, a null parent,
+  and a parent with no name — no network call occurs. Entries have no
+  `name` column, so the parent trackable is the only thing that can prove
+  an entry is test data.
+
+*Post-run isolation check (orchestrator, direct SQL):* `trackables` 0
+rows, `entries` 0 rows, `app_settings` 1 row, `counter` 1 row. No
+`__test__` residue and no orphaned entries.
 
 ---
 
