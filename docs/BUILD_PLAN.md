@@ -1277,7 +1277,7 @@ Safari.
 
 ## Step 2.1 — Home: trackable list + quick-log
 
-**Status:** TODO
+**Status:** DONE (2026-08-22)
 
 > **⚠ EXTRA DEPLOY CHECKPOINT AT THE END OF THIS STEP (user decision,
 > 2026-08-22).** Normally the protocol says keep moving within a phase
@@ -1323,7 +1323,170 @@ log today's value for any of them in one or two taps.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **770 tests green** — 698 unit, 43 integration, 29
+e2e (up from 635 at the Phase 1 close). New this step: 119 unit cases for
+`home-model.js`, 16 e2e cases for the home view. `sw.js` `CACHE` bumped
+`daily-v11` → `daily-v12` with `./js/views/home.js` and
+`./js/views/home-model.js` added to `ASSETS`.
+
+**Deviation from the plan's file list:** the pure logic was split into a
+new `js/views/home-model.js`, leaving `js/views/home.js` as DOM + store
+wiring only. Same rationale as the `router.js` split in Step 0.3 —
+`home.js` cannot be imported headlessly (it touches `document`), so
+without the split every formatting, parsing and re-log-dispatch rule would
+have been testable only through a browser. The split moved 119 cases into
+the fast tier, which is where `ORCHESTRATION.md` §5 wants coverage
+concentrated.
+
+*Contract decisions made here that the plan did not settle:*
+
+- **Clearing a boolean day is a DELETE (`store.removeEntry`), never
+  `saveEntry({value: 0})`.** `applyRelog`'s header comment in
+  `aggregate.js` explicitly forbids an un-toggle path through it, and a
+  stored `0` would be a real logged row that inflates every `count`
+  rollup downstream. E5 asserts a DELETE with both filters and **zero**
+  POSTs.
+- **Refresh order is `loadTrackables` → `flushOutbox` → `loadEntries`,
+  pinned as non-reorderable.** Reading today's state before flushing lets
+  a stale server read mask a write that is still sitting in the outbox.
+- **The view always passes the raw `trackable.id` to the store**, looked
+  up through a `Map<String(id), trackable>`, never the string parsed out
+  of `data-trackable-id`. Step 1.1 recorded a real bug caused by upsert
+  and delete payloads disagreeing about the type of the same id.
+- **The numeric input is `type="text"` + `inputmode="decimal"`, not
+  `type="number"`.** `inputmode` is what raises the iOS numeric keypad,
+  and `type="number"` would discard a decimal comma before
+  `parseNumericInput` ever saw it. A comment in `home.js` records this so
+  it is not "fixed" later.
+- **`parseNumericInput` accepts a single decimal comma** (some iOS locale
+  keypads emit `,`), but rejects a string containing both `,` and `.`, or
+  more than one `,`, rather than guessing a thousands separator.
+
+*Method note:* every worked example in the interface contract — the
+`toFixed(2)`-then-trim table, all 23 `parseNumericInput` fixtures, and the
+cumulative-add cases — was **computed and cross-checked before the
+contract was written**, not recalled. The decimal add case was chosen as
+`1.5 + 2.25 = 3.75` specifically because both operands are dyadic
+rationals, so the assertion cannot be perturbed by float error. Both
+agents were told to report rather than silently "fix" any fixture they
+disagreed with; neither needed to, and the step took **zero fix cycles
+from the contract itself**.
+
+*Verified by unit tests (`tests/unit/home-model.test.mjs`, 119 cases):*
+
+- Every worked example in the contract asserted individually across
+  `visibleTrackables`, `formatValue`, `relogHint`, `parseNumericInput`,
+  `nextValueFor` and `rowModel`.
+- `visibleTrackables` drops archived rows, sorts by `(sort_order, id)`
+  with a missing `sort_order` treated as `0`, and is asserted **not to
+  mutate its input** — it returns a new array holding the same element
+  references.
+- **`parseNumericInput` never returns a non-finite number**, asserted as
+  `Number.isFinite(result) || result === null` across the whole fixture
+  table. `'1e3'`, `'Infinity'`, `'NaN'`, `'+5'`, `'0x10'`, `'1.2.3'` and
+  `'1,2,3'` all return `null`.
+- **`nextValueFor` delegates to `applyRelog` rather than reimplementing
+  it**: cumulative `320 + 500 = 820`, state `78.4 → 79.1`, boolean
+  idempotent at `1` for `(null, undefined)`, `({value:1}, undefined)` and
+  `({value:0}, undefined)`.
+- The `has` predicate distinguishes shapes correctly: a numeric `{value:0}`
+  counts as logged (logging 0 kcal is a real log) while a boolean
+  `{value:0}` does not.
+- Hostile-input sweeps (`null, undefined, 0, '', [], {}, true, NaN` in
+  each position) prove `formatValue` / `relogHint` / `rowModel` never
+  throw.
+
+*Verified by e2e (`tests/e2e/home.test.mjs`, 16 cases) — the first time
+any Phase 1 module has ever executed in a browser:*
+
+Every PostgREST call is intercepted with `page.route`, so the tier makes
+**zero real Supabase calls**. That is asserted, not assumed: a catch-all
+`**/rest/v1/**` guard is registered *first* (lowest Playwright priority),
+records and aborts anything the narrow fixtures do not claim, and every
+test ends with `expect(unexpected).toEqual([])`.
+
+**`test.use({ serviceWorkers: 'block' })` is mandatory in this file and
+must not be removed.** `sw.js` installs a `fetch` handler that proxies
+requests, and requests originating inside a service worker are invisible
+to `page.route()`. Without blocking it the fixtures silently stop
+applying and the tests hit the **live** database — a failure mode that
+leaves the suite green while testing nothing.
+
+- E1 empty state → `data-home-state="empty"`, an `a[href="#/new"]`, no list.
+- E2 rows sorted `1,2,3` from deliberately shuffled input, archived row absent.
+- E3 boolean unlogged: `—`, `Tap to log today`, `aria-pressed="false"`.
+- **E4 the tap feels instant**: the POST is delayed ~400ms and the row is
+  asserted `data-logged="true"` / `data-state="pending"` *while the
+  request is still open*, then `idle` / `Done` after. The POST is asserted
+  to carry `on_conflict=trackable_id,entry_date`, the
+  `resolution=merge-duplicates,return=representation` Prefer header, and a
+  body deep-equal to `{trackable_id:1, entry_date:TODAY, value:1}`.
+- **E5 un-toggle is a DELETE, not a zero-save** — one DELETE carrying both
+  `trackable_id=eq.1` and `entry_date=eq.<today>`, and zero POSTs.
+- E6 cumulative adds: `320 kcal` + typed `500` posts `820`, not `500`.
+- E7 state replaces: `78.4` + typed `79.1` posts `79.1`, **not** `157.5`.
+- E8 invalid input `abc` → zero requests, editor stays open with the text
+  intact, `.trow-error` reads `Enter a number`, row is **not** `failed`.
+- **E9 offline outbox (highest-value case in the step)** — a 503 leaves
+  the row `pending` with the optimistic value, and
+  `localStorage['daily.outbox.v1']` is asserted to hold exactly one op
+  keyed `1|<today>` with the right payload. Asserted on the **persisted**
+  payload, not in-memory state, for the same reason as the Step 1.1
+  regression test: the dangerous bug is memory and storage disagreeing.
+- E10 a 400 reverts the row to its pre-tap value, shows
+  `.trow-error[role=alert]`, and leaves the outbox empty.
+- E11 offline read: cache pre-seeded, trackables GET aborted → the row
+  still renders and `p.home-offline` appears.
+- E12 no listener leak across `#/` → `#/settings` → `#/`: exactly one
+  `section.home`, and one tap issues exactly one POST.
+- E13 an open editor survives a re-render triggered by another row, draft
+  text preserved.
+- E14 no uncaught page errors; `documentElement.scrollWidth <= 390`.
+- E15 every `.trow-log` is ≥44px tall.
+
+*Bug found by the orchestrator reading the diff, now a permanent
+regression test:*
+
+**A superseded async render could clobber the nav.** `render()` became
+`async` in this step (it awaits the home view's `mount()`, which performs
+network round trips), but `updateNav(route.name)` still ran at the *end*
+of the function, after that await. Sequence: tap Home → `render#1`
+suspends at `await mount()`; tap Settings before it resolves →
+`render#2` runs start-to-finish and correctly marks the Settings nav link
+`aria-current="page"`; `render#1` then resumes and calls
+`updateNav('home')`. Result: the Settings screen is displayed and
+`#app[data-route]` is correct, but the bottom nav highlights **Home**.
+Reachable on a real phone on a slow connection, which is the target
+device. The bug did not exist before this step — the old `render()` was
+synchronous.
+
+**Fix:** `updateNav(route.name)` moved up to run synchronously alongside
+`app.setAttribute('data-route', ...)`, before the await, so nav updates
+happen in trigger order and the last render to start wins the nav too.
+A comment records why it must not be moved back.
+
+**The regression test was verified to actually catch it**, not merely to
+pass: the fix was temporarily reverted and the `NAV-RACE` case failed,
+with the failure confirming the exact mechanism — the Settings link ended
+up with **no** `aria-current` at all, because the stale render had
+stripped it and moved it to Home. `main.js` was then restored and the
+full suite re-run green. This mattered because the test was written
+*after* the fix landed and had only ever been observed passing; an
+unverified regression test is decoration.
+
+The test's wait is deliberately not an immediate assertion — Playwright's
+`toHaveAttribute` retries until it passes, so asserting too early would
+catch the transient *correct* state and pass against broken code. It
+waits for the delayed response to be served, then lets the superseded
+render resume, then asserts. A comment records this so it is not
+"simplified" into a false-passing test.
+
+*Not verifiable from this machine — needs the user's device:* how the
+list renders at real iPhone width, whether `inputmode="decimal"` actually
+raises the numeric keypad in Mobile Safari, whether `localStorage`
+survives iOS storage pressure and PWA backgrounding, and whether the
+outbox behaves on a genuinely flaky connection rather than a mocked 503.
+Deferred to the extra deploy checkpoint this step carries.
 
 ---
 

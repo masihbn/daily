@@ -9,6 +9,7 @@
   --accent: #3478f6;
   --border: #2e2e30;
   --nav-height: 56px;
+  --danger: #ff6b6b;
 }
 
 @media (prefers-color-scheme: light) {
@@ -19,6 +20,7 @@
     --fg-muted: #6b6b6f;
     --accent: #3478f6;
     --border: #dcdcdf;
+    --danger: #d9362e;
   }
 }
 
@@ -130,4 +132,142 @@ button {
   background: var(--accent);
   color: #fff;
   min-height: 44px;
+}
+
+/* Home: trackable list + quick-log (Step 2.1) --------------------------- */
+
+.home {
+  display: block;
+  width: 100%;
+}
+
+.home-offline,
+.home-empty {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+.home-empty a {
+  color: var(--accent);
+}
+
+.tlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Direct children only — the DOM shape here is fixed by the interface
+   contract (no extra wrapper elements), so the row is laid out purely
+   with flex-wrap + `order` on siblings rather than nested containers. */
+.trow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.trow[data-state="pending"] {
+  opacity: 0.65;
+}
+
+.trow[data-state="failed"] {
+  border-color: var(--danger);
+}
+
+.trow-name {
+  order: 1;
+  flex: 1 1 55%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trow-value {
+  order: 2;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.trow[data-logged="true"] .trow-value {
+  color: var(--accent);
+}
+
+.trow-hint {
+  order: 3;
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.trow-log {
+  order: 4;
+  margin-left: auto;
+  min-height: 44px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trow-editor {
+  order: 5;
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.trow-input {
+  flex: 1 1 100px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trow-save {
+  min-height: 44px;
+}
+
+.trow-cancel {
+  min-height: 44px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
+.trow-error {
+  order: 6;
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+  color: var(--danger);
+  font-size: 13px;
 }

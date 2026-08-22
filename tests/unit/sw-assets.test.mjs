@@ -22,6 +22,25 @@ const swText = fs.readFileSync(swPath, 'utf8');
 const indexText = fs.readFileSync(indexPath, 'utf8');
 const cssText = fs.readFileSync(cssPath, 'utf8');
 
+// Walks `dir` recursively and returns every .js file found, as a path
+// relative to `baseDir` with forward slashes (so it matches how sw.js
+// references them regardless of the OS this runs on). Non-recursive
+// fs.readdirSync would miss js/views/*.js (added in Step 2.1) entirely —
+// see the HIGH-VALUE GUARD test below, which this exists to strengthen.
+function collectJsFilesRecursive(dir, baseDir = dir) {
+  let results = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results = results.concat(collectJsFilesRecursive(fullPath, baseDir));
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      results.push(path.relative(baseDir, fullPath).split(path.sep).join('/'));
+    }
+  }
+  return results;
+}
+
 describe('sw.js — CACHE constant', () => {
   // This block used to pin CACHE to an exact value ('daily-v4'). That pin
   // was removed: the CACHE version legitimately changes on every legitimate
@@ -77,17 +96,18 @@ describe('sw.js — ASSETS list', () => {
   });
 
   it(
-    'HIGH-VALUE GUARD: every .js file actually present in js/ appears in sw.js — ' +
-      'this is the exact gotcha that bites when a module is added but the cache ' +
-      'list is not updated, so installed phones keep serving stale/missing files',
+    'HIGH-VALUE GUARD: every .js file actually present in js/, at ANY depth (so js/views/*.js ' +
+      'is covered, not just top-level js/*.js), appears in sw.js — this is the exact gotcha ' +
+      'that bites when a module is added but the cache list is not updated, so installed ' +
+      'phones keep serving stale/missing files',
     () => {
-      const jsFiles = fs.readdirSync(jsDir).filter((f) => f.endsWith('.js'));
+      const jsFiles = collectJsFilesRecursive(jsDir);
       assert.ok(jsFiles.length > 0, 'expected at least one .js file in js/ to check against');
-      for (const file of jsFiles) {
-        const rel = `./js/${file}`;
+      for (const relPath of jsFiles) {
+        const rel = `./js/${relPath}`;
         assert.ok(
-          swText.includes(rel) || swText.includes(`js/${file}`),
-          `expected sw.js to list ${rel} (found in js/ via fs.readdirSync but missing from the cache list)`
+          swText.includes(rel) || swText.includes(`js/${relPath}`),
+          `expected sw.js to list ${rel} (found in js/ via a recursive walk but missing from the cache list)`
         );
       }
     }

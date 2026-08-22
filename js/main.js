@@ -4,9 +4,9 @@
 // placeholders with real views from js/views/.
 
 import { parseHash } from './router.js';
+import { createHomeView } from './views/home.js';
 
 const VIEW_TITLES = {
-  home: 'Home',
   detail: 'Trackable',
   new: 'New Trackable',
   compare: 'Compare',
@@ -14,15 +14,16 @@ const VIEW_TITLES = {
   notfound: 'Not Found',
 };
 
+// The currently-mounted view instance (only the 'home' route has one so
+// far). Torn down at the start of every render() so a route change never
+// leaves a previous view's listeners attached — a leaked listener across
+// navigation is how a single tap ends up firing two writes.
+let currentView = null;
+
 function renderView(route) {
   const { name, params } = route;
 
   switch (name) {
-    case 'home':
-      return {
-        title: VIEW_TITLES.home,
-        body: '<p>Your trackables will be listed here.</p>',
-      };
     case 'detail':
       return {
         title: VIEW_TITLES.detail,
@@ -76,20 +77,47 @@ function updateNav(routeName) {
   });
 }
 
-function render() {
+async function render() {
   const app = document.getElementById('app');
   if (!app) return;
 
   const route = parseHash(location.hash);
-  const { title, body } = renderView(route);
+
+  // Unmount whatever view is currently attached before rendering the new
+  // route, whether or not the new route has a view of its own.
+  if (currentView) {
+    currentView.unmount();
+    currentView = null;
+  }
 
   app.setAttribute('data-route', route.name);
-  app.innerHTML = `<h1>${escapeHtml(title)}</h1>${body}`;
 
+  // Must run synchronously, before the `await` below, not at the end of
+  // render(). render() is async and awaits currentView.mount() for the
+  // 'home' route; if two renders race (e.g. user taps Home then Settings
+  // before the first render's network mount resolves), a later render can
+  // finish and set data-route/nav for its route, only for the earlier
+  // render to resume afterward and overwrite the nav with its own (stale)
+  // route. Keeping updateNav() here, alongside the other synchronous route
+  // bookkeeping, ensures nav updates happen in trigger order so the last
+  // render to start wins the nav state too — matching data-route.
   updateNav(route.name);
+
+  if (route.name === 'home') {
+    app.innerHTML = '<h1>Today</h1><div id="view"></div>';
+    currentView = createHomeView();
+    await currentView.mount(document.getElementById('view'));
+  } else {
+    const { title, body } = renderView(route);
+    app.innerHTML = `<h1>${escapeHtml(title)}</h1>${body}`;
+  }
 }
 
 function bootstrap() {
+  // render() is async now (it awaits the home view's mount()); the
+  // listener does not need to await it — a stray unhandled rejection can't
+  // occur here since render()'s own view lifecycle never lets an error
+  // escape (see js/views/home.js).
   window.addEventListener('hashchange', render);
   render();
 
