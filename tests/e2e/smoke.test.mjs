@@ -27,8 +27,14 @@ test('index.html loads with no uncaught page errors and a non-empty title', asyn
   expect(pageErrors).toEqual([]);
 });
 
+// Fixture note: this used to hit js/app.js, the app's only JS file back in
+// Step 0.0. Step 0.3 deleted it (Supabase constants moved to js/config.js and
+// the shell now boots from js/main.js), so the server correctly 404s on it.
+// Repointed at js/main.js so this MIME coverage is not quietly dropped — the
+// property under test is unchanged and still matters: a wrong Content-Type
+// makes every ES module fail to load with an error that does not point here.
 test('the server enforces the ES module MIME rule end-to-end', async ({ request }) => {
-  const res = await request.get('/js/app.js');
+  const res = await request.get('/js/main.js');
   expect(res.status()).toBe(200);
   const contentType = res.headers()['content-type'];
   expect(contentType.startsWith('text/javascript')).toBe(true);

@@ -1,16 +1,44 @@
-const CACHE = 'daily-v3';
+const CACHE = 'daily-v4';
+
+// Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
-  './js/app.js',
+  './js/main.js',
+  './js/router.js',
+  './js/config.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
 
+// Cross-origin CDN assets. Fetched and cached individually (not via
+// addAll) because cache.addAll() is all-or-nothing: a single failed or
+// opaque cross-origin request would reject the whole batch and break
+// the entire install.
+const CDN_ASSETS = [
+  'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js',
+];
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE);
+      await cache.addAll(ASSETS);
+      await Promise.all(
+        CDN_ASSETS.map(async (url) => {
+          try {
+            const res = await fetch(url, { mode: 'cors' });
+            await cache.put(url, res);
+          } catch {
+            // One CDN hiccup should not break the entire install.
+          }
+        })
+      );
+    })()
+  );
   self.skipWaiting();
 });
 

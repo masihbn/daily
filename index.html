@@ -12,13 +12,24 @@
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-<main>
-  <div>Tap count (stored in Supabase — the cloud, not this device)</div>
-  <div id="count">…</div>
-  <button id="inc">+1</button>
-  <button id="reset" class="secondary">Reset</button>
-  <div id="meta">connecting…</div>
-</main>
-<script src="js/app.js"></script>
+<header>
+  <h1>Daily</h1>
+</header>
+<div id="app"></div>
+<nav id="nav">
+  <a href="#/" data-route="home">Home</a>
+  <a href="#/compare" data-route="compare">Compare</a>
+  <a href="#/settings" data-route="settings">Settings</a>
+</nav>
+
+<!-- Chart.js v4 + annotation plugin, pinned exact versions (never @latest —
+     a silent major bump would break the installed app with no deploy).
+     Plain UMD <script> tags, loaded before js/main.js so window.Chart
+     exists for later steps. Nothing uses them yet in this step; they are
+     loaded now so the service worker caches them for offline use. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

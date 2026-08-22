@@ -108,8 +108,14 @@ describe('startServer', () => {
     assert.equal(rootBody, indexBody);
   });
 
-  it('GET /js/app.js -> 200, content-type exactly text/javascript; charset=utf-8 (highest-value assertion: wrong MIME breaks every ES module silently)', async () => {
-    const res = await fetch(`${server.url}/js/app.js`);
+  // Fixture note: this used to hit js/app.js, which was the app's only JS
+  // file back in Step 0.0. Step 0.3 deleted js/app.js (its Supabase constants
+  // moved to js/config.js, and the app shell now boots from js/main.js), so
+  // the server correctly 404s on it now. Repointed at js/main.js — the app's
+  // current module entry point — so the MIME coverage below isn't quietly
+  // dropped.
+  it('GET /js/main.js -> 200, content-type exactly text/javascript; charset=utf-8 (highest-value assertion: wrong MIME breaks every ES module silently)', async () => {
+    const res = await fetch(`${server.url}/js/main.js`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
   });
@@ -153,7 +159,7 @@ describe('startServer', () => {
     const paths = [
       '/index.html',
       '/',
-      '/js/app.js',
+      '/js/main.js',
       '/js/config.js',
       '/css/styles.css',
       '/manifest.json',

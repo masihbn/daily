@@ -635,7 +635,7 @@ rows, `entries` 0 rows, `app_settings` 1 row, `counter` 1 row. No
 
 ## Step 0.3 — App shell: replace the tap counter
 
-**Status:** TODO
+**Status:** DONE (2026-08-22)
 
 **Goal.** `index.html` boots a real multi-view app shell with a working
 router instead of the placeholder counter. No features yet — this is the
@@ -680,7 +680,87 @@ skeleton every later step hangs off.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **212 tests green** — 165 unit, 34 integration,
+13 e2e.
+
+**Deviation from the plan's file list:** `parseHash` was split out into a
+new `js/router.js` rather than living in `main.js`. `main.js` bootstraps
+on import (DOM wiring, service-worker registration), which makes it
+unimportable in the Node unit tier. Splitting the pure route parser out
+made 32 router cases testable without a browser, which is where the real
+routing bugs live. `main.js` remains the entry point and the only file
+`index.html` references as a module.
+
+**Pinned CDN versions:** `chart.js@4.5.1` and
+`chartjs-plugin-annotation@3.1.0`. Both were verified to resolve (HTTP
+200 via HEAD) at implementation time rather than trusted from the example
+version written in this plan, per the Architecture decision requiring it.
+
+*Verified by unit tests (`tests/unit/router.test.mjs`, 32 cases):*
+- All five named routes plus `''` / `'#'` / `'#/'` → home.
+- `#/t/5` → detail with `params.id === '5'` **as a string**, explicitly
+  asserted not coerced to a number — a numeric id would break `#/t/:id`
+  lookups in Step 2.3.
+- Trailing-slash equivalence; `#/t` and `#/t/` → notfound rather than a
+  detail view with an empty id; `#/t/5/extra` → notfound.
+- Percent-decoded ids; a malformed escape returns notfound instead of
+  throwing.
+- Case sensitivity; eight non-string inputs each returning notfound
+  without throwing; a fresh result object per call.
+
+*Verified by unit tests (`tests/unit/sw-assets.test.mjs`, 20 cases):*
+- `CACHE` is exactly `daily-v4` and matches `/^daily-v\d+$/`.
+- **The high-value guard:** every `.js` file actually present in `js/` is
+  enumerated from disk and asserted to appear in `sw.js`. Forgetting the
+  cache list when adding a module is the most-repeated gotcha in
+  `PROJECT_NOTES.md`, and it only ever surfaces as an installed phone
+  silently serving a stale app.
+- Every jsDelivr URL in `index.html` also appears in `sw.js` — otherwise
+  charts work online and vanish offline.
+- No floating CDN version: each extracted URL must carry an explicit
+  `@x.y.z` pin. Version *numbers* are deliberately not hardcoded so the
+  test does not need editing when they are bumped.
+- `js/app.js` is absent from disk, from `index.html`, and from `sw.js`.
+
+*Verified by e2e (`tests/e2e/shell.test.mjs`, 10 cases):* page loads with
+title `Daily` and no uncaught errors; `#app` carries the right
+`data-route` for home / settings / compare / new / detail / notfound;
+`#/t/42` shows the id; `#/nope` renders a real notfound view **without
+silently redirecting** (the hash stays `#/nope`); clicking a nav link
+re-routes **without a full page reload**, proven by a `window` sentinel
+surviving the click; `aria-current="page"` marks only the active link;
+`window.Chart` is defined, proving the pinned UMD script executed; and
+the fixed bottom nav's bounding box sits inside the 390×844 viewport —
+a nav rendered under the home indicator is a real iPhone failure mode.
+
+*Fix cycle — three failures, judged individually:*
+1. **`parseHash('/settings')` returned `settings`.** Code wrong: the
+   leading `#` was optional, so a History-API-style path appeared to
+   route correctly. That is actively misleading in a hash-routed app
+   where such a URL 404s on refresh from Pages. Fixed to require `#`.
+2. **`GET /js/app.js` expected 200.** Test wrong — a *stale fixture*, not
+   a real defect. That assertion was written in Step 0.0 when `app.js`
+   was the only JS file; this step correctly deleted it. The property
+   (`.js` served as `text/javascript`) still matters, so the fixture was
+   repointed at `js/main.js` rather than the case being deleted. This
+   recurred in `tests/e2e/smoke.test.mjs`, which the first fix pass
+   missed — an orchestrator scoping error, fixed the same way.
+3. **`index.html` contains `@latest`.** Test wrong, and *too crude*: the
+   only match was inside a comment explaining why `@latest` is avoided.
+   Replaced with a URL-level check that extracts each jsDelivr URL and
+   requires an explicit `@x.y.z` pin — **strictly stronger**, since the
+   old substring check would have passed a floating `chart.js@4` range,
+   which is the actual hazard.
+
+*Deferred, deliberately:* `sw.js`'s CDN caching does `cache.put(url, res)`
+without checking `res.ok`, so a CDN error response would be cached and
+then served offline. The pinned URLs return 200 today, and **Step 5.1 is
+the dedicated service-worker pass** — recorded there rather than fixed
+mid-step.
+
+**Not verifiable from this machine:** Safari's service-worker behavior,
+Add to Home Screen, standalone launch, and how the safe-area padding
+actually renders on the physical device. Deferred to the Phase 0 gate.
 
 ---
 
@@ -1233,6 +1313,15 @@ network, and reliably picks up new deploys.
 - **Verify the update path explicitly**: bump `CACHE`, deploy, and
   confirm an already-installed client actually picks up the new version.
   This is the single most-repeated gotcha in `PROJECT_NOTES.md`.
+- **Carried over from Step 0.3 (found on review, deliberately deferred to
+  here):** the install handler's CDN branch calls `cache.put(url, res)`
+  without checking `res.ok`. A 404 or 5xx from jsDelivr would be cached
+  as if it were the real script, and then served from cache offline —
+  producing a broken chart library with no network error to point at.
+  Guard it with `if (res.ok)` and let a failed fetch simply leave that
+  URL uncached, since the `fetch` handler already falls back to the
+  network. The pinned URLs returned 200 when Step 0.3 shipped, so this is
+  latent rather than active.
 
 **Test Subjects.**
 

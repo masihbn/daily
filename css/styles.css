@@ -1,36 +1,110 @@
+/* Dark-mode-first: the app is opened at night. Colors live as custom
+   properties on :root so there's one place to change them; the light
+   scheme is an override, not the default. */
+:root {
+  --bg: #111111;
+  --bg-elevated: #1c1c1e;
+  --fg: #f2f2f2;
+  --fg-muted: #9a9a9a;
+  --accent: #3478f6;
+  --border: #2e2e30;
+  --nav-height: 56px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f5f7;
+    --bg-elevated: #ffffff;
+    --fg: #111111;
+    --fg-muted: #6b6b6f;
+    --accent: #3478f6;
+    --border: #dcdcdf;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
 html, body {
   height: 100%;
   margin: 0;
-  background: #111;
-  color: #fff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
   font-family: -apple-system, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#app {
+  flex: 1;
+  padding: 16px;
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 16px);
+}
+
+#app h1 {
+  font-size: 22px;
+  margin: 0 0 12px;
+}
+
+#app a {
+  color: var(--accent);
+}
+
+/* Bottom nav: fixed to the viewport bottom, padded for the iPhone home
+   indicator (safe-area-inset-bottom) so content isn't hidden under it. */
+#nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+#nav a {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 44px;
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 13px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
-main {
-  text-align: center;
-  padding: 24px;
+
+#nav a[aria-current="page"] {
+  color: var(--accent);
+  font-weight: 600;
 }
-#count {
-  font-size: 96px;
-  font-weight: 700;
-  margin: 16px 0;
-}
+
 button {
-  font-size: 20px;
-  padding: 14px 28px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  font-size: 16px;
+  padding: 12px 20px;
   border-radius: 12px;
   border: none;
-  background: #3478f6;
+  background: var(--accent);
   color: #fff;
-  margin: 6px;
-}
-button.secondary {
-  background: #333;
-}
-#meta {
-  margin-top: 20px;
-  font-size: 13px;
-  color: #888;
+  min-height: 44px;
 }
