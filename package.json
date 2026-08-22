@@ -1,0 +1,16 @@
+{
+  "name": "daily",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TEST-ONLY manifest. This repo has NO build step and is NOT a Node project. GitHub Pages serves the repo verbatim and ignores this file. Playwright is a test-only devDependency; nothing under tests/ or node_modules/ is ever deployed.",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:unit": "node tests/helpers/run-tier.mjs unit",
+    "test:integration": "node tests/helpers/run-tier.mjs integration",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}

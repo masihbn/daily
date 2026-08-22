@@ -199,7 +199,7 @@ Full protocol in **`docs/ORCHESTRATION.md`**. The short version:
 
 ## Step 0.0 — Test harness & regression suite scaffold
 
-**Status:** TODO
+**Status:** DONE (2026-08-21)
 
 **Goal.** `npm test` exists, runs green against an empty-but-real suite,
 and every later step has somewhere to add tests. Nothing else in this
@@ -249,7 +249,124 @@ plan can be verified until this exists.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Final result: **122 tests, all green** — unit 113, integration 6, e2e 3.
+Runtimes: unit 510ms, integration 931ms, e2e 3.2s.
+
+*Deviations from the plan as written, and why:*
+
+- **`js/config.js` was created here, not in Step 0.3.** This step's notes
+  require test credentials to come from `config.js`, but the plan listed
+  it as a 0.3 deliverable. Pulled forward; 0.3 now inherits it instead of
+  creating it. `js/app.js`, `index.html` and `sw.js` were left untouched,
+  so nothing in the deploy path references it yet and `CACHE` was
+  correctly *not* bumped.
+- **`supabase.mjs` targets `trackables`/`entries` (post-0.2 names) but
+  tolerates the table being absent.** `trackables` does not exist until
+  Step 0.2, so `sweepStaleTestRows()` and `deleteTestTrackablesByName()`
+  return `0` on a missing relation (HTTP 404 / `PGRST205` / `42P01`) and
+  `createTestTrackable()` throws with `.code === 'TABLE_MISSING'`. This
+  lets the mandatory suite-start sweep be safe to call from day one.
+- **Implementer/Test Author file boundary was redrawn for this step
+  only.** Normally the Implementer never touches `tests/**`, but here the
+  harness *is* the deliverable. Implementer owned `tests/helpers/**` +
+  config; Test Author owned `tests/unit|integration|e2e/**`. Neither
+  crossed, so tests were still written blind against the contract.
+
+*What was actually tested:*
+
+- **Test-data isolation guard** (`tests/unit/isolation-guard.test.mjs`) —
+  `isTestName` accepts only strings starting `__test__`; returns `false`
+  without throwing for 20 hostile inputs (`''`, `'__test_'`, `'x__test__y'`,
+  `'__TEST__x'` case-sensitivity, `null`, `undefined`, numbers, booleans,
+  `{}`, `[]`, `Symbol`, a function, an object whose `toString()` returns
+  `'__test__x'`). `assertTestName` throws for every one, message carrying
+  both `__test__` and the rejected value. `buildDeleteByNameUrl` throws for
+  11 hostile names and never returns a URL for any of them; URL-encoding
+  round-trips (`'__test__a b&c=d'` survives as one `name` param — an
+  unescaped `&` would truncate the filter and widen the delete).
+  **Result: pass.**
+- **Static server** (`tests/unit/server.test.mjs`) — full Content-Type map,
+  with `.js` → `text/javascript; charset=utf-8` asserted explicitly (a wrong
+  MIME here makes every ES module fail to load with an error that does not
+  point at the server). `/` serves `index.html` byte-identically;
+  query strings stripped; `Cache-Control: no-store` on success and error
+  paths; 404 for missing file and for an existing directory (no autoindex);
+  `POST` → 405; `HEAD` → 200 with empty body; malformed percent-escape
+  → 400; port closed after `close()`. Traversal blocked on 4 vectors — 2
+  percent-encoded via `fetch`, 2 literal dot-segment via raw socket.
+  **Result: pass.**
+- **Live PostgREST connectivity** (`tests/integration/connectivity.test.mjs`)
+  — read-only `GET counter?id=eq.1` returns 200 with a numeric value,
+  proving credentials + network + PostgREST. `trackables` probe tolerates
+  both eras and logged `trackables table ABSENT (pre-Step-0.2 era) — got
+  status 404`. `sweepStaleTestRows()` returns a number without throwing.
+  `cleanupTestRows(['__test__ok','real_habit'])` rejects **before issuing
+  any delete**. `restGet` does not throw on non-2xx. Tier performs zero
+  writes and zero deletes of its own. **Result: pass.**
+- **Browser smoke** (`tests/e2e/smoke.test.mjs`) — page loads 200 with a
+  non-empty title and no uncaught page errors; `/js/app.js` served as
+  `text/javascript` end-to-end through Playwright's own webServer; missing
+  script 404s. **Result: pass.**
+- **Harness self-checks** — `run-tier.mjs nosuchtier` exits 1 with
+  `no test files found`; no-argument invocation exits 1 with usage; the
+  standalone server CLI (`node tests/helpers/server.mjs 8199`, the exact
+  invocation Playwright's `webServer` uses) returns 200 with the correct
+  MIME. Tier summary lines verified to match Node's own `pass`/`fail`
+  counts. **Result: pass.**
+
+*Bugs found during the fix cycle (one cycle; all now permanent regression
+tests):*
+
+1. **`sweepStaleTestRows()` could delete real user data.** The sweep filtered
+   with PostgREST `name=like.__test__*`, which becomes SQL `LIKE '__test__%'`
+   — and **`_` is a single-character wildcard in SQL `LIKE`**. The pattern
+   therefore meant "any 2 chars, then `test`, then any 2 chars, then
+   anything", matching ordinary names like `mytestrun`, `AAtestBB`,
+   `12test34x`. Since the sweep runs at the start of every suite run against
+   the live database, this would have silently and permanently deleted real
+   trackables. **This bug originated in the orchestrator's interface
+   contract, not in either subagent** — both implemented the wrong spec
+   faithfully, which is precisely the class of error blind parallelism
+   cannot catch. It was found by the orchestrator reading the diff, and was
+   *missed* by the Diagnostician, which read the same file and explicitly
+   cleared it as safe.
+   **Fix:** all SQL wildcards removed from the sweep. It now GETs
+   `?select=id,name`, filters in JS with the exhaustively-tested
+   `isTestName()` predicate, dedupes, and deletes each survivor by exact
+   name through `buildDeleteByNameUrl()`. `buildSweepUrl()` was deleted
+   from the module so the hazard cannot be reintroduced by calling it.
+   **Regression test:** the seven strings that matched the old pattern are
+   asserted rejected by `isTestName`, and `buildDeleteByNameUrl` asserted
+   to throw for each; a separate test asserts `buildSweepUrl` is no longer
+   exported. Invariant now holds: exactly **one** DELETE exists in the whole
+   module, exact-match `name=eq.<encoded>`, gated by `assertTestName()`.
+2. **Tier runner double-counted.** Node fires `test:pass`/`test:fail` for
+   `describe` suites as well as leaf tests, so one failing `it()` nested two
+   levels deep reported as 3 failures — printed `105 passed, 3 failed`
+   against Node's true `94/1`. Exit codes were still correct, but a harness
+   whose summary line lies is exactly what this runner exists to prevent.
+   **Fix:** skip events where `details.type === 'suite'`, defaulting to
+   counting when `details` is absent so the tally can never collapse toward
+   zero and defeat the zero-test guard. Verified: runner counts now match
+   Node's exactly in both tiers.
+3. **A traversal test tested nothing** (`GET /../package.json` returned 200).
+   The server was correct; `fetch()`'s WHATWG URL parser collapses `/../`
+   client-side, so the request on the wire was plain `GET /package.json` —
+   an in-bounds file. The containment guard was never reached. Judged
+   **test wrong, code right** (the two percent-encoded siblings already
+   passed, proving the guard works).
+   **Fix — rewritten, not deleted:** the case now uses a raw `net.Socket`
+   with a hand-written request line so the literal dot-segment reaches the
+   server, plus a second new vector (`/../../Windows/win.ini`) escaping the
+   root entirely. Meaningful traversal coverage went 2 → 4 cases; a comment
+   records why it must not be "simplified" back to `fetch()`.
+
+*Not verified here (deferred by design):* `createTestTrackable()` has never
+executed successfully against a live table, because `trackables` does not
+exist yet. Only its name-assertion and `TABLE_MISSING` paths are covered.
+**Step 0.2 must exercise the real create/delete round-trip** once the table
+exists — that is the first point at which the teardown path can be proven
+end-to-end rather than by construction.
 
 ---
 
