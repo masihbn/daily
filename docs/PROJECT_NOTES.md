@@ -83,19 +83,40 @@ filipstachura.com/posts/ios-sideloading.
 
 ## GitHub & deployment blueprint
 
-The live setup, as of 2026-08-21:
+The live setup, as of 2026-08-22:
 
-- **Repo**: https://github.com/masihbn/memory-test-pwa — **public**
+> **Renamed 2026-08-22 (Step 0.1): `memory-test-pwa` → `daily`.** Entries
+> further down this file that predate that date still refer to the old
+> repo and Pages URL. Those are left as written on purpose — they are the
+> record of what was actually tested at the time, and rewriting them
+> would make the test log claim things were verified at a URL that did
+> not yet exist. Read anything above this note as current; anything in a
+> dated log entry as historical.
+
+- **Repo**: https://github.com/masihbn/daily — **public**
   (required for free GitHub Pages; private-repo Pages needs paid GitHub
-  Pro). Created and pushed via `gh repo create memory-test-pwa --public
-  --source=. --remote=origin --push`.
+  Pro). Originally created and pushed via `gh repo create memory-test-pwa
+  --public --source=. --remote=origin --push`, then renamed with
+  `gh repo rename daily --repo masihbn/memory-test-pwa --yes`. After a
+  rename the local remote must be repointed —
+  `git remote set-url origin https://github.com/masihbn/daily.git` — and
+  verified with `git remote -v` plus a real `git fetch`. GitHub does
+  redirect the old URL for git operations, so a stale remote keeps
+  working silently and you will not notice it is wrong.
 - **GitHub account used**: `masihbn`, authenticated locally via `gh auth
   login` (device-code flow, credentials cached in the Windows keyring —
   future sessions should just work; check with `gh auth status`).
-- **Live URL (GitHub Pages)**: https://masihbn.github.io/memory-test-pwa/
-  — serves from the `main` branch, root path (`/`). Enabled via:
-  `gh api repos/masihbn/memory-test-pwa/pages -X POST -f
-  "source[branch]=main" -f "source[path]=/"`.
+- **Live URL (GitHub Pages)**: https://masihbn.github.io/daily/
+  — serves from the `main` branch, root path (`/`). Originally enabled
+  via: `gh api repos/masihbn/memory-test-pwa/pages -X POST -f
+  "source[branch]=main" -f "source[path]=/"`. The Pages config (branch +
+  path) survived the 2026-08-22 rename untouched; verify with
+  `gh api repos/masihbn/daily/pages`.
+  **The old Pages URL (`/memory-test-pwa/`) does not redirect reliably** —
+  unlike git operations, which GitHub does redirect. Treat
+  `https://masihbn.github.io/daily/` as the only canonical URL, and note
+  that any home-screen icon added from the old URL is now dead and must
+  be deleted and re-added.
 - **Supabase project**: `okwzgmvnsdlheuolcthn`
   (`https://okwzgmvnsdlheuolcthn.supabase.co`), managed through the
   Supabase MCP server (`.mcp.json`, gitignored — see below).

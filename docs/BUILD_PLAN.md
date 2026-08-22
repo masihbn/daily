@@ -372,7 +372,7 @@ end-to-end rather than by construction.
 
 ## Step 0.1 — Rename repo and Pages URL to "Daily"
 
-**Status:** TODO
+**Status:** DONE (2026-08-22)
 
 **Goal.** The project lives at its real name before anything is built on
 top of the old URL, so the phone's home-screen icon is added once, not
@@ -416,7 +416,56 @@ twice.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Executed 2026-08-22 after explicit user confirmation (public,
+hard-to-reverse action — `ORCHESTRATION.md` §6 requires confirming it
+every time, and the user was shown the exact command and the
+dead-icon consequence before approving).
+
+- **Repo renamed** — `gh repo rename daily --repo masihbn/memory-test-pwa
+  --yes`. The command printed nothing on success, so the rename was
+  **verified independently** rather than assumed: `gh repo view
+  masihbn/daily` returns `{"name":"daily","visibility":"PUBLIC",
+  "url":"https://github.com/masihbn/daily"}`. Still public, which the
+  free Pages tier requires. **Result: pass.**
+- **Pages config survived** — `gh api repos/masihbn/daily/pages` returns
+  `html_url: https://masihbn.github.io/daily/`, `source: {branch: main,
+  path: /}`, `status: building`. Branch and path were preserved through
+  the rename; no reconfiguration was needed. **Result: pass.**
+- **Local remote repointed** — `git remote set-url origin
+  https://github.com/masihbn/daily.git`, confirmed by `git remote -v` and
+  a real `git fetch origin` that succeeded. Worth doing deliberately:
+  GitHub redirects the old URL for git operations, so a stale remote
+  keeps working silently and the mistake stays invisible. **Result: pass.**
+- **Repo secrets survived** — `gh secret list` shows both `SUPABASE_URL`
+  and `SUPABASE_ANON_KEY` still present. **Result: pass.**
+- **Keepalive workflow survived** — `gh workflow run
+  supabase-keepalive.yml --repo masihbn/daily` accepted. This matters
+  disproportionately: if keepalive breaks, the free Supabase project
+  auto-pauses about a week later with no other symptom. **Result: pass.**
+- **`manifest.json`** — `name`/`short_name` → `"Daily"`; `start_url`
+  `"./index.html"` and a newly added `scope: "./"`, both **relative**.
+  Pages serves this project from the `/daily/` subpath, so an absolute
+  `start_url` of `/` would launch the installed app at the GitHub user
+  root and 404. Keeping them relative makes the subpath change a
+  non-event. **Result: pass (verified by inspection).**
+- **`index.html`** — `<title>` → `Daily`. **`sw.js`** — `CACHE`
+  `memtest-v2` → `daily-v3`, required because cached assets changed.
+  **Result: pass.**
+- **Docs** — `CLAUDE.md` and `docs/PROJECT_NOTES.md` current-state
+  references updated to the new repo and URL.
+  **Deliberate deviation from this step's deliverable list:** it says to
+  update *every* occurrence of the old URL in `PROJECT_NOTES.md`, but
+  most remaining occurrences are inside **dated historical test-log
+  entries** describing what was verified on 2026-08-21. Those were left
+  as written — rewriting them would make the log claim things were tested
+  at a URL that did not exist yet, destroying the evidence trail the log
+  exists to provide. A dated banner was added at the top of the live-setup
+  section explaining the rename and how to read older entries.
+  **Result: pass, with the deviation recorded above.**
+
+**Not verifiable from this machine — needs the user's device:** that the
+new URL actually serves, that Add to Home Screen works from it, and that
+the standalone launch is correct. Deferred to the Phase 0 gate checklist.
 
 ---
 

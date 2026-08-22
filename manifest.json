@@ -1,7 +1,8 @@
 {
-  "name": "Memory Test",
-  "short_name": "MemTest",
+  "name": "Daily",
+  "short_name": "Daily",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#111111",
   "theme_color": "#111111",

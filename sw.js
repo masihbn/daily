@@ -1,4 +1,4 @@
-const CACHE = 'memtest-v2';
+const CACHE = 'daily-v3';
 const ASSETS = [
   './',
   './index.html',

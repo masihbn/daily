@@ -44,11 +44,14 @@ no subagent may weaken or delete a test to make it pass.
   possible. Don't introduce a bundler/framework without discussing it
   first; it's a real tradeoff against that goal.
 - **Hosting**: GitHub Pages, serving from `main` branch root.
-  Live at: https://masihbn.github.io/memory-test-pwa/
+  Live at: https://masihbn.github.io/daily/
 - **Backend**: Supabase (Postgres + PostgREST), called directly from the
   client via `fetch` — no Supabase JS client library in use.
-- **Repo**: https://github.com/masihbn/memory-test-pwa (public — required
-  for free GitHub Pages)
+- **Repo**: https://github.com/masihbn/daily (public — required
+  for free GitHub Pages). Renamed from `memory-test-pwa` on 2026-08-22
+  (Step 0.1). GitHub redirects the old URL for git operations, but the
+  old **Pages** URL does not redirect reliably — treat
+  `https://masihbn.github.io/daily/` as the only canonical URL.
 
 ## Folder structure
 
