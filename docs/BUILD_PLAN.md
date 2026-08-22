@@ -771,6 +771,41 @@ the renamed URL loads, Add to Home Screen works from the **new** URL
 (the old icon is dead and must be deleted), and the app shell renders
 with working navigation. **Wait for their verdict before Phase 1.**
 
+**PASSED — 2026-08-22, verified on the user's iPhone.**
+
+The new URL loads; nav swaps views with no reload; taps feel immediate;
+`#/nope` renders a real not-found view without redirecting; Add to Home
+Screen, standalone launch and the icon all work from the new URL; the
+shell still opens in Airplane Mode.
+
+Two layout bugs were found on the device, both invisible to the suite,
+and both fixed before Phase 1 began:
+
+1. **Header overlapped the status bar** — no `env(safe-area-inset-top)`
+   was applied. Fixed with padding (not margin) so the header background
+   still paints through the inset.
+2. **A 59pt strip of bare screen below the nav in standalone mode.**
+   This took three attempts and the first two fixes were wrong, so the
+   sequence is recorded in `PROJECT_NOTES.md` → Attempt 6 as a lesson.
+   Root cause: `apple-mobile-web-app-status-bar-style="black-translucent"`
+   makes iOS position the web view at the physical top but size it as
+   `screenHeight - statusBarHeight`, so the deficit falls off the bottom,
+   **outside the view** — no CSS could ever paint it. Changed to
+   `"black"`. Confirmed by on-device measurement, not inference:
+   `screen.height 852` vs `innerHeight 793` (= the 59pt
+   `safe-area-inset-top`), with `innerHeight - nav.bottom = 0.0` proving
+   the nav had been flush all along.
+
+**The transferable lesson:** for standalone-only iOS layout bugs,
+**instrument before theorising.** Playwright emulates neither standalone
+display mode nor safe-area insets, so `env()` evaluates to `0` and the
+e2e "nav is inside the viewport" test passed happily on broken markup.
+A temporary diagnostic readout produced the answer in one screenshot
+after two wrong remote diagnoses had already shipped.
+
+Cache versions this phase: `memtest-v2` → `daily-v9`, every bump forced
+by a real cached-asset change.
+
 ---
 
 # PHASE 1 — Data layer

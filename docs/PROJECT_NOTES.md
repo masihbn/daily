@@ -339,21 +339,63 @@ still opens in Airplane Mode from the home screen.
    own chrome. Fixed with `padding-top: calc(16px +
    env(safe-area-inset-top, 0px))` on the header — padding, not margin,
    so the header's background still paints up through the inset.
-2. **Band of mismatched colour below the bottom nav** in standalone
-   mode. **The first diagnosis was wrong** and is recorded here so it is
-   not repeated: the guess was that `#nav` used `bottom:
-   env(safe-area-inset-bottom)`, which would lift the bar and leave the
-   strip unpainted. Reading the CSS disproved it — `#nav` was already
-   `bottom: 0` with the inset carried as `padding-bottom`, which is the
-   correct pattern. Current working theory: `html` had no background, so
-   `body`'s `--bg` propagated to the canvas, while `height: 100%`
-   resolves against a layout viewport that under `viewport-fit=cover`
-   can be shorter than the physical screen — the leftover gap then
-   painted in the page colour against the nav's elevated colour. `html`
-   now carries `--bg-elevated` so any such gap blends. **Still a
-   hypothesis pending device re-verification.** If banding persists,
-   investigate the layout-viewport height (`100dvh` /
-   `-webkit-fill-available`) next — not the nav rules.
+2. **A 59pt strip of bare screen below the bottom nav** in standalone
+   mode. **RESOLVED — but only after two wrong fixes shipped.** The full
+   sequence is kept here because the process lesson is worth more than
+   the fix.
+
+   - *Wrong guess 1:* "`#nav` uses `bottom: env(safe-area-inset-bottom)`,
+     which lifts the bar and leaves the strip unpainted." Disproved by
+     reading the CSS — `#nav` was already `bottom: 0` with the inset as
+     `padding-bottom`, the correct pattern.
+   - *Wrong guess 2:* "`html` has no background, so `body`'s colour
+     propagates to the canvas and the gap beyond the layout viewport
+     paints in the page colour." Shipped `html { background:
+     var(--bg-elevated) }`. No change on the device.
+   - *The decisive clue came from the user:* the bug appears in the
+     installed app but never in Safari. Safari's own toolbar covers that
+     region, so `env(safe-area-inset-bottom)` is `0` there and non-zero
+     in standalone. That made it measurable.
+   - *Then: stop guessing, instrument.* A temporary diagnostic readout
+     was added to the settings view, dumping viewport, screen,
+     `visualViewport`, standalone flags, all four safe-area insets
+     (measured with a hidden probe element, since JS cannot read `env()`
+     directly) and `getBoundingClientRect()` for `#nav`, `body` and
+     `documentElement`. One screenshot settled it:
+
+     ```
+     screen.height:       852.0
+     window.innerHeight:  793.0     (852 - 793 = 59 = safe-area-inset-top)
+     safe-area-inset-top:  59.0
+     #nav: top=714.0 bottom=793.0
+     gap below nav (innerHeight - nav.bottom): 0.0
+     ```
+
+     `gap = 0.0` retired both earlier theories in a single line: the nav
+     had been flush with the bottom of the layout viewport the whole
+     time. The **web view itself** was 59pt short of the screen.
+   - *Root cause:* `apple-mobile-web-app-status-bar-style:
+     black-translucent` makes iOS position the view at the physical top
+     (content under the notch) while still sizing it as `screenHeight -
+     statusBarHeight`. The deficit falls off the bottom, **outside the
+     view**, which is why no CSS fix — however correct — could paint it.
+   - *Fix:* `content="black"`. iOS then positions the view below the
+     status bar and sizes it correctly. `viewport-fit=cover` and all
+     `env(safe-area-inset-*)` rules were kept; with `black`,
+     `safe-area-inset-top` reports `0`, so the header padding collapses
+     to its intended 16px on its own. Tradeoff: the notch strip is now
+     solid black rather than the header colour — imperceptible in dark
+     mode, noticeable in light.
+   - *Guard:* a text-level assertion that no `<meta>` tag sets
+     `black-translucent`, carrying the measurements and mechanism in its
+     comment. Someone will eventually want the translucent bar back for
+     aesthetics; that comment is what should stop them.
+
+   **The lesson: instrument before theorising.** The tools to measure
+   this existed from the first report. Choosing to reason remotely
+   instead cost three round trips and shipped two wrong fixes to the
+   user's phone. For any standalone-only iOS layout bug, add the readout
+   first.
 
 **The lesson worth keeping: Playwright cannot see either bug.** It does
 not emulate safe-area insets, so `env(safe-area-inset-*)` evaluates to
@@ -364,19 +406,35 @@ CSS *contains* correct safe-area rules (every `env()` has a `0px`
 fallback, etc.) — those cannot prove correct rendering, only prevent
 silent removal, and they are commented as such.
 
-**Also caught, worth remembering:** the first version of that guard used
-`/bottom\s*:\s*env\(/`, which also matches `padding-bottom: env(...)` —
-the *correct* rule — because "padding-bottom" ends in "bottom". It could
-never pass on correct CSS, and would have pressured someone into
-deleting the correct padding to go green. Fixed with a `(?<![-\w])`
-lookbehind. Same failure mode as an `@latest` check earlier the same day
-that matched a comment explaining why `@latest` is avoided: **a
-text-level assertion that does not anchor its match will eventually
-accuse correct code.**
+**A second, smaller pattern — it bit three times in one day.** Every
+text-level assertion added that day initially accused correct code,
+because none of them anchored the match to the construct they cared
+about:
+
+| Assertion | What it actually matched |
+|---|---|
+| `/@latest/` over `index.html` | a comment explaining why `@latest` is avoided |
+| `/bottom\s*:\s*env\(/` over the CSS | `padding-bottom: env(...)` — the *correct* rule, since "padding-bottom" ends in "bottom" |
+| `/black-translucent/` over `index.html` | the comment documenting why not to use `black-translucent` |
+
+Each looked like a real failure and each was a false alarm. The middle
+one was the worst: it could never pass on correct CSS, so the "obvious"
+way to go green was to delete the correct padding. **A text-level
+assertion that does not anchor its match will eventually accuse correct
+code, and a suite that cries wolf is how tests get "corrected" until
+they stop testing anything.** All three now match the construct itself —
+an extracted URL, a property with a `(?<![-\w])` lookbehind, a `<meta>`
+tag's `content` attribute.
 
 **Cache bumps this session**: `memtest-v2` → `daily-v3` (rename) →
-`daily-v4` (app shell) → `daily-v5` (safe-area fix) → `daily-v6` (canvas
-fix). Every one was required because a cached asset changed.
+`daily-v4` (app shell) → `daily-v5` (safe-area) → `daily-v6` (canvas,
+wrong fix) → `daily-v7` (diagnostics) → `daily-v8` (status-bar fix) →
+`daily-v9` (diagnostics removed). Every one was required because a
+cached asset actually changed. Worth noting how often this came up: on
+iOS the installed app will happily keep serving the old bundle, and more
+than once a "the fix didn't work" report was really "the phone never
+received the fix" — check the served `CACHE` value before re-diagnosing
+anything.
 
 ### Attempt 1 — 2026-08-21, local LAN test
 
