@@ -6,18 +6,24 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-Currently mid-build: hosting and backend plumbing are live and verified;
-the actual tracking UI has not been built yet — today's app is still the
-placeholder tap-counter used to prove the plumbing.
+**Currently mid-build — Phase 0 complete as of 2026-08-22.** Hosting and
+backend plumbing are live and verified. The placeholder tap-counter is
+**gone**: `index.html` now boots a real app shell with a hash router
+(`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`) and a bottom nav.
+Every view is still a placeholder — no tracking features are built yet.
+That work is Phase 1 onward in `docs/BUILD_PLAN.md`.
 
-**The concept has moved beyond what's described below, and design is now
-resolved.** It was reframed from a narrow "skill/habit tracker" into a
-more general personal logging + charts platform (generic bounded-metric
-"two bars" tracking, flexible aggregation, etc.), and the product is
-named **"Daily."** See **docs/APP_CONCEPT.md** for the design decisions
-before assuming the schema/data model sections below are still the
-target — the schema live on Supabase (`docs/DATA_MODEL.md`) predates
-this reframing and hasn't been migrated to match it yet.
+There is a cumulative regression suite: `npm test` runs unit →
+integration → e2e and must be green before any step is marked DONE.
+**221 tests at Phase 0 close.** See `docs/ORCHESTRATION.md`.
+
+**The concept was reframed and the design is now resolved.** It went from
+a narrow "skill/habit tracker" to a more general personal logging +
+charts platform (generic bounded-metric "two bars" tracking, flexible
+aggregation, etc.), and the product is named **"Daily."** See
+**docs/APP_CONCEPT.md** for the design decisions. The live schema has
+since been migrated to match (migration `0003`, applied 2026-08-22) —
+`docs/DATA_MODEL.md` describes what is actually live.
 
 **→ If you are here to build something, read `docs/ORCHESTRATION.md`
 first, then `docs/BUILD_PLAN.md`.**
@@ -61,10 +67,17 @@ manifest.json        PWA manifest (stays at root)
 sw.js                 service worker (stays at root — its cache scope covers
                        everything at or below wherever it's served from)
 css/styles.css       all styles
-js/app.js            all client JS (will split into modules as features grow)
+js/main.js           entry point: router wiring, view render, SW registration.
+                      The only file index.html loads as type="module".
+js/router.js         pure parseHash(hash) -> {name, params}. Split out of
+                      main.js so it is unit-testable in Node (main.js
+                      bootstraps on import and cannot be imported headlessly).
+js/config.js         SUPABASE_URL / SUPABASE_ANON_KEY — single source of
+                      truth, imported by the app AND by tests/helpers/.
+                      (js/app.js, the old tap-counter, was deleted in 0.3.)
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
-                      (numbered, e.g. 0001_..., 0002_...) — see docs/DATA_MODEL.md
+                      (numbered, e.g. 0001_..., 0003_...) — see docs/DATA_MODEL.md
 tests/               test-only, never deployed (see ORCHESTRATION.md)
   unit/                node --test, pure functions, zero dependencies
   integration/         real PostgREST calls against __test__* rows
@@ -101,23 +114,34 @@ files go in `docs/`, not the root.
 
 ## Data model (high level — see docs/DATA_MODEL.md for full detail)
 
-Two tables, live on the Supabase project as of 2026-08-21:
+Live on the Supabase project as of 2026-08-22 (migration `0003`). The old
+`skills` / `skill_entries` tables were **renamed**, not recreated:
 
-- **`skills`** — one row per habit the user is tracking (name, whether
-  it's logged as done/not-done or as a number, a weekly target, a
-  color, etc).
-- **`skill_entries`** — one row per day a skill was logged (`skill_id`,
-  `entry_date`, `value`). Calendar/weekly views are just date-range
-  queries against this table, aggregated client-side — no materialized
-  views needed at this scale.
+- **`trackables`** — one row per thing being tracked. `value_shape`
+  (`boolean`/`numeric`), `relog_semantic` (`cumulative`/`state` — what
+  re-logging the same day does), `aggregation`
+  (`sum`/`count`/`average`/`last`), `direction` (`build` = floor,
+  `break` = ceiling), target and bounds config, `color`, `sort_order`,
+  `archived`.
+- **`entries`** — one row per day a trackable was logged
+  (`trackable_id`, `entry_date`, `value`, `note`). **Unique on
+  `(trackable_id, entry_date)`** — the whole re-log design depends on
+  exactly one row per trackable per day. `updated_at` is maintained by a
+  trigger; the app must NOT set it by hand. Calendar/weekly views are
+  date-range queries aggregated client-side.
+- **`app_settings`** — single row (`check (id = 1)`), holds
+  `rolling_window_days` (default 90).
+- **`counter`** — legacy, from the original plumbing test. **Do not
+  drop it**: the keepalive workflow pings it, and dropping it silently
+  auto-pauses the free project about a week later.
 
-**Known gap, not yet fixed**: both tables currently use the same
-wide-open RLS pattern as the original test counter (`using (true)` for
-everything, gated only by the public anon key). Fine for solo use
-against an unlisted URL; must be replaced with per-user, auth-scoped
-policies before this app is ever used for something the user wouldn't
-want exposed if the URL or key leaked. Don't add more sensitive fields
-(health data, journal-style notes) without revisiting this first.
+**Known gap, deliberate and scheduled**: every table uses the wide-open
+`using (true)` RLS pattern, gated only by the public anon key. This is a
+recorded v1 tradeoff (`docs/APP_CONCEPT.md`), closed in **Step 5.3** —
+do not "helpfully" harden it early, that breaks every step in between.
+It does mean anyone with the anon key can read/write until then, so
+don't add sensitive fields (health specifics, journal-style notes)
+without revisiting that decision first.
 
 ## Conventions worth knowing before editing
 
