@@ -1,4 +1,4 @@
-const CACHE = 'daily-v9';
+const CACHE = 'daily-v10';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -9,6 +9,8 @@ const ASSETS = [
   './js/main.js',
   './js/router.js',
   './js/config.js',
+  './js/api.js',
+  './js/store.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

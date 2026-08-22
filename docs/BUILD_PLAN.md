@@ -812,7 +812,7 @@ by a real cached-asset change.
 
 ## Step 1.1 — PostgREST client (`api.js`) + offline store (`store.js`)
 
-**Status:** TODO
+**Status:** DONE (2026-08-22)
 
 **Goal.** One well-tested module owns all network access; the rest of
 the app never calls `fetch` directly.
@@ -854,7 +854,169 @@ the app never calls `fetch` directly.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **429 tests green** — 373 unit, 43 integration, 13
+e2e (up from 221 at the Phase 0 close). New this step: 159 unit cases for
+`api.js`, 40 unit cases for `store.js`, 9 integration cases against the
+live database. `sw.js` `CACHE` bumped `daily-v9` → `daily-v10` with
+`./js/api.js` and `./js/store.js` added to `ASSETS`.
+
+The outbox was kept in this step rather than split out, as the plan
+permitted. It is the part of `store.js` most likely to lose data, so it
+got the heaviest test coverage.
+
+*Contract decisions made here that the plan did not settle, recorded so a
+later step does not re-litigate them:*
+
+- **Three typed error classes, distinguished by a `retryable` flag** —
+  `ValidationError` (thrown before any network call), `NetworkError`
+  (`fetch` itself rejected), `ApiError` (non-2xx, carrying the PostgREST
+  `message`/`code`/`details`/`hint`). The store queues a write only when
+  `isRetryable(err)`. Without that split the outbox would either retry a
+  permanently-rejected 400 forever or drop a recoverable offline write.
+  `retryable` is `status >= 500 || 408 || 429`.
+- **`assertValidEntry()` is shared by `api.js` and `store.js`** and
+  rejects any key outside `trackable_id`/`entry_date`/`value`/`note`.
+  This turns the `updated_at` footgun (the column is owned by a database
+  trigger, per `DATA_MODEL.md`) into a hard validation failure rather
+  than a comment nobody reads.
+- **Dependency injection: `createStore({ api, storage, now })`**, with
+  `getStore()` as the app-facing singleton. A module-level `localStorage`
+  reference would have made the store untestable in the fast unit tier,
+  since Node has no `localStorage` — which is where the plan wants
+  coverage concentrated.
+- **Reconnect rule made explicit:** on a successful entry load the server
+  is authoritative **for the requested window only**, and pending outbox
+  ops are then re-applied on top. Without the overlay an offline log
+  visibly vanishes on reconnect; without the window scoping, loading one
+  month would wipe cached data for every other month.
+- **Outbox dedupe replaces in place, preserving queue position** — at
+  most one pending op per `(trackable_id, entry_date)`, with ordering
+  between different days left stable.
+
+*Verified by unit tests (`tests/unit/api.test.mjs`, 159 cases), against a
+stubbed `globalThis.fetch` that records method/URL/headers/body:*
+
+- Every one of the nine functions issues the exact method and full URL,
+  including query-parameter order, and sends `apikey` + `Authorization` +
+  `Accept`. GET requests are asserted **not** to send `Content-Type`.
+- **`upsertEntry` sends `on_conflict=trackable_id,entry_date` with
+  `Prefer: resolution=merge-duplicates,return=representation`** — the
+  single line the whole re-log design rests on; without it, re-logging a
+  day 409s against the unique constraint.
+- `updated_at`, `id`, `created_at` and any unknown key in an entry
+  payload throw `ValidationError` with **zero** fetches issued (call
+  count asserted, not just the throw).
+- `deleteEntry` always carries both `trackable_id=eq.` and
+  `entry_date=eq.`; a missing or hostile argument throws with zero
+  fetches, fuzzed across `null`/`''`/`0`/`-1`/`1.5`/`'*'`/`'eq.1'`/
+  `'1;drop table'`/`'1,2'`/`{}`/`[]`/`true`. Returns `0` rather than
+  throwing when nothing matched.
+- **`listEntries({trackableIds: []})` throws** — an empty id list must
+  never degrade into an unfiltered query over the whole table. Injection-
+  shaped ids (`'1)'`, `'1,2'`, `'*'`) and `from > to` likewise throw.
+- Error mapping: a 400 with a PostgREST JSON body carries all four
+  fields and `retryable === false`; 500/408/429 are retryable; a non-JSON
+  error body (an HTML 502 page) lands in `.body` as raw text without
+  throwing while the error is built; a `fetch` rejection becomes a
+  `NetworkError` preserving `.cause`; a missing `globalThis.fetch` gives
+  a `NetworkError`, not a `TypeError`.
+- **Structural guard:** `js/api.js` is read from disk and asserted to
+  contain exactly one `'DELETE'` request method. This mirrors the guard
+  that caught the Step 0.0 data-loss bug; a comment records that it must
+  not be "simplified" away.
+
+*Verified by unit tests (`tests/unit/store.test.mjs`, 40 cases):*
+
+- **Cache never overwrites server:** cache seeded with `value: 5`, server
+  returns `9` for the same day → the store reads `9` after the load.
+- A cached entry inside the loaded window that the server omits is
+  dropped; one **outside** the window survives.
+- **A pending outbox op survives a network reload** and stays marked
+  `pending` even when the server response lacks it.
+- The three save outcomes: success → `saved`, server row cached, outbox
+  emptied; retryable failure → `queued`, optimistic value kept with
+  `pending: true`; non-retryable 400 → `failed`, cache **reverted**, and
+  where no prior entry existed the row is absent afterward rather than
+  left as a ghost. Invalid input throws and mutates nothing.
+- `flushOutbox` replays FIFO, **stops dead at the first retryable
+  failure** (call count asserted, remaining ops left in order), and drops
+  a non-retryable op before continuing.
+- Hydration is defensive: corrupt JSON, a `v: 2` payload, and a bare JSON
+  array are each discarded with the bad key removed; a `storage` whose
+  `getItem`/`setItem` always throw (iOS Safari private mode) leaves the
+  store fully functional in memory.
+
+*Verified by integration tests (`tests/integration/api.test.mjs`, 9 cases,
+against the live database):*
+
+- Full trackable lifecycle: create → list → update → archive, with
+  `listTrackables()` excluding the archived row and
+  `{includeArchived: true}` including it.
+- **Upsert round-trip:** a second call for the same
+  `(trackable_id, entry_date)` updates instead of 409-ing, and
+  `updated_at` advances strictly — proving the database trigger fires and
+  that the client is correctly *not* sending that column.
+- Inclusive-both-ends range filtering across seeded boundary rows;
+  cross-trackable scoping; `deleteEntry` returning `1` then `0`.
+- Error mapping proven against the real server, not a stub: an FK
+  violation and a check-constraint violation both surface as `ApiError`
+  with a real PostgREST code, 4xx status, and `retryable === false`.
+- **`app_settings` has no `name` column and therefore no `__test__`
+  guard**, so `updateSettings` is exercised as a read-modify-write with
+  **no net change** — read `rolling_window_days` into `V`, write `V`
+  back, assert it is still `V`. A comment in the test records that no
+  other value may ever be written to that table.
+
+*Bug found by the orchestrator reading the diff, now a permanent
+regression test:*
+
+**A satisfied outbox op was dropped from memory but never from storage.**
+`dequeueByKey()` reassigned the in-memory `outbox`, but both call sites
+(`saveEntry` and `removeEntry` success paths) called only
+`persistCache()`, never `persistOutbox()`. Failure sequence: log a value
+offline → op queued *and persisted*; later save a newer value
+successfully → in-memory outbox cleared, `localStorage` outbox still
+holding the stale op; relaunch the app → `hydrate()` reads it back;
+`flushOutbox()` replays it and **overwrites the newer server value with
+the stale one.** That is a cached value clobbering a server value — the
+exact invariant `store.js`'s header comment forbids.
+
+**Fix:** `dequeueByKey()` now calls `persistOutbox()` itself, so no
+future call site can forget, with a comment recording why the line must
+not be hoisted back out to the callers.
+
+**The regression test was verified to actually catch it**, not merely to
+pass: the fix was temporarily reverted, both new cases failed, and the
+file was restored. Notably **no other test in the 429-case suite failed**
+during that revert — the bug was invisible to everything else, which is
+why it needed a dedicated test asserting on the *persisted* payload
+rather than on `store.getOutbox()`. An in-memory-only assertion passes
+under the buggy code, because the bug is precisely that memory and
+storage disagree.
+
+*One fix cycle, judged individually:*
+
+1. **`removeEntry` queued a delete op whose `trackable_id` was a string**
+   (`'1'`), because it built the payload from `assertId()`'s return
+   value, while an upsert op for the same id queued a number. **This was
+   an orchestrator contract gap, not a subagent error** — the contract
+   pinned upsert payloads to "preserved as given" and said nothing about
+   delete payloads, so both agents implemented an under-specified spec
+   faithfully. Same class of error as the Step 0.0 wildcard bug.
+   Judged **code wrong, test right**: sibling op types disagreeing about
+   the type of the same field is a latent bug generator, since any future
+   `op.payload.trackable_id === row.trackable_id` comparison would work
+   for upserts and silently fail for deletes. Fixed by preserving the raw
+   argument in the delete payload; validation behavior unchanged.
+
+*Post-run isolation check (orchestrator, direct SQL):* `trackables` 0
+rows, `entries` 0 rows, `app_settings` 1 row still at
+`rolling_window_days = 90` (the no-op write left it untouched), `counter`
+1 row (keepalive intact). No `__test__` residue.
+
+*Not wired into the UI yet, deliberately:* neither module is imported by
+`js/main.js` — they are consumed starting at Step 2.1. They are in
+`sw.js`'s `ASSETS` so an installed phone caches them ahead of that.
 
 ---
 
