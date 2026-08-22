@@ -422,7 +422,44 @@ _(To be filled in by the executing session.)_
 
 ## Step 0.2 — Migration `0003`: generalize schema to Trackables/Entries
 
-**Status:** TODO
+**Status:** IN PROGRESS — started 2026-08-21, interrupted by a session
+limit before the migration was applied. **Nothing was applied to the live
+database; it is untouched and still on the `skills`/`skill_entries`
+schema.** Verified after the interruption: `list_tables` shows only
+`counter`, `skills`, `skill_entries`; no `0003_trackables.sql` exists;
+`tests/helpers/supabase.mjs` is unmodified.
+
+**What DOES exist, ready to use:**
+`tests/integration/schema.test.mjs.pending-step-0.2` — the complete test
+file for this step (472 lines, syntax-checked, covers blocks A–J below).
+It is deliberately named `.pending-step-0.2` so the tier runner, which
+discovers `*.test.mjs`, does not pick it up — it imports
+`createTestEntry`/`upsertTestEntry`, which do not exist yet, so the
+integration tier would throw on import and the suite would be red.
+**To resume: implement the migration and the two helpers, then rename the
+file back to `schema.test.mjs`.** It is not weakened or skipped coverage;
+it is coverage for a step that has not been built yet.
+
+Its cases: (A) new tables exist / old ones gone / `counter` untouched;
+(B) `app_settings` seeded singleton — reads only, never written to, since
+it has no `name` column and therefore no `__test__` guard; (C) the
+create→read→delete round-trip, which is the **first end-to-end proof of
+the teardown path** (untestable before this step, because `trackables` did
+not exist); (D) every column default pinned; (E) all nine check
+constraints reject bad values; (F) `target_value` is numeric, not the old
+smallint that overflows at 32767; (G) the `(trackable_id, entry_date)`
+unique constraint plus the `merge-duplicates` upsert Step 1.1 depends on;
+(H) entries cascade on parent delete, so teardown leaves no orphans;
+(I) the `updated_at` trigger fires; (J) the entry guard rejects a
+non-`__test__` parent.
+
+**Still to do:** write and apply `0003_trackables.sql`, add
+`createTestEntry`/`upsertTestEntry` to `tests/helpers/supabase.mjs`
+(preserving its one-DELETE invariant — no new delete path; entries
+cascade), rewrite `docs/DATA_MODEL.md` to match what is live, run
+`get_advisors`, and **verify by introspection that the
+`(trackable_id, entry_date)` unique constraint survived the rename** —
+that constraint is what the whole re-log-semantics design rests on.
 
 **Goal.** The live database matches the entity model in
 `APP_CONCEPT.md`, replacing the narrower `skills`/`skill_entries`
