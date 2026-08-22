@@ -1248,6 +1248,29 @@ rather than tap-based: show the unit test results for `dates.js` /
 semantics, and the `min === max` normalization guard — plus a
 demonstrated round-trip write to Supabase. **Wait before Phase 2.**
 
+**PASSED — 2026-08-22.** Suite 635 green. Evidence presented: every
+ISO-week year-boundary fixture (`2025-12-29` → `2026-W01`, `2027-01-03` →
+`2026-W53`, `2021-01-01` → `2020-W53`, `2016-01-01` → `2015-W53`), all
+three re-log semantics, `normalizeSeries([5,5,5])` → `[50,50,50]` with
+`Number.isNaN` asserted false, and a live round-trip through the real
+`api.js`/`aggregate.js`: logged 320 kcal, re-logged with
+`applyRelog(320, 500, cumulative)` → 820, upsert **edited the existing
+row** (same id, no unique-constraint error) with `updated_at` advanced by
+the DB trigger; a boolean re-logged twice stayed `1`;
+`rollup(week, count)` → `[{key:'2026-W34', value:3, count:3}]`; teardown
+left 0 `__test__` rows.
+
+The timezone tier was additionally verified **adversarially**: reverting
+`todayLocal` to `toISOString().slice(0,10)` passed under `TZ=UTC` and
+failed all five other zones, and reverting `parseLocal` to
+`new Date(str)` failed every non-UTC zone. Both were restored and the
+suite re-run green.
+
+**Caveat carried into Phase 2:** none of the four Phase 1 modules has
+ever run in a browser — only in Node. The e2e tests load `index.html`,
+which does not import them. Step 2.1 is their first execution in Mobile
+Safari.
+
 ---
 
 # PHASE 2 — Core UI
@@ -1255,6 +1278,20 @@ demonstrated round-trip write to Supabase. **Wait before Phase 2.**
 ## Step 2.1 — Home: trackable list + quick-log
 
 **Status:** TODO
+
+> **⚠ EXTRA DEPLOY CHECKPOINT AT THE END OF THIS STEP (user decision,
+> 2026-08-22).** Normally the protocol says keep moving within a phase
+> and only stop at the Phase 2 gate. The user explicitly asked to stop
+> after **this step**: finish 2.1, run the full suite, commit, **push**,
+> and hand them a manual test script for their phone — then wait for
+> their verdict before starting 2.2.
+>
+> Reason: 2.1 is the screen they use daily, and it is the first time the
+> Phase 1 data layer runs in a browser at all. If `store.js`'s
+> `localStorage` handling or `dates.js`'s local-date logic misbehaves on
+> iOS, that should surface with one step of work on top of it, not
+> three. This does **not** replace the Phase 2 gate, which still applies
+> after 2.3.
 
 **Goal.** The primary daily-use screen works: see everything tracked,
 log today's value for any of them in one or two taps.

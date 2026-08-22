@@ -6,16 +6,40 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-**Currently mid-build — Phase 0 complete as of 2026-08-22.** Hosting and
-backend plumbing are live and verified. The placeholder tap-counter is
-**gone**: `index.html` now boots a real app shell with a hash router
-(`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`) and a bottom nav.
-Every view is still a placeholder — no tracking features are built yet.
-That work is Phase 1 onward in `docs/BUILD_PLAN.md`.
+**Currently mid-build — Phases 0 and 1 complete as of 2026-08-22.**
+Hosting and backend plumbing are live and verified. The placeholder
+tap-counter is **gone**: `index.html` boots a real app shell with a hash
+router (`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`) and a bottom
+nav.
+
+**The data layer is built but not yet wired to any UI.** `js/api.js`,
+`js/store.js`, `js/dates.js` and `js/aggregate.js` are complete and
+tested, but **nothing imports them yet** — `js/main.js` still renders
+placeholder views. So the app on the phone looks exactly like it did at
+the Phase 0 close. Wiring starts at Step 2.1, which is the next step.
+
+**Consequence worth knowing before you trust the suite:** those four
+modules have only ever run in **Node**, never in a browser. The e2e tests
+load `index.html`, which does not import them. Step 2.1 is the first time
+they execute in Mobile Safari, so treat browser-specific behaviour
+(`localStorage` under iOS storage rules, the offline outbox on a real
+flaky connection, backgrounding the PWA mid-write) as unverified. Supabase
+CORS from the browser is the exception — the Phase 0 tap-counter already
+proved that path.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**221 tests at Phase 0 close.** See `docs/ORCHESTRATION.md`.
+**635 tests at Phase 1 close** (579 unit, 43 integration, 13 e2e). See
+`docs/ORCHESTRATION.md`.
+
+**User decision on record (2026-08-22):** the user asked for an **extra
+deploy checkpoint after Step 2.1** — build 2.1, then stop, push, and hand
+them a manual test script, rather than running straight through 2.2 and
+2.3 to the Phase 2 gate. Reason: 2.1 is the screen they use daily and the
+first time the Phase 1 modules run in a browser at all, so an iOS
+surprise should surface after one step instead of three. Honor this; it
+is an addition to the protocol's normal "keep moving within a phase"
+rule, not a replacement for the Phase 2 gate, which still stands.
 
 **The concept was reframed and the design is now resolved.** It went from
 a narrow "skill/habit tracker" to a more general personal logging +
@@ -75,6 +99,26 @@ js/router.js         pure parseHash(hash) -> {name, params}. Split out of
 js/config.js         SUPABASE_URL / SUPABASE_ANON_KEY — single source of
                       truth, imported by the app AND by tests/helpers/.
                       (js/app.js, the old tap-counter, was deleted in 0.3.)
+js/api.js            PostgREST client (Step 1.1). The ONLY module allowed
+                      to fetch() Supabase. Nine named operations, three
+                      typed errors (ValidationError/NetworkError/ApiError)
+                      split by a `retryable` flag. Not yet imported by any
+                      view.
+js/store.js          In-memory cache + localStorage mirror + an outbox
+                      that queues writes made offline and replays them
+                      (Step 1.1). Network is the source of truth; the
+                      cache never overwrites a server value. Injectable
+                      via createStore({api, storage, now}); getStore() is
+                      the app-facing singleton. Not yet imported.
+js/dates.js          PURE local-calendar date math (Step 1.2): todayLocal,
+                      parseLocal, formatLocal, addDays, isoWeekKey,
+                      startOfIsoWeek, isoWeeksInRange, rangeDays,
+                      monthGrid. Read its header before touching it — the
+                      UTC/DST traps are documented there.
+js/aggregate.js      PURE rollup/normalization/bound math (Step 1.2):
+                      rollup, fillSeries, normalizeSeries, deriveBounds,
+                      applyRelog. applyRelog is the heart of the data
+                      model. Imports only dates.js.
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (numbered, e.g. 0001_..., 0003_...) — see docs/DATA_MODEL.md
