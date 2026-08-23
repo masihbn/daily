@@ -66,11 +66,13 @@ function isFiniteNumber(v) {
 // additive logging from the product, so every trackable this form creates
 // is written with relog_semantic: 'state' (see buildPayload below).
 //
-// target_type only ever offers 'none' / 'weekly_count' here. The schema
-// also has a 'specific_days' target type (target_days column), but its UI
-// is deliberately deferred — see docs/APP_CONCEPT.md "Specific days of
-// week" (the one open design question left for v1). Do not add a control
-// for it in this step.
+// target_type offers 'none' plus one shape-specific option — see
+// targetOptionsFor() below (Step 2.4 defect 4: "Times per week" is
+// meaningless for a numeric metric like calories, so the option offered
+// now depends on value_shape). The schema also has a 'specific_days'
+// target type (target_days column), but its UI is deliberately deferred —
+// see docs/APP_CONCEPT.md "Specific days of week" (the one open design
+// question left for v1). Do not add a control for it in this step.
 export function defaultsFor(valueShape) {
   const shape = valueShape === 'numeric' ? 'numeric' : 'boolean';
   return {
@@ -90,19 +92,52 @@ export function defaultsFor(valueShape) {
   };
 }
 
+// --- targetOptionsFor ------------------------------------------------------
+
+// Step 2.4 defect 4: "Times per week" is meaningless for a numeric metric
+// like calories, so the target options offered depend on value_shape.
+// 'none' is legal for both shapes; each shape then gets exactly one
+// target type of its own. Exported (named) so it is unit-testable and so
+// applyShapeChange() below can derive "is the current target_type still
+// legal for the new shape" from the same single source of truth instead
+// of duplicating the option list.
+export function targetOptionsFor(valueShape) {
+  const shape = valueShape === 'numeric' ? 'numeric' : 'boolean';
+  if (shape === 'numeric') {
+    return [
+      { value: 'none', label: 'No target' },
+      { value: 'weekly_average', label: 'Average per week' },
+    ];
+  }
+  return [
+    { value: 'none', label: 'No target' },
+    { value: 'weekly_count', label: 'Times per week' },
+  ];
+}
+
 // --- applyShapeChange ----------------------------------------------------
 
 // `aggregation` is forced by `value_shape`, never merely disabled: 'count'
 // is never offered in the numeric select, and the numeric options are
 // never applied to a boolean. Every other field is left as-is — only
-// aggregation changes here.
+// aggregation changes here — EXCEPT target_type/target_value, which must
+// also reset when the current target_type is not legal for the new shape
+// (Step 2.4 defect 4): switching Boolean -> Numeric with 'weekly_count'
+// selected must not leave an illegal combination that the database check
+// constraint would reject on save.
 export function applyShapeChange(state, valueShape) {
   const shape = valueShape === 'numeric' ? 'numeric' : 'boolean';
   const base = state && typeof state === 'object' ? state : {};
+
+  const legalTargetTypes = targetOptionsFor(shape).map((opt) => opt.value);
+  const targetStillLegal = legalTargetTypes.includes(base.target_type);
+
   return {
     ...base,
     value_shape: shape,
     aggregation: shape === 'numeric' ? 'sum' : 'count',
+    target_type: targetStillLegal ? base.target_type : 'none',
+    target_value: targetStillLegal ? base.target_value : '',
   };
 }
 
@@ -121,7 +156,10 @@ export function visibleFields(state) {
     unit: numeric,
     aggregation: numeric,
     target_type: true,
-    target_value: s.target_type === 'weekly_count',
+    // Step 2.4 defect 4: applies to both target types (weekly_count and
+    // weekly_average), so this is keyed on "has a target" rather than on
+    // one specific target_type value.
+    target_value: s.target_type !== 'none',
     bounds_enabled: numeric,
     bounds_mode: boundsOn,
     bound_lower: manual,
@@ -144,7 +182,9 @@ export function validate(state) {
     return { ok: false, message: 'Name is required' };
   }
 
-  if (s.target_type === 'weekly_count') {
+  // Step 2.4 defect 4: the same rule applies to both target types
+  // (weekly_count and weekly_average) — same message either way.
+  if (s.target_type !== 'none') {
     const tv = parseNumericInput(s.target_value);
     if (tv === null || !(tv > 0)) {
       return { ok: false, message: 'Target must be a number greater than 0' };
@@ -181,13 +221,21 @@ export function buildPayload(state) {
 
   const name = typeof s.name === 'string' ? s.name.trim() : '';
 
+  // Step 2.4 defect 4: target_type is now one of 'none' /
+  // 'weekly_count' / 'weekly_average' — any other value (e.g. the
+  // deliberately-unexposed 'specific_days') collapses to 'none' here,
+  // same as before.
+  const targetType = ['weekly_count', 'weekly_average'].includes(s.target_type)
+    ? s.target_type
+    : 'none';
+
   const payload = {
     name,
     value_shape: numeric ? 'numeric' : 'boolean',
     relog_semantic: 'state',
     aggregation: s.aggregation,
     direction: s.direction === 'break' ? 'break' : 'build',
-    target_type: s.target_type === 'weekly_count' ? 'weekly_count' : 'none',
+    target_type: targetType,
     color: s.color,
     // `archived` is deliberately never sent from this form: there is no
     // archived control here, and archiving is a separate explicit action
@@ -201,7 +249,7 @@ export function buildPayload(state) {
     payload.unit = unit === '' ? null : unit;
   }
 
-  if (payload.target_type === 'weekly_count') {
+  if (targetType !== 'none') {
     payload.target_value = parseNumericInput(s.target_value);
   }
 
@@ -241,7 +289,10 @@ function stateFromTrackable(t) {
         ? t.aggregation
         : 'sum'
       : 'count',
-    target_type: t.target_type === 'weekly_count' ? 'weekly_count' : 'none',
+    // Step 2.4 defect 4: 'weekly_average' joins 'weekly_count' as a legal
+    // loaded value; anything else (including the unexposed
+    // 'specific_days') maps to 'none' as before.
+    target_type: ['weekly_count', 'weekly_average'].includes(t.target_type) ? t.target_type : 'none',
     target_value: stringifyNum(t.target_value),
     bounds_enabled: t.bounds_enabled === true,
     bounds_mode: t.bounds_mode === 'manual' ? 'manual' : 'auto',
@@ -330,18 +381,29 @@ export function createTrackableView({ mode, id, api, store } = {}) {
     group.className = 'tform-radio-group';
     for (const opt of options) {
       const id = `tf-${fieldName}-${opt.value}`;
+
+      // DEFECT 2 fix (CONTRACT-2.4.md §4): each radio + its label is
+      // wrapped in one flex item (span.tform-radio-pair) so a wrap can
+      // never split a radio from its own label, and so the two are
+      // vertically centred against each other directly instead of relying
+      // on the group's cross-axis alignment.
+      const pair = document.createElement('span');
+      pair.className = 'tform-radio-pair';
+
       const input = document.createElement('input');
       input.type = 'radio';
       input.id = id;
       input.name = fieldName;
       input.value = opt.value;
       input.checked = formState[fieldName] === opt.value;
-      group.appendChild(input);
+      pair.appendChild(input);
 
       const lab = document.createElement('label');
       lab.setAttribute('for', id);
       lab.textContent = opt.label;
-      group.appendChild(lab);
+      pair.appendChild(lab);
+
+      group.appendChild(pair);
     }
     wrap.appendChild(group);
 
@@ -441,9 +503,14 @@ export function createTrackableView({ mode, id, api, store } = {}) {
         wrap = textField('name', 'Name');
         break;
       case 'value_shape':
+        // DEFECT 3 (CONTRACT-2.4.md §5): the user explicitly asked for the
+        // raw model words here — this deliberately OVERRIDES the "never
+        // render the raw enum" rule from CONTRACT-2.2.md §3.2 for this one
+        // field only. direction and aggregation below keep their
+        // plain-English labels; do not "fix" this back to Yes/No.
         wrap = radioField('value_shape', 'Type', [
-          { value: 'boolean', label: 'Yes / No' },
-          { value: 'numeric', label: 'A number' },
+          { value: 'boolean', label: 'Boolean' },
+          { value: 'numeric', label: 'Numeric' },
         ]);
         break;
       case 'direction':
@@ -466,18 +533,24 @@ export function createTrackableView({ mode, id, api, store } = {}) {
         ]);
         break;
       case 'target_type':
-        // Only 'none' / 'weekly_count' are offered. The schema also has a
-        // 'specific_days' target type (target_days column) — its UI is
-        // deliberately deferred; see docs/APP_CONCEPT.md "Specific days of
-        // week". Do not add a control for it here.
-        wrap = selectField('target_type', 'Target', [
-          { value: 'none', label: 'No target' },
-          { value: 'weekly_count', label: 'Times per week' },
-        ]);
+        // DEFECT 4 (CONTRACT-2.4.md §6): the options depend on
+        // value_shape — "Times per week" is meaningless for a numeric
+        // metric like calories. See targetOptionsFor() above. The schema
+        // also has a 'specific_days' target type (target_days column) —
+        // its UI is deliberately deferred; see docs/APP_CONCEPT.md
+        // "Specific days of week". Do not add a control for it here.
+        wrap = selectField('target_type', 'Target', targetOptionsFor(formState.value_shape));
         break;
-      case 'target_value':
-        wrap = textField('target_value', 'Times per week', { decimal: true });
+      case 'target_value': {
+        // Label tracks whichever target type is currently selected, since
+        // this one field now serves two different targets (Step 2.4
+        // defect 4). Not pinned down verbatim by the contract; kept
+        // consistent with the wording used in the target_type select
+        // itself so the two never disagree.
+        const label = formState.target_type === 'weekly_average' ? 'Average per week' : 'Times per week';
+        wrap = textField('target_value', label, { decimal: true });
         break;
+      }
       case 'bounds_enabled':
         wrap = checkboxField();
         break;
@@ -499,7 +572,21 @@ export function createTrackableView({ mode, id, api, store } = {}) {
       default:
         wrap = document.createElement('div');
     }
-    if (!visible) wrap.hidden = true;
+    // DEFECT 1 fix (CONTRACT-2.4.md §3), defence-in-depth half: a
+    // stylesheet rule alone (`.tform-field[hidden] { display: none }` in
+    // styles.css) is enough to actually hide the field, but a `disabled`
+    // control additionally cannot be focused, cannot raise the iOS
+    // keyboard, and is never submitted — so even if that CSS rule is ever
+    // deleted, a hidden field can no longer capture input. Every wrapper
+    // is rebuilt fresh on each render, so there is nothing to "clear" when
+    // a field becomes visible again — a freshly built control is never
+    // disabled unless this branch runs.
+    if (!visible) {
+      wrap.hidden = true;
+      for (const el of wrap.querySelectorAll('input, select, textarea, button')) {
+        el.disabled = true;
+      }
+    }
     return wrap;
   }
 

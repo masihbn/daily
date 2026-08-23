@@ -4,6 +4,28 @@
 // §5.3 (test plan, cases F1 through F15) — the implementation is being
 // written in parallel by another agent and is not visible here.
 //
+// AMENDED by CONTRACT-2.4.md ("Form fixes, per-shape targets, bounds
+// verdict"), user feedback from the Phase 2 gate. Six defects; the ones
+// touching this file:
+//   DEFECT 1 — every progressive-disclosure assertion below (F1/F2/F3) was
+//     REWRITTEN to check real rendered visibility (toBeHidden/toBeVisible)
+//     plus each hidden control's disabled state, instead of only the
+//     `hidden` attribute. See the dedicated comment on assertFieldHidden/
+//     assertFieldVisible below for the full story — this is the actual
+//     defect the user hit on device, and the reason this whole revision
+//     exists.
+//   DEFECT 3 — value_shape labels now read the raw words "Boolean"/
+//     "Numeric" (new DEFECT3 test).
+//   DEFECT 4 — target_type options are now per-shape, and applyShapeChange
+//     resets an illegal target_type/target_value on a shape switch (new
+//     DEFECT4a/DEFECT4b tests).
+//   DEFECT 6 — the colour swatch selection affordance is strengthened; the
+//     underlying functional contract (radio gets checked) is covered by the
+//     new DEFECT6 test.
+// DEFECT 2 (radio/label alignment) and DEFECT 5 (bounds verdict, covered in
+// tests/e2e/home.test.mjs and tests/unit/home-model.test.mjs) are CSS/other-
+// file concerns not exercised by new cases in this file.
+//
 // Do NOT start a server here and do NOT hardcode the base URL or viewport;
 // both are supplied by playwright.config.mjs (baseURL 127.0.0.1:8123,
 // 390x844 viewport). Reuses the exact interception mechanics established in
@@ -179,11 +201,71 @@ async function routeEntries(page, { getFixture = [] } = {}) {
   });
 }
 
+// --- DEFECT 1 visibility helpers (CONTRACT-2.4.md §3, §9.3) ---------------
+//
+// THE WHOLE REASON THIS DEFECT SHIPPED: every progressive-disclosure
+// assertion in this file used to check the `hidden` ATTRIBUTE
+// (toHaveJSProperty('hidden', true)) rather than actual rendered visibility.
+// Those assertions passed even while, on the real device, the fields were
+// plainly visible and tapping one raised the iOS keyboard — because
+// `.tform-field { display: flex }` is an AUTHOR stylesheet rule, and an
+// author rule always beats the browser's built-in `[hidden] { display:
+// none }`, regardless of specificity. Setting `wrap.hidden = true` set the
+// attribute; it did not hide anything on screen.
+//
+// Playwright's `toBeHidden()` / `toBeVisible()` check the element's
+// COMPUTED STYLE (effectively: is it in the accessibility tree / does it
+// have zero rendered box), which is what determines what a real user can
+// see and tap — that is what actually would have caught this bug, and it
+// is the BINDING assertion below. The `hidden` JS property is still
+// checked alongside as a secondary/mechanism signal, but it must never be
+// the only thing asserted again. Do NOT "simplify" these helpers back to
+// attribute-only checks.
+//
+// Defence-in-depth (CONTRACT-2.4.md §3, fix half 2): every input/select/
+// textarea/button inside a hidden `.tform-field` must also be `disabled` —
+// a disabled control cannot be focused and cannot raise a keyboard even if
+// the CSS rule that makes toBeHidden() pass is later deleted. `controls` is
+// an array of selectors (scoped to `page`, e.g. `input[name="unit"]`) for
+// every focusable control inside that field wrapper.
+
+async function assertFieldHidden(page, field, controls) {
+  const wrapper = page.locator(`.tform-field[data-field="${field}"]`);
+  // BINDING: real, rendered invisibility.
+  await expect(wrapper).toBeHidden();
+  // Secondary signal only — never sufficient by itself (see comment above).
+  await expect(wrapper).toHaveJSProperty('hidden', true);
+  for (const selector of controls) {
+    await expect(page.locator(selector)).toBeDisabled();
+  }
+}
+
+async function assertFieldVisible(page, field, controls) {
+  const wrapper = page.locator(`.tform-field[data-field="${field}"]`);
+  await expect(wrapper).toBeVisible();
+  await expect(wrapper).toHaveJSProperty('hidden', false);
+  for (const selector of controls) {
+    await expect(page.locator(selector)).toBeEnabled();
+  }
+}
+
+// Selector(s) for the focusable control(s) inside each progressively-
+// disclosed field wrapper, per CONTRACT-2.2.md §3.2's control column.
+const FIELD_CONTROLS = {
+  unit: ['input[name="unit"]'],
+  aggregation: ['select[name="aggregation"]'],
+  target_value: ['input[name="target_value"]'],
+  bounds_enabled: ['input[name="bounds_enabled"]'],
+  bounds_mode: ['select[name="bounds_mode"]'],
+  bound_lower: ['input[name="bound_lower"]'],
+  bound_upper: ['input[name="bound_upper"]'],
+};
+
 // ===========================================================================
 // F1 — #/new renders the defaults
 // ===========================================================================
 
-test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 defaults; unit/aggregation/bounds_*/target_value are hidden', async ({
+test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 defaults; unit/aggregation/bounds_*/target_value are ACTUALLY HIDDEN (not just carrying the attribute) and their controls are disabled', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -201,7 +283,7 @@ test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 default
   await expect(page.locator('input[name="color"][value="#34c759"]')).toBeChecked();
 
   for (const field of ['unit', 'aggregation', 'bounds_enabled', 'bounds_mode', 'bound_lower', 'bound_upper', 'target_value']) {
-    await expect(page.locator(`.tform-field[data-field="${field}"]`)).toHaveJSProperty('hidden', true);
+    await assertFieldHidden(page, field, FIELD_CONTROLS[field]);
   }
 
   expect(unexpected).toEqual([]);
@@ -211,7 +293,7 @@ test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 default
 // F2 — shape toggling reveals/hides numeric-only fields
 // ===========================================================================
 
-test('F2 — selecting numeric reveals unit/aggregation/bounds_enabled; selecting boolean again re-hides them', async ({
+test('F2 — selecting numeric reveals (actually shows, enabled) unit/aggregation/bounds_enabled; selecting boolean again actually re-hides and disables them', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -219,14 +301,14 @@ test('F2 — selecting numeric reveals unit/aggregation/bounds_enabled; selectin
   await page.goto('/index.html#/new');
 
   await page.locator('input[name="value_shape"][value="numeric"]').check();
-  await expect(page.locator('.tform-field[data-field="unit"]')).toHaveJSProperty('hidden', false);
-  await expect(page.locator('.tform-field[data-field="aggregation"]')).toHaveJSProperty('hidden', false);
-  await expect(page.locator('.tform-field[data-field="bounds_enabled"]')).toHaveJSProperty('hidden', false);
+  await assertFieldVisible(page, 'unit', FIELD_CONTROLS.unit);
+  await assertFieldVisible(page, 'aggregation', FIELD_CONTROLS.aggregation);
+  await assertFieldVisible(page, 'bounds_enabled', FIELD_CONTROLS.bounds_enabled);
 
   await page.locator('input[name="value_shape"][value="boolean"]').check();
-  await expect(page.locator('.tform-field[data-field="unit"]')).toHaveJSProperty('hidden', true);
-  await expect(page.locator('.tform-field[data-field="aggregation"]')).toHaveJSProperty('hidden', true);
-  await expect(page.locator('.tform-field[data-field="bounds_enabled"]')).toHaveJSProperty('hidden', true);
+  await assertFieldHidden(page, 'unit', FIELD_CONTROLS.unit);
+  await assertFieldHidden(page, 'aggregation', FIELD_CONTROLS.aggregation);
+  await assertFieldHidden(page, 'bounds_enabled', FIELD_CONTROLS.bounds_enabled);
 
   expect(unexpected).toEqual([]);
 });
@@ -235,7 +317,7 @@ test('F2 — selecting numeric reveals unit/aggregation/bounds_enabled; selectin
 // F3 — bounds progressive disclosure
 // ===========================================================================
 
-test('F3 — ticking bounds_enabled reveals bounds_mode; choosing manual reveals both bound inputs; choosing auto re-hides them', async ({
+test('F3 — ticking bounds_enabled actually reveals bounds_mode; choosing manual actually reveals both bound inputs (enabled); choosing auto actually re-hides them (disabled)', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -243,20 +325,127 @@ test('F3 — ticking bounds_enabled reveals bounds_mode; choosing manual reveals
   await page.goto('/index.html#/new');
   await page.locator('input[name="value_shape"][value="numeric"]').check();
 
-  await expect(page.locator('.tform-field[data-field="bounds_mode"]')).toHaveJSProperty('hidden', true);
+  await assertFieldHidden(page, 'bounds_mode', FIELD_CONTROLS.bounds_mode);
 
   await page.locator('input[name="bounds_enabled"]').check();
-  await expect(page.locator('.tform-field[data-field="bounds_mode"]')).toHaveJSProperty('hidden', false);
-  await expect(page.locator('.tform-field[data-field="bound_lower"]')).toHaveJSProperty('hidden', true);
-  await expect(page.locator('.tform-field[data-field="bound_upper"]')).toHaveJSProperty('hidden', true);
+  await assertFieldVisible(page, 'bounds_mode', FIELD_CONTROLS.bounds_mode);
+  await assertFieldHidden(page, 'bound_lower', FIELD_CONTROLS.bound_lower);
+  await assertFieldHidden(page, 'bound_upper', FIELD_CONTROLS.bound_upper);
 
   await page.locator('select[name="bounds_mode"]').selectOption('manual');
-  await expect(page.locator('.tform-field[data-field="bound_lower"]')).toHaveJSProperty('hidden', false);
-  await expect(page.locator('.tform-field[data-field="bound_upper"]')).toHaveJSProperty('hidden', false);
+  await assertFieldVisible(page, 'bound_lower', FIELD_CONTROLS.bound_lower);
+  await assertFieldVisible(page, 'bound_upper', FIELD_CONTROLS.bound_upper);
 
   await page.locator('select[name="bounds_mode"]').selectOption('auto');
-  await expect(page.locator('.tform-field[data-field="bound_lower"]')).toHaveJSProperty('hidden', true);
-  await expect(page.locator('.tform-field[data-field="bound_upper"]')).toHaveJSProperty('hidden', true);
+  await assertFieldHidden(page, 'bound_lower', FIELD_CONTROLS.bound_lower);
+  await assertFieldHidden(page, 'bound_upper', FIELD_CONTROLS.bound_upper);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-2.4.md DEFECT 3 — value_shape labels read the raw model words
+// ===========================================================================
+
+test('DEFECT3 — the value_shape radio labels read exactly "Boolean" and "Numeric" (CONTRACT-2.4.md §5 — a deliberate, field-specific override of the "never render the raw enum" rule; direction/aggregation keep their plain-English labels)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const booleanRadio = page.locator('input[name="value_shape"][value="boolean"]');
+  const numericRadio = page.locator('input[name="value_shape"][value="numeric"]');
+  const booleanId = await booleanRadio.getAttribute('id');
+  const numericId = await numericRadio.getAttribute('id');
+  expect(booleanId).toBeTruthy();
+  expect(numericId).toBeTruthy();
+
+  await expect(page.locator(`label[for="${booleanId}"]`)).toHaveText('Boolean');
+  await expect(page.locator(`label[for="${numericId}"]`)).toHaveText('Numeric');
+
+  // direction keeps its plain-English labels (unaffected by DEFECT 3).
+  await expect(page.locator('.tform-field[data-field="direction"]')).toContainText('More is better');
+  await expect(page.locator('.tform-field[data-field="direction"]')).toContainText('Less is better');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-2.4.md DEFECT 4 — target_type options depend on value_shape
+// ===========================================================================
+
+test('DEFECT4a — selecting Numeric shows "Average per week" and hides "Times per week" in the target select; selecting Boolean shows the reverse', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const targetSelect = page.locator('select[name="target_type"]');
+
+  // Default mode is boolean: "Times per week" is offered, "Average per
+  // week" (meaningless for a boolean) must not exist as an option at all.
+  await expect(targetSelect.locator('option', { hasText: 'Times per week' })).toHaveCount(1);
+  await expect(targetSelect.locator('option', { hasText: 'Average per week' })).toHaveCount(0);
+
+  await page.locator('input[name="value_shape"][value="numeric"]').check();
+  // "Times per week" is meaningless for a number like calories — it must
+  // not be offered; "Average per week" replaces it.
+  await expect(targetSelect.locator('option', { hasText: 'Average per week' })).toHaveCount(1);
+  await expect(targetSelect.locator('option', { hasText: 'Times per week' })).toHaveCount(0);
+
+  await page.locator('input[name="value_shape"][value="boolean"]').check();
+  await expect(targetSelect.locator('option', { hasText: 'Times per week' })).toHaveCount(1);
+  await expect(targetSelect.locator('option', { hasText: 'Average per week' })).toHaveCount(0);
+
+  expect(unexpected).toEqual([]);
+});
+
+test('DEFECT4b — switching Boolean -> Numeric while "Times per week" is selected resets target_type to "No target" and hides+disables target_value (illegal combination must never reach the database check constraint)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  await page.locator('select[name="target_type"]').selectOption({ label: 'Times per week' });
+  await assertFieldVisible(page, 'target_value', FIELD_CONTROLS.target_value);
+  await page.locator('input[name="target_value"]').fill('3');
+
+  await page.locator('input[name="value_shape"][value="numeric"]').check();
+
+  await expect(page.locator('select[name="target_type"]')).toHaveValue('none');
+  await assertFieldHidden(page, 'target_value', FIELD_CONTROLS.target_value);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-2.4.md DEFECT 6 — the selected colour swatch is visibly selected
+// ===========================================================================
+
+test('DEFECT6 — selecting a colour swatch marks its radio checked (and the previously-selected swatch is no longer checked)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const defaultSwatch = page.locator('input[name="color"][value="#34c759"]');
+  await expect(defaultSwatch).toBeChecked();
+
+  const targetSwatch = page.locator('input[name="color"][value="#3478f6"]');
+  const targetId = await targetSwatch.getAttribute('id');
+  expect(targetId).toBeTruthy();
+  // §8: the radio itself stays "focusable-but-visually-collapsed" — its
+  // <label> (the visible circle) is the real tap target, same as every
+  // other radio group in this form (see the for/id label association
+  // required by §3.8). Click the label, not the (possibly zero-size) input.
+  await page.locator(`label[for="${targetId}"]`).click();
+
+  await expect(targetSwatch).toBeChecked();
+  await expect(defaultSwatch).not.toBeChecked();
 
   expect(unexpected).toEqual([]);
 });

@@ -30,6 +30,16 @@
 //      to send it either. See "buildPayload never sends `archived`" below
 //      for the regression case that guards this.
 
+// CONTRACT-2.4.md ("Form fixes, per-shape targets, bounds verdict") amends
+// this contract's §3.3/§3.5/§3.6: target_type options are now per-shape
+// (boolean: none/weekly_count; numeric: none/weekly_average, replacing
+// weekly_count), applyShapeChange must reset an illegal target_type/
+// target_value pair when the shape changes, and a new named export
+// targetOptionsFor(valueShape) exposes the per-shape option list. See
+// CONTRACT-2.4.md §6 and §9.2 for the exact fixtures added/changed below.
+// Cases marked "2.4" are new or updated for that revision; everything else
+// is unchanged Step 2.2 coverage.
+
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -38,6 +48,7 @@ import {
   visibleFields,
   validate,
   buildPayload,
+  targetOptionsFor,
 } from '../../js/views/trackable.js';
 
 // ===========================================================================
@@ -115,20 +126,25 @@ describe('applyShapeChange — forces aggregation in both directions, preserves 
     assert.equal(result.aggregation, 'sum');
   });
 
-  it('preserves fields unrelated to value_shape/aggregation across a switch to numeric', () => {
+  it('preserves fields unrelated to value_shape/aggregation/target_type across a switch to numeric', () => {
+    // 2.4: target_type is no longer "unrelated" to value_shape — CONTRACT-
+    // 2.4.md §6 makes target_type legality shape-dependent (weekly_count is
+    // boolean-only now), so a state carrying an illegal target_type for the
+    // new shape must have it reset. This fixture uses target_type:'none',
+    // which stays legal under both shapes, to isolate the "does switching
+    // shape leave truly unrelated fields alone" question from the reset
+    // behaviour, which gets its own dedicated cases below.
     const state = {
       ...defaultsFor('boolean'),
       name: 'Reading',
       direction: 'break',
-      target_type: 'weekly_count',
-      target_value: '5',
+      target_type: 'none',
       color: '#bf5af2',
     };
     const result = applyShapeChange(state, 'numeric');
     assert.equal(result.name, 'Reading');
     assert.equal(result.direction, 'break');
-    assert.equal(result.target_type, 'weekly_count');
-    assert.equal(result.target_value, '5');
+    assert.equal(result.target_type, 'none');
     assert.equal(result.color, '#bf5af2');
   });
 
@@ -155,6 +171,117 @@ describe('applyShapeChange — forces aggregation in both directions, preserves 
     const toBoolean = applyShapeChange({ ...defaultsFor('numeric'), aggregation: 'average' }, 'boolean');
     assert.equal(toBoolean.aggregation, 'count');
   });
+});
+
+// ===========================================================================
+// applyShapeChange — target_type reset on illegal shape switch
+// (CONTRACT-2.4.md §6, "DEFECT 4 — target type must depend on value_shape")
+// ===========================================================================
+//
+// "Times per week" is meaningless for a numeric trackable like Calories, and
+// "Average per week" is meaningless for a boolean. target_type is now legal
+// per-shape (boolean: none/weekly_count; numeric: none/weekly_average), so
+// applyShapeChange must reset target_type to 'none' AND clear target_value
+// whenever the current target_type is not legal for the new shape — leaving
+// an illegal (shape, target_type) combination in formState would make the
+// database check constraint reject the save. Fixtures below are the exact
+// worked examples from CONTRACT-2.4.md §6, asserted individually.
+
+describe('applyShapeChange — resets target_type/target_value when illegal for the new shape (CONTRACT-2.4.md §6, assert exactly)', () => {
+  it("boolean+weekly_count -> numeric: target_type becomes 'none', target_value becomes '', aggregation becomes 'sum'", () => {
+    const state = {
+      ...defaultsFor('boolean'),
+      value_shape: 'boolean',
+      target_type: 'weekly_count',
+      target_value: '3',
+    };
+    const result = applyShapeChange(state, 'numeric');
+    assert.equal(result.target_type, 'none');
+    assert.equal(result.target_value, '');
+    assert.equal(result.aggregation, 'sum');
+  });
+
+  it("numeric+weekly_average -> boolean: target_type becomes 'none', target_value becomes '', aggregation becomes 'count'", () => {
+    const state = {
+      ...defaultsFor('numeric'),
+      value_shape: 'numeric',
+      target_type: 'weekly_average',
+      target_value: '2000',
+    };
+    const result = applyShapeChange(state, 'boolean');
+    assert.equal(result.target_type, 'none');
+    assert.equal(result.target_value, '');
+    assert.equal(result.aggregation, 'count');
+  });
+
+  it("boolean+target_type:'none' -> numeric: target_type stays 'none' (already legal, must not be disturbed)", () => {
+    const state = {
+      ...defaultsFor('boolean'),
+      value_shape: 'boolean',
+      target_type: 'none',
+    };
+    const result = applyShapeChange(state, 'numeric');
+    assert.equal(result.target_type, 'none');
+  });
+
+  it("boolean+weekly_count -> boolean (no-op shape switch): target_type is NOT reset, because weekly_count stays legal for boolean", () => {
+    // Regression guard against an over-eager reset that clears target_type
+    // on every call regardless of whether the shape actually changed.
+    const state = {
+      ...defaultsFor('boolean'),
+      value_shape: 'boolean',
+      target_type: 'weekly_count',
+      target_value: '4',
+    };
+    const result = applyShapeChange(state, 'boolean');
+    assert.equal(result.target_type, 'weekly_count');
+    assert.equal(result.target_value, '4');
+  });
+
+  it("numeric+weekly_average -> numeric (no-op shape switch): target_type is NOT reset, because weekly_average stays legal for numeric", () => {
+    const state = {
+      ...defaultsFor('numeric'),
+      value_shape: 'numeric',
+      target_type: 'weekly_average',
+      target_value: '1500',
+    };
+    const result = applyShapeChange(state, 'numeric');
+    assert.equal(result.target_type, 'weekly_average');
+    assert.equal(result.target_value, '1500');
+  });
+});
+
+// ===========================================================================
+// targetOptionsFor (CONTRACT-2.4.md §6 table, NEW named export)
+// ===========================================================================
+
+describe('targetOptionsFor — per-shape target option list (CONTRACT-2.4.md §6, assert exactly)', () => {
+  it("targetOptionsFor('boolean') -> [none/'No target', weekly_count/'Times per week'], in that order", () => {
+    assert.deepEqual(targetOptionsFor('boolean'), [
+      { value: 'none', label: 'No target' },
+      { value: 'weekly_count', label: 'Times per week' },
+    ]);
+  });
+
+  it("targetOptionsFor('numeric') -> [none/'No target', weekly_average/'Average per week'], in that order", () => {
+    assert.deepEqual(targetOptionsFor('numeric'), [
+      { value: 'none', label: 'No target' },
+      { value: 'weekly_average', label: 'Average per week' },
+    ]);
+  });
+
+  it('boolean options never include weekly_average, numeric options never include weekly_count', () => {
+    const boolValues = targetOptionsFor('boolean').map((o) => o.value);
+    const numValues = targetOptionsFor('numeric').map((o) => o.value);
+    assert.equal(boolValues.includes('weekly_average'), false);
+    assert.equal(numValues.includes('weekly_count'), false);
+  });
+
+  // NOTE: CONTRACT-2.4.md §6 does not specify targetOptionsFor's behaviour
+  // for an unrecognized value_shape (unlike defaultsFor/applyShapeChange,
+  // which explicitly document "anything not 'numeric' -> boolean" as their
+  // fallback convention elsewhere in this file). Deliberately not asserting
+  // a guessed fallback here rather than pin down unspecified behaviour.
 });
 
 // ===========================================================================
@@ -279,6 +406,72 @@ describe('visibleFields — numeric with target_type "weekly_count" combined wit
 });
 
 // ===========================================================================
+// visibleFields — target_value for weekly_average (CONTRACT-2.4.md §6:
+// "visibleFields shows target_value whenever target_type !== 'none' (it
+// applies to both weekly_count and weekly_average)")
+// ===========================================================================
+
+describe('visibleFields — target_value visibility now covers weekly_average too, not just weekly_count (CONTRACT-2.4.md §6, §9.2)', () => {
+  it('numeric, target_type "weekly_average": target_value is shown, in its §3.8 DOM position (bounds_enabled is also present, per the numeric-shape rule that is independent of target_type)', () => {
+    const state = { ...defaultsFor('numeric'), target_type: 'weekly_average', target_value: '2000' };
+    assert.deepEqual(visibleFields(state), [
+      'name',
+      'value_shape',
+      'direction',
+      'unit',
+      'aggregation',
+      'target_type',
+      'target_value',
+      'bounds_enabled',
+      'color',
+    ]);
+  });
+
+  it('numeric, target_type "none": target_value is excluded (bounds_enabled still present — numeric shape alone governs it)', () => {
+    const state = { ...defaultsFor('numeric'), target_type: 'none' };
+    assert.deepEqual(visibleFields(state), [
+      'name',
+      'value_shape',
+      'direction',
+      'unit',
+      'aggregation',
+      'target_type',
+      'bounds_enabled',
+      'color',
+    ]);
+  });
+
+  it('boolean, target_type "weekly_count": target_value is shown (regression guard — unchanged from Step 2.2 coverage above)', () => {
+    const state = { ...defaultsFor('boolean'), target_type: 'weekly_count', target_value: '3' };
+    assert.ok(visibleFields(state).includes('target_value'));
+  });
+
+  it('numeric with target_type "weekly_average" combined with full manual bounds: target_value appears between target_type and bounds_enabled, per §3.8 DOM order', () => {
+    const state = {
+      ...defaultsFor('numeric'),
+      target_type: 'weekly_average',
+      target_value: '10',
+      bounds_enabled: true,
+      bounds_mode: 'manual',
+    };
+    assert.deepEqual(visibleFields(state), [
+      'name',
+      'value_shape',
+      'direction',
+      'unit',
+      'aggregation',
+      'target_type',
+      'target_value',
+      'bounds_enabled',
+      'bounds_mode',
+      'bound_lower',
+      'bound_upper',
+      'color',
+    ]);
+  });
+});
+
+// ===========================================================================
 // validate (CONTRACT-2.2.md §3.5)
 // ===========================================================================
 
@@ -354,6 +547,33 @@ describe('validate — "Target must be a number greater than 0"', () => {
 
   it('target_type "none" with a garbage target_value does NOT trigger the target error (field is hidden, not validated)', () => {
     const state = validBooleanState({ target_type: 'none', target_value: 'not a number' });
+    assert.deepEqual(validate(state), { ok: true });
+  });
+});
+
+describe('validate — "Target must be a number greater than 0" now also applies to weekly_average (CONTRACT-2.4.md §6: "validate applies the same rule to both target types... message unchanged")', () => {
+  it('numeric, target_type "weekly_average", target_value "0" -> the exact existing message', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: '0' });
+    assert.deepEqual(validate(state), { ok: false, message: 'Target must be a number greater than 0' });
+  });
+
+  it('numeric, target_type "weekly_average", target_value "-1" (negative) -> the exact existing message', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: '-1' });
+    assert.deepEqual(validate(state), { ok: false, message: 'Target must be a number greater than 0' });
+  });
+
+  it('numeric, target_type "weekly_average", target_value "" (empty) -> the exact existing message', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: '' });
+    assert.deepEqual(validate(state), { ok: false, message: 'Target must be a number greater than 0' });
+  });
+
+  it('numeric, target_type "weekly_average", target_value "abc" (not a number) -> the exact existing message', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: 'abc' });
+    assert.deepEqual(validate(state), { ok: false, message: 'Target must be a number greater than 0' });
+  });
+
+  it('numeric, target_type "weekly_average", target_value "2000" (valid, > 0) -> ok', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: '2000' });
     assert.deepEqual(validate(state), { ok: true });
   });
 });
@@ -526,6 +746,17 @@ describe('buildPayload — boolean, target_type "none": exactly the minimal key 
     for (const key of ['unit', 'target_value', 'bounds_enabled', 'bounds_mode', 'bound_lower', 'bound_upper']) {
       assert.equal(key in payload, false, `expected "${key}" to be absent`);
     }
+  });
+});
+
+describe('buildPayload — numeric, target_type "weekly_average": target_value included as a number (CONTRACT-2.4.md §6: "buildPayload sends target_value whenever target_type !== \'none\'")', () => {
+  it('includes target_value as a finite number, and unit is still present (numeric)', () => {
+    const state = validNumericState({ target_type: 'weekly_average', target_value: '2000' });
+    const payload = buildPayload(state);
+    assert.equal(payload.target_type, 'weekly_average');
+    assert.equal(payload.target_value, 2000);
+    assert.equal(typeof payload.target_value, 'number');
+    assert.equal(payload.unit, 'kg');
   });
 });
 

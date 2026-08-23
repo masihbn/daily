@@ -137,6 +137,17 @@ export function createHomeView({ store, today } = {}) {
     valueSpan.textContent = model.shape === 'boolean' ? model.statusWord : model.valueText;
     li.appendChild(valueSpan);
 
+    // Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for a bounded
+    // numeric's good/bad verdict (home-model.js verdict()/statusWord()).
+    // Omitted entirely when empty — an unbounded (or auto-bounded, see
+    // verdict()'s comment) numeric shows no status span at all.
+    if (model.shape === 'numeric' && model.statusWord) {
+      const statusSpan = document.createElement('span');
+      statusSpan.className = 'trow-status';
+      statusSpan.textContent = model.statusWord;
+      li.appendChild(statusSpan);
+    }
+
     if (model.shape === 'numeric' && model.directionLabel) {
       const dirSpan = document.createElement('span');
       dirSpan.className = 'trow-direction';

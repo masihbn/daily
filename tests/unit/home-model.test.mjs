@@ -457,6 +457,142 @@ describe('verdict — additional documented rules', () => {
 });
 
 // ===========================================================================
+// verdict — DEFECT 5: bounded-numeric verdict (CONTRACT-2.4.md §7) — NEW in
+// Step 2.4, amends CONTRACT-2.1b.md §3.1's "numeric is always neutral" rule.
+// ===========================================================================
+//
+// Before 2.4, verdict() returned 'neutral' for every numeric trackable
+// unconditionally — a value outside its configured bounds showed no colour
+// change at all, which is the defect this section guards against. Now: a
+// numeric value is 'bad' when it falls outside [bound_lower, bound_upper]
+// and 'good' when inside, but ONLY when bounds_enabled === true AND
+// bounds_mode === 'manual' AND both bounds AND the entry value are finite
+// numbers. 'auto' bounds are explicitly NOT handled yet (deferred to Step
+// 3.3, since deriving them needs history the home screen doesn't load) and
+// must still read 'neutral', not throw and not guess a threshold.
+//
+// B is the exact fixture from CONTRACT-2.4.md §7: bounds 70-80 manual.
+const B = { value_shape: 'numeric', bounds_enabled: true, bounds_mode: 'manual', bound_lower: 70, bound_upper: 80 };
+
+describe('verdict — DEFECT 5 bounded-numeric fixtures (CONTRACT-2.4.md §7, assert exactly)', () => {
+  it('value 75 (inside range) -> good', () => {
+    assert.equal(verdict(B, { value: 75 }), 'good');
+  });
+
+  it('value 70 (exactly the lower bound) -> good — the lower edge is INCLUSIVE', () => {
+    assert.equal(verdict(B, { value: 70 }), 'good');
+  });
+
+  it('value 80 (exactly the upper bound) -> good — the upper edge is INCLUSIVE', () => {
+    assert.equal(verdict(B, { value: 80 }), 'good');
+  });
+
+  it('value 69.9 (just under the lower bound) -> bad', () => {
+    assert.equal(verdict(B, { value: 69.9 }), 'bad');
+  });
+
+  it('value 81 (just over the upper bound) -> bad', () => {
+    assert.equal(verdict(B, { value: 81 }), 'bad');
+  });
+
+  it('no entry (null) -> neutral', () => {
+    assert.equal(verdict(B, null), 'neutral');
+  });
+
+  it("bounds_mode 'auto' (not 'manual') -> neutral, even though the value (99) is out of range — 'auto' bounds are Step 3.3's job, not invented here", () => {
+    assert.equal(verdict({ ...B, bounds_mode: 'auto' }, { value: 99 }), 'neutral');
+  });
+
+  it('bounds_enabled false -> neutral, even though bounds_mode is manual and the value is out of range', () => {
+    assert.equal(verdict({ ...B, bounds_enabled: false }, { value: 99 }), 'neutral');
+  });
+
+  it('bound_lower is null (not a finite number) -> neutral', () => {
+    assert.equal(verdict({ ...B, bound_lower: null }, { value: 99 }), 'neutral');
+  });
+
+  it('value_shape "boolean" -> the boolean verdict path is unchanged (direction:build default via missing key, logged -> good)', () => {
+    assert.equal(verdict({ ...B, value_shape: 'boolean' }, { value: 1 }), 'good');
+  });
+});
+
+describe('verdict — additional bounded-numeric neutral fallbacks not spelled out as a worked example but implied by §7\'s condition list (both bounds AND the entry value must be finite)', () => {
+  it('bound_upper is null (not a finite number) -> neutral', () => {
+    assert.equal(verdict({ ...B, bound_upper: null }, { value: 99 }), 'neutral');
+  });
+
+  it('bound_lower is a non-finite number (NaN) -> neutral', () => {
+    assert.equal(verdict({ ...B, bound_lower: NaN }, { value: 75 }), 'neutral');
+  });
+
+  it('bound_upper is a non-finite number (Infinity) -> neutral', () => {
+    assert.equal(verdict({ ...B, bound_upper: Infinity }, { value: 75 }), 'neutral');
+  });
+
+  it('the entry value itself is non-finite (NaN) -> neutral, not "bad"', () => {
+    assert.equal(verdict(B, { value: NaN }), 'neutral');
+  });
+
+  it('the entry object has no usable value (undefined) -> neutral', () => {
+    assert.equal(verdict(B, { value: undefined }), 'neutral');
+  });
+
+  it('bounds_enabled is truthy but not strict boolean true (e.g. 1) -> neutral (mirrors the strict-equality convention used elsewhere in this model, e.g. visibleTrackables\' archived===true check)', () => {
+    assert.equal(verdict({ ...B, bounds_enabled: 1 }, { value: 99 }), 'neutral');
+  });
+});
+
+describe('statusSymbol — DEFECT 5: follows the new bounded-numeric verdict (CONTRACT-2.4.md §7: "statusSymbol continues to derive from verdict, so a bad numeric now shows the cross and a good one the check")', () => {
+  it('an out-of-range bounded numeric (verdict "bad") -> statusSymbol "cross"', () => {
+    assert.equal(statusSymbol(B, { value: 81 }), 'cross');
+  });
+
+  it('an in-range bounded numeric (verdict "good") -> statusSymbol "check"', () => {
+    assert.equal(statusSymbol(B, { value: 75 }), 'check');
+  });
+
+  it('a numeric with bounds not applicable (verdict "neutral") -> statusSymbol "empty"', () => {
+    assert.equal(statusSymbol({ ...B, bounds_mode: 'auto' }, { value: 99 }), 'empty');
+  });
+});
+
+// ===========================================================================
+// statusWord — DEFECT 5: numeric branch (CONTRACT-2.4.md §7) — NEW in Step
+// 2.4. WCAG 1.4.1 requires this: colour alone (the bad/good border) must
+// never be the only cue that a bounded numeric is out of range.
+// ===========================================================================
+
+describe('statusWord — bounded-numeric fixtures (CONTRACT-2.4.md §7, assert exactly)', () => {
+  it('value 75 (in range) -> "In range"', () => {
+    assert.equal(statusWord(B, { value: 75 }), 'In range');
+  });
+
+  it('value 70 (inclusive lower edge, in range) -> "In range"', () => {
+    assert.equal(statusWord(B, { value: 70 }), 'In range');
+  });
+
+  it('value 80 (inclusive upper edge, in range) -> "In range"', () => {
+    assert.equal(statusWord(B, { value: 80 }), 'In range');
+  });
+
+  it('value 69.9 (out of range) -> "Out of range"', () => {
+    assert.equal(statusWord(B, { value: 69.9 }), 'Out of range');
+  });
+
+  it('value 81 (out of range) -> "Out of range"', () => {
+    assert.equal(statusWord(B, { value: 81 }), 'Out of range');
+  });
+
+  it('no entry (null) -> empty string', () => {
+    assert.equal(statusWord(B, null), '');
+  });
+
+  it('a numeric outside the bounded condition (bounds_mode "auto") -> empty string, same as every other unbounded numeric case', () => {
+    assert.equal(statusWord({ ...B, bounds_mode: 'auto' }, { value: 99 }), '');
+  });
+});
+
+// ===========================================================================
 // statusWord (CONTRACT-2.1b.md §3.2) — NEW in Step 2.1b
 // ===========================================================================
 

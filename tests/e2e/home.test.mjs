@@ -1017,6 +1017,93 @@ test('V8 — the four boolean statusWord states (Done/Not yet/Clean/Logged) are 
 });
 
 // ===========================================================================
+// CONTRACT-2.4.md §9.4 — DEFECT 5: a bounded numeric outside its configured
+// range must look wrong (not read as neutral, which was the reported bug).
+// ===========================================================================
+//
+// T_BOUNDED is a manual-bounds numeric trackable (70-80), used by all three
+// cases below — only the entry value and bounds_mode differ per test.
+const T_BOUNDED = {
+  id: 20,
+  name: 'Weight',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'last',
+  direction: 'build',
+  unit: 'kg',
+  color: null,
+  sort_order: 20,
+  archived: false,
+  bounds_enabled: true,
+  bounds_mode: 'manual',
+  bound_lower: 70,
+  bound_upper: 80,
+};
+
+test('BOUNDS1 — a manual-bounds numeric with an in-range entry (75, inside 70-80) renders data-verdict="good" and .trow-status "In range"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BOUNDED]);
+  await routeEntries(page, {
+    getFixture: [{ id: 900, trackable_id: 20, entry_date: TODAY, value: 75, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="20"]');
+  await expect(row).toHaveAttribute('data-verdict', 'good');
+  await expect(row.locator('.trow-status')).toHaveText('In range');
+
+  expect(unexpected).toEqual([]);
+});
+
+test('BOUNDS2 — a manual-bounds numeric with an out-of-range entry (85, outside 70-80) renders data-verdict="bad", .trow-status "Out of range", and symbol "cross"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BOUNDED]);
+  await routeEntries(page, {
+    getFixture: [{ id: 901, trackable_id: 20, entry_date: TODAY, value: 85, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="20"]');
+  await expect(row).toHaveAttribute('data-verdict', 'bad');
+  await expect(row.locator('.trow-status')).toHaveText('Out of range');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'cross');
+
+  expect(unexpected).toEqual([]);
+});
+
+test('BOUNDS3 — the same trackable with bounds_mode "auto" (not yet wired to a real derivation — Step 3.3) renders data-verdict="neutral" and no .trow-status element at all', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const autoTrackable = { ...T_BOUNDED, bounds_mode: 'auto' };
+  await routeTrackables(page, [autoTrackable]);
+  await routeEntries(page, {
+    // Same out-of-range value as BOUNDS2 (85) — proves the neutral result
+    // here is because bounds_mode isn't 'manual', not because the value
+    // happens to be in range.
+    getFixture: [{ id: 902, trackable_id: 20, entry_date: TODAY, value: 85, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="20"]');
+  await expect(row).toHaveAttribute('data-verdict', 'neutral');
+  // Element must be OMITTED entirely when statusWord is empty, per
+  // CONTRACT-2.4.md §7 ("Omit the element entirely when empty") — not just
+  // present-but-empty-text, which is why this checks toHaveCount(0) rather
+  // than toHaveText('').
+  await expect(row.locator('.trow-status')).toHaveCount(0);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
 // NAV-RACE — a render suspended mid-mount must not clobber a later render
 // ===========================================================================
 //

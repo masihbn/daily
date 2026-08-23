@@ -133,23 +133,62 @@ export function verdict(trackable, entry) {
     return logged ? 'good' : 'neutral';
   }
 
-  // numeric, or any other/unknown value_shape: no honest way to call a
-  // number good or bad without a target — that arrives with target lines
-  // in Phase 3 (Step 3.2). Do not invent a threshold here.
+  if (trackable.value_shape === 'numeric') {
+    // Step 2.4 defect 5: a numeric with manually-set bounds now reads as
+    // good/bad against them — the user set bounds and saw no colour
+    // change at all, which is the bug being fixed here. Both edges are
+    // inclusive (a value exactly on a bound counts as in range).
+    //
+    // Only bounds_mode === 'manual' is handled. 'auto' bounds come from
+    // aggregate.deriveBounds() over the rolling window, which needs
+    // history the home screen does not load — that is wired up in
+    // Step 3.3. Until then, an 'auto'-bounded numeric reading as
+    // 'neutral' here is pending, not broken.
+    if (
+      trackable.bounds_enabled === true &&
+      trackable.bounds_mode === 'manual' &&
+      isFiniteNumber(trackable.bound_lower) &&
+      isFiniteNumber(trackable.bound_upper) &&
+      entry &&
+      typeof entry === 'object' &&
+      isFiniteNumber(entry.value)
+    ) {
+      if (entry.value < trackable.bound_lower || entry.value > trackable.bound_upper) {
+        return 'bad';
+      }
+      return 'good';
+    }
+    return 'neutral';
+  }
+
+  // any other/unknown value_shape: no honest way to call it good or bad.
   return 'neutral';
 }
 
 export function statusWord(trackable, entry) {
   if (!trackable || typeof trackable !== 'object') return '';
-  if (trackable.value_shape !== 'boolean') return '';
 
-  const logged = hasEntryValue(trackable, entry);
-  const dir = directionOrBuild(trackable);
+  if (trackable.value_shape === 'boolean') {
+    const logged = hasEntryValue(trackable, entry);
+    const dir = directionOrBuild(trackable);
 
-  if (dir === 'break') {
-    return logged ? 'Logged' : 'Clean';
+    if (dir === 'break') {
+      return logged ? 'Logged' : 'Clean';
+    }
+    return logged ? 'Done' : 'Not yet';
   }
-  return logged ? 'Done' : 'Not yet';
+
+  if (trackable.value_shape === 'numeric') {
+    // Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for the new
+    // bounded-numeric verdict above. Mirrors verdict() exactly — see its
+    // comment for why only bounds_mode 'manual' is handled.
+    const v = verdict(trackable, entry);
+    if (v === 'bad') return 'Out of range';
+    if (v === 'good') return 'In range';
+    return '';
+  }
+
+  return '';
 }
 
 export function statusSymbol(trackable, entry) {

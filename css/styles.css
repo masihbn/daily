@@ -293,10 +293,13 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-/* Numeric rows have no verdict (always 'neutral' — no honest good/bad
-   without a target, see home-model.js verdict()), so a logged numeric
-   value keeps the existing accent tint. Boolean rows are coloured by
-   verdict instead, since 'logged' no longer implies 'good' there. */
+/* A logged numeric value keeps the existing accent tint on .trow-value
+   itself — Step 2.4 defect 5's good/bad verdict for a bounded numeric is
+   carried by the row's border/background and by .trow-status below, not
+   by recolouring this span (most numerics still have no target/bounds
+   and stay 'neutral', see home-model.js verdict()). Boolean rows are
+   coloured by verdict directly instead, since 'logged' no longer implies
+   'good' there. */
 .trow[data-shape="numeric"][data-logged="true"] .trow-value {
   color: var(--accent);
 }
@@ -306,6 +309,28 @@ button {
 }
 
 .trow[data-shape="boolean"][data-verdict="bad"] .trow-value {
+  color: var(--bad);
+}
+
+/* Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for a bounded
+   numeric's good/bad verdict. Same order as .trow-value so the two sit
+   together — ties in flex `order` keep document order, and this span is
+   always appended right after .trow-value in the DOM (home.js). The
+   coloured border/background from `.trow[data-verdict]` above already
+   applies to numeric rows now that verdict() can return good/bad for
+   them; this adds the required non-colour word on top of it. */
+.trow-status {
+  order: 2;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trow[data-verdict="good"] .trow-status {
+  color: var(--good);
+}
+
+.trow[data-verdict="bad"] .trow-status {
   color: var(--bad);
 }
 
@@ -417,6 +442,20 @@ button {
   min-width: 0;
 }
 
+/* DEFECT 1 fix (CONTRACT-2.4.md §3): an AUTHOR stylesheet rule (the
+   `.tform-field { display: flex }` above) always beats the browser's
+   built-in `[hidden] { display: none }`, regardless of specificity — so
+   without this rule, setting `wrap.hidden = true` sets the attribute but
+   the field stays visibly on screen (and a "hidden" numeric input can
+   still raise the iOS keyboard on tap). This rule exists ONLY to win back
+   that fight. Removing it silently un-hides every progressively-disclosed
+   field in the trackable form. See trackable.js buildField() for the
+   second half of this fix (disabling the controls inside a hidden
+   wrapper, so input is blocked even if this rule is ever deleted). */
+.tform-field[hidden] {
+  display: none;
+}
+
 .tform-field > label,
 .tform-label {
   font-size: 13px;
@@ -444,13 +483,33 @@ button {
   padding-right: 8px;
 }
 
+/* DEFECT 2 fix (CONTRACT-2.4.md §4): without align-items, this defaults
+   to stretch, so the fixed-height radio lands at the top of the 44px row
+   while the label's own align-items: center centres its text — the two
+   read at different heights. */
 .tform-radio-group {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 12px 20px;
 }
 
-.tform-radio-group input[type="radio"],
+/* Each radio + its label is one flex item (see trackable.js radioField())
+   so a wrap can never split a radio from its own label, and the pair is
+   centred against itself directly rather than relying on the group's
+   cross-axis alignment. */
+.tform-radio-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tform-radio-group input[type="radio"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
 .tform-field input[type="checkbox"] {
   width: 22px;
   height: 22px;
@@ -500,18 +559,45 @@ button {
 
 .tform-color-swatch {
   display: inline-flex;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 50%;
   border: 2px solid transparent;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* DEFECT 6 fix (CONTRACT-2.4.md §8): the selection WAS tracked correctly
+   already — the problem was purely that a 2px border flush on the
+   circle's own edge is too weak an affordance to notice on a phone. The
+   selected swatch must now differ from the unselected ones by more than
+   colour: a ring clearly separated from the swatch (outline +
+   outline-offset, not a border sitting on the edge) plus a check glyph
+   centred inside it, drawn via CSS `content` — matching how
+   .trow-symbol draws its check — NOT emoji. */
 .tform-color-group input[type="radio"]:checked + .tform-color-swatch {
-  border-color: var(--fg);
+  outline: 3px solid var(--fg);
+  outline-offset: 3px;
+}
+
+.tform-color-group input[type="radio"]:checked + .tform-color-swatch::after {
+  content: '\2713'; /* U+2713 CHECK MARK */
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+/* The radio itself stays focusable-but-visually-collapsed (see the
+   comment on `.tform-color-group input[type="radio"]` above); the
+   keyboard focus ring is drawn on the swatch it labels instead. */
+.tform-color-group input[type="radio"]:focus-visible + .tform-color-swatch {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .visually-hidden {

@@ -1775,6 +1775,65 @@ of isolation.
 
 ---
 
+## Step 2.4 — Phase 2 gate feedback: form fixes, per-shape targets, bounds verdict
+
+**Status:** DONE (2026-08-23) — code complete, **not yet device-verified.**
+
+Six defects the user found on their phone at the Phase 2 gate. Suite:
+**1108 green** (994 unit, 43 integration, 71 e2e), up from 1057.
+Migration `0005` applied **before** the suite run. `sw.js` `CACHE`
+`daily-v15` → `daily-v16`.
+
+1. **Hidden fields were still visible and focusable.** Tapping a
+   "hidden" numeric input raised the iOS keyboard. Root cause:
+   `.tform-field { display: flex }` is an **author** rule, and author
+   rules always beat the browser's built-in `[hidden] { display: none }`
+   regardless of specificity — so `wrap.hidden = true` set the attribute
+   and did nothing. Fixed with an explicit `.tform-field[hidden] {
+   display: none }` plus `disabled` on every control inside a hidden
+   wrapper, so a hidden field cannot take focus even if the CSS regresses.
+   **Why the suite missed it: the e2e tests asserted the `hidden`
+   attribute existed, never that the element was actually invisible.**
+   They passed against a visibly broken screen. All three
+   progressive-disclosure tests now assert real computed visibility
+   (`toBeHidden()`/`toBeVisible()`) plus `toBeDisabled()`. Transferable
+   lesson: assert the behaviour, not the mechanism that is supposed to
+   produce it.
+2. **Radio sat above its label.** `.tform-radio-group` is `display: flex`
+   with no `align-items`, so it defaulted to `stretch` and the
+   fixed-height radio pinned to the top of the 44px row. Each radio+label
+   is now one `span.tform-radio-pair` — which also fixes a latent bug
+   where a flex wrap could separate a radio from its own label.
+3. **`value_shape` labels are now `Boolean` / `Numeric`.** Deliberately
+   overrides the "never render the raw enum" rule from Step 2.2 **for
+   this one field**, at the user's explicit request.
+4. **Target type now depends on `value_shape`.** "Times per week" is
+   meaningless for calories. Boolean → `weekly_count` ("Times per week");
+   numeric → new `weekly_average` ("Average per week", migration `0005`).
+   `applyShapeChange` resets an illegal target on switch rather than
+   leaving a combination the check constraint would reject on save.
+5. **A numeric outside its bounds now looks wrong.** `verdict()` was
+   hardcoded neutral for every numeric, so the user set bounds and saw
+   nothing. Manual bounds now drive good/bad, **both edges inclusive**,
+   with `statusWord` giving `In range` / `Out of range` so the meaning
+   survives greyscale (WCAG 1.4.1). **Only `bounds_mode: 'manual'` is
+   handled** — `'auto'` needs `deriveBounds()` over the rolling window,
+   which the home screen does not load; that is Step 3.3, and a comment
+   records that auto reading neutral is pending, not broken.
+6. **The selected colour swatch was imperceptible.** Selection was
+   tracked correctly all along; the affordance was a 2px ring flush on
+   the circle's edge. Now an offset outline plus a check glyph inside
+   the swatch, so it differs by shape and not only colour. Swatches also
+   went 40px → 44px to meet the tap-target rule.
+
+*Deferred to the next step:* the tinted SVG icon set and its picker. The
+user chose custom SVGs over emoji so icons inherit each trackable's
+colour and sit coherently with the good/bad verdict marks. Migration
+`0005` already added the nullable `icon` column, so that step needs no
+further schema change.
+
+---
+
 ## ⛔ PHASE 2 GATE — hard stop
 
 **The most important gate — this is the first time the app is actually
