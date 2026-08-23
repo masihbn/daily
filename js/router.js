@@ -81,5 +81,21 @@ export function parseHash(hash) {
     return fresh({ name: 'detail', params: { id } });
   }
 
+  // Step 2.2: #/t/:id/edit — the literal third segment must be 'edit';
+  // anything else in that position (#/t/5/extra) stays notfound.
+  if (segments.length === 3 && segments[0] === 't' && segments[2] === 'edit') {
+    const rawId = segments[1];
+    if (rawId === '') {
+      return fresh(NOTFOUND);
+    }
+    let id;
+    try {
+      id = decodeURIComponent(rawId);
+    } catch {
+      return fresh(NOTFOUND);
+    }
+    return fresh({ name: 'edit', params: { id } });
+  }
+
   return fresh(NOTFOUND);
 }

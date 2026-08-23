@@ -166,7 +166,11 @@ describe('schema (Step 0.2): column defaults', () => {
       const row = await createTestTrackable({ name });
 
       assert.equal(row.value_shape, 'boolean');
-      assert.equal(row.relog_semantic, 'cumulative');
+      // Default was changed from 'cumulative' to 'state' by migration 0004
+      // (Step 2.1b, 2026-08-22) — the user tried additive re-logging on
+      // device and asked for replace-only instead. This pins the CURRENT
+      // default; it is deliberate, not drift.
+      assert.equal(row.relog_semantic, 'state');
       assert.equal(row.aggregation, 'sum');
       assert.equal(row.direction, 'build');
       assert.equal(row.target_type, 'none');

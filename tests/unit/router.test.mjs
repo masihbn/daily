@@ -80,6 +80,57 @@ describe('parseHash — detail requires an id', () => {
   });
 });
 
+describe('parseHash — edit route (CONTRACT-2.2.md §2, added for Step 2.2)', () => {
+  // segments.length === 3 && segments[0] === 't' && segments[2] === 'edit'
+  // -> { name: 'edit', params: { id } }, id percent-decoded exactly the way
+  // the existing detail route decodes it. Every fixture from CONTRACT-2.2.md
+  // §2 is asserted exactly below.
+
+  it("'#/t/5/edit' -> {name:'edit', params:{id:'5'}}", () => {
+    assert.deepEqual(parseHash('#/t/5/edit'), { name: 'edit', params: { id: '5' } });
+  });
+
+  it("'#/t/5/edit/' -> {name:'edit', params:{id:'5'}} (trailing slash)", () => {
+    assert.deepEqual(parseHash('#/t/5/edit/'), { name: 'edit', params: { id: '5' } });
+  });
+
+  it("'#/t/abc/edit' -> {name:'edit', params:{id:'abc'}}", () => {
+    assert.deepEqual(parseHash('#/t/abc/edit'), { name: 'edit', params: { id: 'abc' } });
+  });
+
+  it("'#/t/5%2F6/edit' -> {name:'edit', params:{id:'5/6'}} (percent-decoded)", () => {
+    assert.deepEqual(parseHash('#/t/5%2F6/edit'), { name: 'edit', params: { id: '5/6' } });
+  });
+
+  it("'#/t/5/extra' -> {name:'notfound', params:{}} — MUST SURVIVE from Step 2.1: only the literal third segment 'edit' matches the new route, 'extra' does not", () => {
+    assert.deepEqual(parseHash('#/t/5/extra'), { name: 'notfound', params: {} });
+  });
+
+  it("'#/t//edit' -> {name:'notfound', params:{}} (empty id)", () => {
+    assert.deepEqual(parseHash('#/t//edit'), { name: 'notfound', params: {} });
+  });
+
+  it("'#/t/5/edit/extra' -> {name:'notfound', params:{}} (too many segments)", () => {
+    assert.deepEqual(parseHash('#/t/5/edit/extra'), { name: 'notfound', params: {} });
+  });
+
+  it("'#/t/%E0%A4%A/edit' -> {name:'notfound', params:{}} (malformed escape, must not throw)", () => {
+    assert.doesNotThrow(() => parseHash('#/t/%E0%A4%A/edit'));
+    assert.deepEqual(parseHash('#/t/%E0%A4%A/edit'), { name: 'notfound', params: {} });
+  });
+
+  it("'#/edit' -> {name:'notfound', params:{}} (single segment 'edit' is not a known static route)", () => {
+    assert.deepEqual(parseHash('#/edit'), { name: 'notfound', params: {} });
+  });
+
+  it('params.id stays a STRING for the edit route, never coerced to a number', () => {
+    const result = parseHash('#/t/5/edit');
+    assert.equal(typeof result.params.id, 'string');
+    assert.equal(result.params.id, '5');
+    assert.notEqual(result.params.id, 5); // guards against == coercion masking a bug
+  });
+});
+
 describe('parseHash — percent-decoding', () => {
   it("'#/t/a%20b' -> detail, id 'a b' (decoded)", () => {
     const result = parseHash('#/t/a%20b');

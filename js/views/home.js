@@ -270,6 +270,15 @@ export function createHomeView({ store, today } = {}) {
         ul.appendChild(buildRow(t));
       }
       section.appendChild(ul);
+
+      // Step 2.2: always-visible way to reach #/new once the list is
+      // non-empty (i.e. whenever data-home-state="ready"). The separate
+      // empty-state link below is untouched.
+      const newLink = document.createElement('a');
+      newLink.className = 'home-new';
+      newLink.href = '#/new';
+      newLink.textContent = 'New trackable';
+      section.appendChild(newLink);
     }
 
     if (homeState === 'empty') {

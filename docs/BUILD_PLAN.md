@@ -1523,7 +1523,7 @@ also held on device. No new bugs found. Full write-up in
 
 ## Step 2.2 — Create / edit a trackable
 
-**Status:** TODO
+**Status:** DONE (2026-08-23)
 
 **Goal.** The user can define what they track, without touching SQL.
 
@@ -1558,7 +1558,95 @@ also held on device. No new bugs found. Full write-up in
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **961 green** — 865 unit, 43 integration, 53 e2e
+(up from 882 after 2.1b). New: `js/views/trackable.js`, a new `edit`
+route, ~80 unit cases for the form's pure logic, 16 e2e cases, and 10
+router cases. `sw.js` `CACHE` `daily-v13` → `daily-v14` with
+`./js/views/trackable.js` added to `ASSETS`.
+
+*Deviations from this step's notes, and why:*
+
+- **No `relog_semantic` control.** Step 2.1b removed additive logging
+  from the product at the user's request, so every trackable this form
+  creates is written `relog_semantic: 'state'`. The plan's suggested
+  numeric default of `'cumulative'` is obsolete.
+- **`target_type` defaults to `'none'`, not `'weekly_count'`.** The plan
+  suggests defaulting booleans to a weekly count, but that forces the
+  user to pick a target number during creation, which contradicts the
+  plan's own goal that "the common case is a name and two taps". Targets
+  are one tap away.
+- **Archive only — no hard delete shipped.** Three reasons, recorded so
+  it is not "added for completeness" later: (1) this step's own notes say
+  "Archive, not delete… so history is never destroyed"; (2) `entries`
+  cascades on the trackable FK, so a hard delete silently destroys every
+  logged day — unrecoverable, and history is the entire point of the app;
+  (3) `js/api.js` carries a data-safety invariant that `deleteEntry` is
+  its only `DELETE` call site, asserted structurally by the unit suite.
+  Archiving is a two-step in-page confirmation, never `window.confirm`
+  (a native modal blocks the page and wedges browser automation).
+- **`specific_days` exposed in the schema, not the UI**, as the plan
+  requires. A comment in `trackable.js` points at `APP_CONCEPT.md`'s open
+  questions so the omission reads as deliberate.
+- **Reachability added:** home gains an always-visible
+  `a.home-new[href="#/new"]` when the list is non-empty (previously
+  `#/new` was reachable only from the empty state, so a user with any
+  trackables could not create another), and the `detail` placeholder
+  gains an Edit link so the edit view is reachable before Step 2.3 builds
+  the real detail screen.
+
+*Verified by unit tests:* the `edit` route's 10 fixtures, including
+`#/t/5%2F6/edit` decoding, a malformed escape returning `notfound`, and
+**`#/t/5/extra` still returning `notfound`** — only the literal third
+segment `edit` matches. Plus ~80 cases over the form's pure exports
+(`defaultsFor`, `applyShapeChange`, `visibleFields`, `validate`,
+`buildPayload`): `aggregation` forced to `count`/`sum` in both directions
+by `value_shape`; `visibleFields` across all four
+numeric × bounds_enabled × bounds_mode combinations; every validation
+message with first-failure-wins ordering; and `buildPayload` asserted to
+omit `unit`/`bounds_*` for booleans and to never send
+`id`/`created_at`/`sort_order`.
+
+*Verified by e2e (16 cases):* progressive disclosure revealing and
+re-hiding fields; each validation failure issuing **zero** network
+requests (asserted on the recorded request count, not merely on the
+message appearing); a boolean save's POST body asserted by **key
+absence** via `Object.keys`, not by value truthiness; a failed save
+keeping the form mounted with the typed name intact rather than
+navigating away; and the archive flow proven two-step — zero requests on
+the first click and after Cancel, `{archived: true}` only after Confirm.
+
+*Bug found by the Implementer and flagged rather than papered over —
+originated in the orchestrator's contract, not the agent's work:*
+
+**`buildPayload` unconditionally sent `archived: false`**, and the same
+function serves both create and edit. Opening an archived trackable's
+edit URL and pressing Save would therefore **silently un-archive it**.
+The contract's §3.6 listed `archived: false` among the create keys and
+said edit followed "the same key rules"; the agent implemented that
+faithfully and reported the consequence. Same class of error as the Step
+0.0 wildcard and the Step 1.1 payload-type mismatch: an under-specified
+contract both agents honour.
+
+**Fix:** `archived` is never sent from this form, in either mode. The
+column defaults to `false` on insert, so a create still lands correctly,
+and an edit leaves the existing value untouched. Archiving stays a
+separate explicit action. A comment records why it must not be added back
+"for symmetry".
+
+**The regression test was verified to actually catch it:** `archived:
+false` was temporarily reinstated and the dedicated regression block plus
+the key-set assertion went red; the fix was restored and the tier re-run
+green. The assertions check key *absence* via `hasOwnProperty`, not
+falsiness — `undefined` would slip past a truthiness check.
+
+*Process failure worth recording:* the Step 2.1b suite run was performed
+**before** migration `0004` was applied, so its reported 882-green
+included an integration tier validated against the pre-migration schema.
+Two assertions pinning the `relog_semantic` default to `'cumulative'`
+were actually stale from the moment the migration landed, and surfaced
+only during this step. They now pin `'state'` with a comment citing the
+migration. **Rule going forward: apply the migration first, then run the
+suite — never the reverse.**
 
 ---
 

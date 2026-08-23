@@ -82,7 +82,11 @@ describe('api.js (Step 1.1): trackable lifecycle', () => {
       assert.equal(created.unit, 'reps');
       assert.equal(created.archived, false);
       // Schema defaults applied by the DB, not sent by the client.
-      assert.equal(created.relog_semantic, 'cumulative');
+      // relog_semantic default was changed from 'cumulative' to 'state' by
+      // migration 0004 (Step 2.1b, 2026-08-22) — the user tried additive
+      // re-logging on device and asked for replace-only instead. This pins
+      // the CURRENT default; it is deliberate, not drift.
+      assert.equal(created.relog_semantic, 'state');
       assert.equal(created.aggregation, 'sum');
 
       const listed = await listTrackables();
