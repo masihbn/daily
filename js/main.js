@@ -6,6 +6,7 @@
 import { parseHash } from './router.js';
 import { createHomeView } from './views/home.js';
 import { createTrackableView } from './views/trackable.js';
+import { createDetailView } from './views/detail.js';
 
 const VIEW_TITLES = {
   detail: 'Trackable',
@@ -26,16 +27,6 @@ function renderView(route) {
   const { name, params } = route;
 
   switch (name) {
-    case 'detail':
-      return {
-        title: VIEW_TITLES.detail,
-        // Step 2.2: an Edit link so the real edit view (js/views/trackable.js)
-        // is reachable before Step 2.3 builds the real detail screen. The id
-        // text itself is unchanged from the Step 0.3 placeholder.
-        body: `<p>Detail view placeholder for trackable id: <strong>${escapeHtml(
-          params.id
-        )}</strong></p><p><a href="#/t/${encodeURIComponent(params.id)}/edit">Edit</a></p>`,
-      };
     case 'compare':
       return {
         title: VIEW_TITLES.compare,
@@ -114,6 +105,12 @@ async function render() {
       route.name === 'edit'
         ? createTrackableView({ mode: 'edit', id: route.params.id })
         : createTrackableView({ mode: 'new' });
+    await currentView.mount(document.getElementById('view'));
+  } else if (route.name === 'detail') {
+    // Step 2.3: the real detail view supersedes the Step 2.2 placeholder
+    // (which showed just the id and an Edit link).
+    app.innerHTML = `<h1>${escapeHtml(VIEW_TITLES.detail)}</h1><div id="view"></div>`;
+    currentView = createDetailView({ id: route.params.id });
     await currentView.mount(document.getElementById('view'));
   } else {
     const { title, body } = renderView(route);

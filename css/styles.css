@@ -580,3 +580,123 @@ button {
   color: var(--danger);
   font-size: 13px;
 }
+
+/* Trackable detail screen shell (Step 2.3) ------------------------------- */
+
+.detail {
+  display: block;
+  width: 100%;
+}
+
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 6px;
+  margin: 0 0 16px;
+}
+
+.detail-name {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.detail-unit,
+.detail-direction {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.detail-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.detail-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.detail-range {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.detail-range[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.detail-range:disabled {
+  opacity: 0.6;
+}
+
+.detail-count {
+  margin: 0 0 16px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.chart-slot {
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.chart-slot-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.chart-slot-placeholder {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.detail-offline {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+.detail-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}

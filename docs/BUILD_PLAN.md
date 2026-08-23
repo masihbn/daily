@@ -1652,7 +1652,7 @@ suite — never the reverse.**
 
 ## Step 2.3 — Trackable detail screen shell
 
-**Status:** TODO
+**Status:** DONE (2026-08-23)
 
 **Goal.** Tapping a trackable opens its own screen with a place for each
 applicable chart. Charts themselves come in Phase 3.
@@ -1675,7 +1675,103 @@ applicable chart. Charts themselves come in Phase 3.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **1057 green** — 950 unit, 43 integration, 64 e2e
+(up from 961 after 2.2). New: `js/views/detail.js`, 85 unit cases, 11 e2e
+cases. `sw.js` `CACHE` `daily-v14` → `daily-v15` with
+`./js/views/detail.js` added to `ASSETS`.
+
+*Contract decisions made here:*
+
+- **Ranges are fixed day counts, not calendar months:** `3M` = 90 days,
+  `6M` = 180, `1Y` = 365, `All` = no lower bound. `js/dates.js`
+  deliberately has no `addMonths`, and month arithmetic carries its own
+  end-of-month ambiguity (31 Mar minus one month). A day count is
+  unambiguous and testable. Windows are **inclusive of both ends**, so
+  `from = addDays(today, -(days - 1))`.
+- **`resolveRange(rangeKey, today)` takes an injected `today` string** —
+  reading the clock inside it would make it untestable, the same reason
+  `todayLocal(now = new Date())` takes a clock in Step 1.2.
+- **The range selection persists per device** in `localStorage` under
+  `daily.detail.range.v1`, every access wrapped in try/catch (iOS private
+  mode throws on `setItem`). An unknown stored value falls back to `3m`.
+- **`bounds` is suppressed on boolean trackables even when
+  `bounds_enabled` is true.** Bounds are meaningless on a boolean, and a
+  stray flag must not produce a slot that cannot render.
+
+*Two contract errors caught by the orchestrator BEFORE the agents read
+it, by computing rather than recalling:*
+
+1. The contract instructed agents to use `addDays(...)` wrapped in
+   `formatLocal(...)`. **`addDays` already returns a `'YYYY-MM-DD'`
+   string**, so that combination throws `RangeError: formatLocal:
+   expected a valid Date`. Both agents would have hit it.
+2. The fixture `resolveRange('1y', '2024-02-29')` was written as
+   `'2023-03-01'`. **It is `'2023-03-02'`** — 2024 is a leap year, so the
+   inclusive 365-day window back from 29 Feb lands a day later than the
+   naive answer. A wrong fixture here becomes a wrong test that both
+   agents implement faithfully; this is the third time that pattern has
+   been caught in this project and the first time it was caught before
+   the agents ran.
+
+The Test Author independently recomputed all eight fixtures against the
+real `js/dates.js` and confirmed the corrected values, and the unit file
+additionally re-derives them at runtime via a property check rather than
+trusting the hardcoded table.
+
+*Verified by unit tests (`tests/unit/detail-model.test.mjs`, 85 cases):*
+`RANGES` order and shape; all eight `resolveRange` fixtures; the
+inclusive-length property (`rangeDays(from, to).length === days`) across
+seven different `today` values including two leap days; `from` never
+later than `to`; all seven `visibleSlots` fixtures; a 64-combination
+hostile-input cross-product proving `visibleSlots` never throws.
+
+*Verified by e2e (`tests/e2e/detail.test.mjs`, 11 cases):*
+
+- **D6, the load-once guard — the highest-value test in this step.** With
+  four chart slots visible, exactly **one** GET to `/rest/v1/entries` is
+  issued on load; clicking `1Y` issues exactly one more, with the new
+  `gte.` bound. This step's notes are explicit that letting each chart
+  query separately is "3–4 round trips on a phone network for data they
+  all share". Asserted on the recorded request count, so Phase 3 cannot
+  quietly regress it.
+- D7: the `All` range issues a request with **no** `entry_date=gte.`
+  parameter at all — asserted on absence, not on a different value.
+  (`api.listEntries` validates `from`, so passing `null` would throw.)
+- Slot sets driven by config: two slots for a boolean, four for a
+  bounds-enabled numeric with other trackables present, three when it is
+  the only trackable (no overlay).
+- Range persistence across navigation; `notfound` for a missing id;
+  singular/plural entry count; no page errors; no horizontal scroll at
+  390px; 44px range buttons.
+
+*Stale fixtures reconciled, and a real problem they exposed:*
+
+Replacing the `detail` placeholder broke two existing assertions that
+described it — `shell.test.mjs`'s `#/t/42` case and `trackable.test.mjs`
+F14. Both were **repointed, not deleted**: the shell case now asserts the
+routing property that still matters (`data-route="detail"` plus
+`section.detail[data-trackable-id="42"]`, stable because the view sets
+that attribute even in `notfound`), and F14 now asserts the real
+`a.detail-edit` link against an id that exists in its fixtures.
+
+**The far more important finding: `tests/e2e/shell.test.mjs` had no
+request interception at all, and six of its nine tests were making live
+calls to the production Supabase database on every suite run.** That file
+was written in Phase 0 when every route rendered static text; it silently
+became a live-database consumer in **Step 2.1**, the moment `home.js`
+started fetching on mount, and nobody noticed for three steps because the
+calls are read-only and the tests still passed. It now uses the same
+guard-first pattern as the other e2e files —
+`test.use({ serviceWorkers: 'block' })`, a catch-all `**/rest/v1/**`
+route registered first that records and aborts anything unclaimed, and
+`expect(unexpected).toEqual([])` in every affected test.
+
+**Transferable lesson:** a test file's network hermeticity is not a
+property of the file, it is a property of *what the code under test does
+now*. Adding a fetch to a view retroactively changes every test that
+renders that view. When a view gains its first network call, audit every
+existing e2e file that navigates to it — passing tests are not evidence
+of isolation.
 
 ---
 

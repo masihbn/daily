@@ -610,7 +610,18 @@ test('F13 — #/new has no .tform-archive button, and no .tform-delete button ex
 // F14 — entry points: home "New trackable" link, detail placeholder "Edit" link
 // ===========================================================================
 
-test('F14 — home shows a.home-new[href="#/new"] for a non-empty list, and the detail placeholder shows a[href="#/t/42/edit"]', async ({
+// Repointed for Step 2.3: the old assertion ("detail placeholder shows
+// a[href=#/t/42/edit]") tested the Step 2.2 static placeholder, which is
+// gone — js/main.js now mounts the real js/views/detail.js for the
+// 'detail' route. The home half of this test ("home shows a.home-new")
+// still holds unchanged. For the detail half, the real edit link only
+// renders once the view reaches its 'ready' state (js/views/detail.js:
+// the 'notfound' state renders just a link back to '#/'), so this now
+// navigates to a trackable id (1, T1) that actually exists in this test's
+// fixture, and asserts the real `a.detail-edit` element and its
+// '#/t/<id>/edit' href — confirmed against js/views/detail.js's render()
+// (class 'detail-edit', href `#/t/${id}/edit`) before writing this.
+test('F14 — home shows a.home-new[href="#/new"] for a non-empty list, and the detail view shows a.detail-edit[href="#/t/1/edit"]', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -620,8 +631,9 @@ test('F14 — home shows a.home-new[href="#/new"] for a non-empty list, and the 
   await page.goto('/index.html#/');
   await expect(page.locator('a.home-new[href="#/new"]')).toBeVisible();
 
-  await page.goto('/index.html#/t/42');
-  await expect(page.locator('a[href="#/t/42/edit"]')).toBeVisible();
+  await page.goto('/index.html#/t/1');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('a.detail-edit[href="#/t/1/edit"]')).toBeVisible();
 
   expect(unexpected).toEqual([]);
 });
