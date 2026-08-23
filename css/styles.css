@@ -10,6 +10,14 @@
   --border: #2e2e30;
   --nav-height: 56px;
   --danger: #ff6b6b;
+  /* Step 2.1b: "good"/"bad" verdict colours (CONTRACT-2.1b.md §5). --bad
+     is an alias for --danger, not a duplicate literal, so the two colours
+     can never drift apart. Neutral reuses the existing --fg-muted — no
+     new token needed for it. */
+  --good: #34c759;
+  --bad: var(--danger);
+  --good-bg: rgba(52, 199, 89, 0.18);
+  --bad-bg: rgba(255, 107, 107, 0.18);
 }
 
 @media (prefers-color-scheme: light) {
@@ -21,6 +29,9 @@
     --accent: #3478f6;
     --border: #dcdcdf;
     --danger: #d9362e;
+    --good: #1f9c46;
+    --good-bg: rgba(31, 156, 70, 0.14);
+    --bad-bg: rgba(217, 54, 46, 0.14);
   }
 }
 
@@ -175,6 +186,10 @@ button {
   padding: 12px 14px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
+  /* The verdict border-left below adds its own visible edge; a slightly
+     smaller base radius on that side keeps the tint from poking past the
+     rounded corner. */
+  border-left-width: 4px;
   border-radius: 12px;
 }
 
@@ -184,6 +199,78 @@ button {
 
 .trow[data-state="failed"] {
   border-color: var(--danger);
+}
+
+/* Step 2.1b good/bad/neutral verdict (CONTRACT-2.1b.md §5). A green check
+   means "today is good", not "logged" — see home-model.js verdict(). The
+   coloured left edge plus a background tint is the "substantially more
+   prominent" fix for the user's explicit complaint that checked/unchecked
+   was too subtle before; colour is never the only cue (WCAG 1.4.1) —
+   .trow-value's word and .trow-symbol's shape carry the same meaning. */
+.trow[data-verdict="good"] {
+  border-left-color: var(--good);
+  background: linear-gradient(0deg, var(--good-bg), var(--good-bg)), var(--bg-elevated);
+}
+
+.trow[data-verdict="bad"] {
+  border-left-color: var(--bad);
+  background: linear-gradient(0deg, var(--bad-bg), var(--bad-bg)), var(--bg-elevated);
+}
+
+.trow[data-verdict="neutral"] {
+  border-left-color: var(--border);
+}
+
+/* Failed state still wins visually over a stale verdict tint. */
+.trow[data-state="failed"] {
+  border-left-color: var(--danger);
+}
+
+.trow-symbol {
+  order: 0;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--fg-muted);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  color: transparent;
+}
+
+/* Glyphs are plain Unicode text characters rendered via CSS `content` on
+   a pseudo-element, styled with `color`/`border` custom properties — NOT
+   an emoji font, which renders inconsistently across iOS versions. */
+.trow-symbol[data-symbol="check"] {
+  border-color: var(--good);
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.trow-symbol[data-symbol="check"]::before {
+  content: '\2713'; /* U+2713 CHECK MARK */
+}
+
+.trow-symbol[data-symbol="cross"] {
+  border-color: var(--bad);
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.trow-symbol[data-symbol="cross"]::before {
+  content: '\2715'; /* U+2715 MULTIPLICATION X */
+}
+
+/* "empty" renders no glyph at all — the plain outline ring (border +
+   border-radius: 50% above) IS the "empty outline circle" the contract
+   asks for. */
+.trow-symbol[data-symbol="empty"] {
+  border-color: var(--fg-muted);
+  background: transparent;
 }
 
 .trow-name {
@@ -206,12 +293,33 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.trow[data-logged="true"] .trow-value {
+/* Numeric rows have no verdict (always 'neutral' — no honest good/bad
+   without a target, see home-model.js verdict()), so a logged numeric
+   value keeps the existing accent tint. Boolean rows are coloured by
+   verdict instead, since 'logged' no longer implies 'good' there. */
+.trow[data-shape="numeric"][data-logged="true"] .trow-value {
   color: var(--accent);
 }
 
-.trow-hint {
+.trow[data-shape="boolean"][data-verdict="good"] .trow-value {
+  color: var(--good);
+}
+
+.trow[data-shape="boolean"][data-verdict="bad"] .trow-value {
+  color: var(--bad);
+}
+
+.trow-direction {
   order: 3;
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.trow-hint {
+  order: 4;
   flex: 1 1 100%;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -220,7 +328,7 @@ button {
 }
 
 .trow-log {
-  order: 4;
+  order: 5;
   margin-left: auto;
   min-height: 44px;
   touch-action: manipulation;
@@ -228,7 +336,7 @@ button {
 }
 
 .trow-editor {
-  order: 5;
+  order: 6;
   flex: 1 1 100%;
   min-width: 0;
   display: flex;
@@ -263,7 +371,7 @@ button {
 }
 
 .trow-error {
-  order: 6;
+  order: 7;
   flex: 1 1 100%;
   min-width: 0;
   overflow-wrap: anywhere;

@@ -273,6 +273,47 @@ this is ever shared, exposed more broadly, or treated as finished.
 - **2026-08-21** — Re-log semantics fixed: boolean = idempotent,
   numeric/cumulative = adds, numeric/state = replaces. Keeps the
   existing one-entry-per-day schema shape intact.
+  - **SUPERSEDED 2026-08-22 (Step 2.1b), after the user tried both on
+    device: additive re-logging is removed from the product.** Re-logging
+    a numeric trackable REPLACES the day's value. Migration `0004` makes
+    `state` the default and converted every existing row.
+    `applyRelog()`'s `cumulative` branch and the `'cumulative'` value in
+    the check constraint are deliberately **kept** — existing entry rows
+    were written under the additive semantic, so removing it would make
+    both the code and the schema lie about how that data was produced.
+    The capability is simply never offered in the UI.
+- **2026-08-22** — **Good/bad must be visible on the home screen, and the
+  checked state must be much more obvious** (user request). Resolved by
+  finally using the `direction` column the schema has always had:
+
+  > **A green check means "today is good" — NOT "logged."**
+
+  | | Not logged | Logged |
+  |---|---|---|
+  | `build` (Workout) | ○ *Not yet* — muted | ✓ *Done* — green |
+  | `break` (Smoking) | ✓ *Clean* — green | ✕ *Logged* — red |
+
+  Rationale, from research rather than taste:
+  - **WCAG 1.4.1** forbids colour as the only cue, so every state carries
+    a distinct **shape and word** as well as a colour and survives
+    greyscale/colourblindness.
+  - **Loop Habit Tracker** (`iSoron/uhabits`, the most established
+    open-source tracker) refuses bad-habit tracking outright, arguing you
+    should rephrase to *"Did you have a smoke-free day today?"* — because
+    ticking a box reads as an achievement and rewards the behaviour the
+    user is trying to stop.
+  - Apps that **do** support bad habits (Streaks' "negative tasks",
+    Quitzilla, Simple Streak) resolve that by **inverting the reward** —
+    the clean day is the win, counted as days *since* the last slip.
+  - So the tick is kept (the user wants to log the slip) but is made to
+    look like a slip, and the reward signal points at the desired
+    behaviour in both directions. This is why an unlogged `break` habit
+    shows the green check — it is deliberate, not a bug.
+
+  **Numeric trackables stay verdict-neutral for now**: without a target
+  there is no honest way to call a number good or bad. They show a
+  plain-English `direction` label ("less is better") instead, and real
+  good/bad colouring arrives with target lines in Step 3.2.
 - **2026-08-21** — Target model = per-trackable, mixed (weekly count /
   specific days / none). Streak logic = forgiving weekly rollup.
 - **2026-08-21** — Auto-threshold method = rolling window; default 90

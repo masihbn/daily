@@ -1496,6 +1496,21 @@ otherwise empty: `Workout` (boolean), `Calories` (numeric/cumulative,
 kcal), `Weight` (numeric/state, kg) — ids 365–367. Real user rows, not
 `__test__` fixtures, so the suite's sweep cannot delete them.
 
+**REVISED by Step 2.1b (2026-08-22), after the user used it.** Two
+product changes came out of the device session, both recorded in
+`APP_CONCEPT.md`: additive re-logging was removed (migration `0004` —
+numerics now replace), and the home screen now uses the `direction`
+column it had been ignoring, so good vs. bad is visible. Governing rule:
+**a green check means "today is good", not "logged"** — an unlogged
+`break` habit shows the green check, which is deliberate. Suite after
+2.1b: **882 green** (802 unit, 43 integration, 37 e2e). `sw.js` `CACHE`
+`daily-v12` → `daily-v13`. New home-model exports: `verdict`,
+`statusWord`, `statusSymbol`, `directionLabel`. Key regression guards:
+E/V6 asserts a numeric re-log posts `500`, **not** `2500`, and a unit
+case asserts two `relogHint` inputs differing only in `relog_semantic`
+produce byte-identical strings — proving additive wording is genuinely
+gone rather than merely defaulted away.
+
 All four device-only unknowns above came back clean: the keypad is
 numeric rather than QWERTY, cumulative added (320 → 500 → **820**), state
 replaced (78.4 → 79.1 → **79.1**, not 157.5), and **an Airplane-Mode log

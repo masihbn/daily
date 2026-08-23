@@ -1,12 +1,13 @@
-// Home view: trackable list + quick-log (Step 2.1). DOM + store wiring only
-// — all re-log semantics, formatting and sorting logic live in
-// ./home-model.js (pure) so this file's job is strictly: render the DOM,
-// read/write through js/store.js, and never let anything throw out of an
-// event handler.
+// Home view: trackable list + quick-log (Step 2.1, revised by Step 2.1b —
+// replace-only logging + direction-aware good/bad visuals). DOM + store
+// wiring only — all re-log semantics, formatting, sorting and verdict/
+// symbol logic live in ./home-model.js (pure) so this file's job is
+// strictly: render the DOM, read/write through js/store.js, and never let
+// anything throw out of an event handler.
 //
-// See docs/BUILD_PLAN.md Step 2.1 and the interface contract it was built
-// from for the exact DOM shape, refresh sequence and result-mapping table
-// this file implements.
+// See docs/BUILD_PLAN.md Step 2.1 and the interface contracts (CONTRACT-
+// 2.1.md, CONTRACT-2.1b.md) for the exact DOM shape, refresh sequence and
+// result-mapping table this file implements.
 
 import { getStore } from '../store.js';
 import { todayLocal } from '../dates.js';
@@ -103,6 +104,24 @@ export function createHomeView({ store, today } = {}) {
     li.dataset.shape = model.shape;
     li.dataset.state = model.state;
     li.dataset.logged = String(model.logged);
+    // Step 2.1b: a green check means "today is good", not "logged" — for a
+    // break-direction habit the unlogged state is the good one. See
+    // home-model.js verdict() and CONTRACT-2.1b.md §0. data-verdict and the
+    // symbol below are recomputed on every render (including the
+    // synchronous optimistic one in runWrite()), so a tap on a break habit
+    // flips green-check -> red-cross immediately, before the network call
+    // resolves.
+    li.dataset.verdict = model.verdict;
+
+    // Decorative shape+colour cue (WCAG 1.4.1: colour is never the only
+    // cue — model.statusWord/valueText already carries the meaning to
+    // assistive tech, so this stays aria-hidden and gets no label of its
+    // own). Rendered via CSS content, not emoji — see styles.css.
+    const symbolSpan = document.createElement('span');
+    symbolSpan.className = 'trow-symbol';
+    symbolSpan.setAttribute('aria-hidden', 'true');
+    symbolSpan.dataset.symbol = model.statusSymbol;
+    li.appendChild(symbolSpan);
 
     const nameLink = document.createElement('a');
     nameLink.className = 'trow-name';
@@ -112,8 +131,18 @@ export function createHomeView({ store, today } = {}) {
 
     const valueSpan = document.createElement('span');
     valueSpan.className = 'trow-value';
-    valueSpan.textContent = model.valueText;
+    // Boolean rows show the word cue (Done / Not yet / Clean / Logged)
+    // instead of the generic Done/— formatValue() text; numeric rows are
+    // unchanged.
+    valueSpan.textContent = model.shape === 'boolean' ? model.statusWord : model.valueText;
     li.appendChild(valueSpan);
+
+    if (model.shape === 'numeric' && model.directionLabel) {
+      const dirSpan = document.createElement('span');
+      dirSpan.className = 'trow-direction';
+      dirSpan.textContent = model.directionLabel;
+      li.appendChild(dirSpan);
+    }
 
     const hintSpan = document.createElement('span');
     hintSpan.className = 'trow-hint';

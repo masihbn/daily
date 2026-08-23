@@ -73,6 +73,12 @@ export function formatValue(trackable, value) {
 }
 
 // --- 2.3 relogHint -----------------------------------------------------
+//
+// Step 2.1b: additive wording is gone entirely — re-logging a numeric
+// trackable REPLACES the day's value now (migration 0004), and every row
+// is treated the same regardless of relog_semantic. See CONTRACT-2.1b.md
+// §3.5. The good/bad meaning that used to leak into this text now lives
+// in verdict()/statusWord()/statusSymbol() below instead.
 
 const DOT = ' · '; // space, MIDDLE DOT, space
 
@@ -94,19 +100,69 @@ export function relogHint(trackable, entry) {
   }
 
   if (shape === 'numeric') {
-    if (trackable.relog_semantic === 'cumulative') {
-      return has
-        ? `Today: ${formatValue(trackable, entry.value)}${DOT}new value is added`
-        : "Adds to today's total";
-    }
-    if (trackable.relog_semantic === 'state') {
-      return has
-        ? `Today: ${formatValue(trackable, entry.value)}${DOT}new value replaces it`
-        : "Replaces today's value";
-    }
-    return '';
+    return has
+      ? `Today: ${formatValue(trackable, entry.value)}${DOT}tap to change`
+      : "Tap to log today's value";
   }
 
+  return '';
+}
+
+// --- 3.1-3.4 verdict / statusWord / statusSymbol / directionLabel --------
+//
+// The governing rule (CONTRACT-2.1b.md §0): a green check means "today is
+// good", NOT "logged". For a `break`-direction habit the unlogged state
+// is the good one — ticking a box reads as an achievement, so a bad
+// habit's tick must not look rewarding. Do not "correct" this so that a
+// check means logged; that would invert the entire point of the design.
+
+function directionOrBuild(trackable) {
+  return trackable && trackable.direction === 'break' ? 'break' : 'build';
+}
+
+export function verdict(trackable, entry) {
+  if (!trackable || typeof trackable !== 'object') return 'neutral';
+
+  if (trackable.value_shape === 'boolean') {
+    const logged = hasEntryValue(trackable, entry);
+    const dir = directionOrBuild(trackable);
+    if (dir === 'break') {
+      return logged ? 'bad' : 'good';
+    }
+    // 'build' (including missing/unknown direction)
+    return logged ? 'good' : 'neutral';
+  }
+
+  // numeric, or any other/unknown value_shape: no honest way to call a
+  // number good or bad without a target — that arrives with target lines
+  // in Phase 3 (Step 3.2). Do not invent a threshold here.
+  return 'neutral';
+}
+
+export function statusWord(trackable, entry) {
+  if (!trackable || typeof trackable !== 'object') return '';
+  if (trackable.value_shape !== 'boolean') return '';
+
+  const logged = hasEntryValue(trackable, entry);
+  const dir = directionOrBuild(trackable);
+
+  if (dir === 'break') {
+    return logged ? 'Logged' : 'Clean';
+  }
+  return logged ? 'Done' : 'Not yet';
+}
+
+export function statusSymbol(trackable, entry) {
+  const v = verdict(trackable, entry);
+  if (v === 'good') return 'check';
+  if (v === 'bad') return 'cross';
+  return 'empty';
+}
+
+export function directionLabel(trackable) {
+  if (!trackable || typeof trackable !== 'object') return '';
+  if (trackable.direction === 'build') return 'more is better';
+  if (trackable.direction === 'break') return 'less is better';
   return '';
 }
 
@@ -160,6 +216,10 @@ export function rowModel(trackable, entry, status) {
       hint: '',
       state,
       color: null,
+      verdict: 'neutral',
+      statusWord: '',
+      statusSymbol: 'empty',
+      directionLabel: '',
     };
   }
 
@@ -179,5 +239,9 @@ export function rowModel(trackable, entry, status) {
     hint: relogHint(trackable, entry),
     state,
     color: typeof trackable.color === 'string' && trackable.color !== '' ? trackable.color : null,
+    verdict: verdict(trackable, entry),
+    statusWord: statusWord(trackable, entry),
+    statusSymbol: statusSymbol(trackable, entry),
+    directionLabel: directionLabel(trackable),
   };
 }

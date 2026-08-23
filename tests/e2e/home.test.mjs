@@ -66,6 +66,100 @@ const T_STATE = {
 };
 const T_ARCH = { id: 4, name: 'Old', value_shape: 'boolean', sort_order: 3, archived: true };
 
+// --- CONTRACT-2.1b.md fixtures ("Replace-only logging + direction-aware
+// visuals") -----------------------------------------------------------
+//
+// T_BREAK is the break-direction boolean fixture the contract's §6.2 asks
+// for verbatim (id:5, name:'Smoking', direction:'break', sort_order:4,
+// archived:false), extended with the same surrounding fields the other
+// fixtures carry for consistency.
+const T_BREAK = {
+  id: 5,
+  name: 'Smoking',
+  value_shape: 'boolean',
+  relog_semantic: 'state',
+  aggregation: 'count',
+  direction: 'break',
+  unit: null,
+  color: null,
+  sort_order: 4,
+  archived: false,
+};
+
+// T_CAL_STATE represents the post-migration-0004 reality for a numeric
+// trackable: relog_semantic defaults to 'state' now, so re-logging Calories
+// REPLACES today's value rather than adding to it. This is deliberately a
+// separate fixture from T_CUM (id:2, relog_semantic:'cumulative') — T_CUM is
+// kept as-is (see E6 below) to prove the underlying applyRelog cumulative
+// branch still works for data that explicitly requests it (contract §3.7:
+// "so a future trackable could still opt in"), while T_CAL_STATE is what a
+// real Calories trackable looks like today, now that the UI never offers
+// the cumulative choice.
+const T_CAL_STATE = {
+  id: 6,
+  name: 'Calories',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'sum',
+  direction: 'break',
+  unit: 'kcal',
+  color: null,
+  sort_order: 5,
+  archived: false,
+};
+
+// T_NUM_BUILD is a build-direction numeric fixture, for V7's "more is
+// better" case (T_CAL_STATE above covers "less is better").
+const T_NUM_BUILD = {
+  id: 7,
+  name: 'Reading',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'sum',
+  direction: 'build',
+  unit: 'pages',
+  color: null,
+  sort_order: 6,
+  archived: false,
+};
+
+// V8 (greyscale survivability) needs all four boolean statusWord states
+// visible at once, which needs four distinct rows (a single trackable can
+// only be in one state per page load): build-logged, build-unlogged,
+// break-logged, break-unlogged.
+const T_V8_BUILD_LOGGED = {
+  id: 10,
+  name: 'V8BuildLogged',
+  value_shape: 'boolean',
+  direction: 'build',
+  sort_order: 10,
+  archived: false,
+};
+const T_V8_BUILD_UNLOGGED = {
+  id: 11,
+  name: 'V8BuildUnlogged',
+  value_shape: 'boolean',
+  direction: 'build',
+  sort_order: 11,
+  archived: false,
+};
+const T_V8_BREAK_LOGGED = {
+  id: 12,
+  name: 'V8BreakLogged',
+  value_shape: 'boolean',
+  direction: 'break',
+  sort_order: 12,
+  archived: false,
+};
+const T_V8_BREAK_UNLOGGED = {
+  id: 13,
+  name: 'V8BreakUnlogged',
+  value_shape: 'boolean',
+  direction: 'break',
+  sort_order: 13,
+  archived: false,
+};
+
 // Compute "today" the same way the app must (local calendar components, NOT
 // toISOString, which reads UTC and is wrong for part of every day).
 const d = new Date();
@@ -219,7 +313,10 @@ test('E3 — a boolean row with no entry today renders unlogged', async ({ page 
 
   const row = page.locator('li.trow[data-trackable-id="1"]');
   await expect(row).toHaveAttribute('data-logged', 'false');
-  await expect(row.locator('.trow-value')).toHaveText('—');
+  // CONTRACT-2.1b.md §4.2: boolean rows now show statusWord ('Not yet' /
+  // 'Done' / 'Clean' / 'Logged'), not formatValue's '—' / 'Done'. T_BOOL is
+  // direction:'build', so unlogged -> 'Not yet'.
+  await expect(row.locator('.trow-value')).toHaveText('Not yet');
   await expect(row.locator('.trow-hint')).toHaveText('Tap to log today');
   const btn = row.locator('.trow-log');
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
@@ -269,7 +366,12 @@ test('E4 — logging a boolean row is optimistic immediately, then confirmed by 
 
   // Now wait for the delayed response to resolve and confirm.
   await expect(row).toHaveAttribute('data-state', 'idle');
+  // CONTRACT-2.1b.md §4.2: '.trow-value' now shows statusWord, not
+  // formatValue. T_BOOL is direction:'build', so logged -> 'Done' — this
+  // happens to be textually identical to the old formatValue('Done')
+  // result, but it is now sourced from a different function.
   await expect(row.locator('.trow-value')).toHaveText('Done');
+  await expect(row).toHaveAttribute('data-verdict', 'good');
 
   expect(postRequests.length).toBe(1);
   const posted = postRequests[0];
@@ -316,9 +418,19 @@ test('E5 — un-toggling a logged boolean row issues a DELETE and never a POST',
 // E6 — numeric cumulative adds
 // ===========================================================================
 
-test('E6 — the numeric cumulative editor adds the typed amount to the existing total', async ({
+test('E6 — a numeric trackable whose DATA still says relog_semantic:"cumulative" still adds (applyRelog/nextValueFor untouched by 2.1b — CONTRACT-2.1b.md §3.7)', async ({
   page,
 }) => {
+  // NOTE (2.1b): this case is NOT obsolete. CONTRACT-2.1b.md §3.7 requires
+  // nextValueFor to keep delegating to applyRelog exactly as before — "so a
+  // future trackable could still opt in" — and forbids special-casing
+  // replace-only in JS. The product-level "additive logging is removed"
+  // change is achieved by the UI never creating a trackable with
+  // relog_semantic:'cumulative' any more (migration 0004 defaults new rows
+  // to 'state' and backfills existing ones), not by deleting the cumulative
+  // code path. T_CUM here still explicitly claims relog_semantic:'cumulative'
+  // to prove that path is intact. See V6 below for the actual regression
+  // guard on the new default ('state') behaviour.
   const unexpected = await installGuard(page);
   await routeTrackables(page, [T_CUM]);
   const { postRequests } = await routeEntries(page, {
@@ -332,7 +444,9 @@ test('E6 — the numeric cumulative editor adds the typed amount to the existing
 
   const row = page.locator('li.trow[data-trackable-id="2"]');
   await expect(row.locator('.trow-value')).toHaveText('320 kcal');
-  await expect(row.locator('.trow-hint')).toHaveText('Today: 320 kcal · new value is added');
+  // CONTRACT-2.1b.md §3.5: relogHint's wording no longer varies by
+  // relog_semantic at all — was 'Today: 320 kcal · new value is added'.
+  await expect(row.locator('.trow-hint')).toHaveText('Today: 320 kcal · tap to change');
 
   await row.locator('.trow-log').click();
 
@@ -466,7 +580,10 @@ test('E10 — a non-retryable (400) failure reverts the row and leaves the outbo
   await expect(row).toHaveAttribute('data-state', 'failed');
   await expect(page.locator('.trow-error[role="alert"]')).toBeVisible();
   await expect(row).toHaveAttribute('data-logged', 'false');
-  await expect(row.locator('.trow-value')).toHaveText('—');
+  // CONTRACT-2.1b.md §4.2: boolean '.trow-value' shows statusWord now, not
+  // formatValue's '—'. T_BOOL is direction:'build', reverted-to-unlogged ->
+  // 'Not yet'.
+  await expect(row.locator('.trow-value')).toHaveText('Not yet');
 
   const outboxRaw = await page.evaluate(() => localStorage.getItem('daily.outbox.v1'));
   if (outboxRaw !== null) {
@@ -611,6 +728,290 @@ test('E15 — every .trow-log button is at least 44px tall', async ({ page }) =>
   for (const h of heights) {
     expect(h).toBeGreaterThanOrEqual(44);
   }
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-2.1b.md §6.2 — V1 through V8
+// ===========================================================================
+// "Replace-only logging + direction-aware visuals": V1-V4 cover the four
+// possible (direction × logged) boolean states and their verdict/statusWord/
+// statusSymbol; V5 proves the optimistic toggle recomputes verdict
+// immediately, not just data-logged; V6 is the primary regression guard for
+// the whole revision (numeric re-logging must REPLACE, never add); V7
+// covers the new directionLabel on numeric rows; V8 proves the four boolean
+// states are distinguishable by text alone (WCAG 1.4.1 — colour is never
+// the only cue).
+
+// ===========================================================================
+// V1 — build boolean, unlogged
+// ===========================================================================
+
+test('V1 — a build-direction boolean with no entry today is verdict "neutral", text "Not yet", symbol "empty"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="1"]');
+  await expect(row).toHaveAttribute('data-verdict', 'neutral');
+  await expect(row.locator('.trow-value')).toHaveText('Not yet');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'empty');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V2 — build boolean, logged
+// ===========================================================================
+
+test('V2 — a build-direction boolean logged today is verdict "good", text "Done", symbol "check"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, {
+    getFixture: [{ id: 600, trackable_id: 1, entry_date: TODAY, value: 1, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="1"]');
+  await expect(row).toHaveAttribute('data-verdict', 'good');
+  await expect(row.locator('.trow-value')).toHaveText('Done');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'check');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V3 — break boolean, unlogged — THE COUNTER-INTUITIVE CASE
+// ===========================================================================
+
+// This is deliberate and is the heart of CONTRACT-2.1b's design — DO NOT
+// "fix" it to mean logged==good. A green check here means "today is good",
+// not "logged". For a break-direction habit (e.g. Smoking) the UNLOGGED day
+// is the win: ticking a bad-habit box would otherwise read as an
+// achievement and reward exactly the behaviour the user is trying to stop.
+// CONTRACT-2.1b.md §0 cites the research backing this: the Loop Habit
+// Tracker (the most established open-source tracker) refuses bad-habit
+// tracking for this exact reason, while apps that do support it (Streaks
+// "negative tasks", Quitzilla, Simple Streak) invert the reward so the
+// clean day is the win. If a future change makes this test fail because
+// "check now means logged", that is a regression, not a fix — revert it.
+test('V3 — a break-direction boolean with NO entry today is verdict "good" (a clean day is the win, not a "fix")', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BREAK]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="5"]');
+  await expect(row).toHaveAttribute('data-verdict', 'good');
+  await expect(row.locator('.trow-value')).toHaveText('Clean');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'check');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V4 — break boolean, logged
+// ===========================================================================
+
+test('V4 — a break-direction boolean logged today is verdict "bad", text "Logged", symbol "cross"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BREAK]);
+  await routeEntries(page, {
+    getFixture: [{ id: 601, trackable_id: 5, entry_date: TODAY, value: 1, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="5"]');
+  await expect(row).toHaveAttribute('data-verdict', 'bad');
+  await expect(row.locator('.trow-value')).toHaveText('Logged');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'cross');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V5 — tapping a break boolean flips good->bad immediately (optimistic
+// update must recompute verdict, not just data-logged — CONTRACT-2.1b.md §4.3)
+// ===========================================================================
+
+test('V5 — tapping an unlogged break-direction boolean flips verdict good->bad and symbol check->cross while the POST is still in flight', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BREAK]);
+  await routeEntries(page, {
+    getFixture: [],
+    post: {
+      delayMs: 400,
+      body: [
+        {
+          id: 602,
+          trackable_id: 5,
+          entry_date: TODAY,
+          value: 1,
+          note: null,
+          created_at: `${TODAY}T00:00:00Z`,
+          updated_at: `${TODAY}T00:00:00Z`,
+        },
+      ],
+    },
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="5"]');
+  await expect(row).toHaveAttribute('data-verdict', 'good');
+
+  await row.locator('.trow-log').click();
+
+  // The POST is delayed ~400ms above — this assertion must observe the
+  // optimistic state WHILE the request is still open, not after it settles.
+  await expect(row).toHaveAttribute('data-verdict', 'bad');
+  await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'cross');
+  await expect(row).toHaveAttribute('data-state', 'pending');
+
+  // Let the delayed response resolve so the test doesn't leak a pending
+  // route into the next test.
+  await expect(row).toHaveAttribute('data-state', 'idle');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V6 — numeric replaces, never adds (PRIMARY REGRESSION GUARD)
+// ===========================================================================
+
+// This is the highest-value test in this revision: additive logging has
+// been removed from the product at the user's request (CONTRACT-2.1b.md
+// §0.1). T_CAL_STATE represents what a real Calories trackable looks like
+// today, post-migration-0004 (relog_semantic defaults to 'state' and
+// existing rows were backfilled to it). If this test ever sees a POST body
+// value of 2500 instead of 500, additive logging has silently come back.
+test('V6 — numeric re-log REPLACES the day\'s value; the POST body must be 500, not 2500', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CAL_STATE]);
+  const { postRequests } = await routeEntries(page, {
+    getFixture: [{ id: 700, trackable_id: 6, entry_date: TODAY, value: 2000, note: null }],
+    post: {
+      body: [{ id: 701, trackable_id: 6, entry_date: TODAY, value: 500, note: null }],
+    },
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="6"]');
+  await expect(row.locator('.trow-value')).toHaveText('2000 kcal');
+
+  await row.locator('.trow-log').click();
+  const input = row.locator('input.trow-input');
+  await input.fill('500');
+  await row.locator('.trow-save').click();
+
+  expect(postRequests.length).toBe(1);
+  const posted = JSON.parse(postRequests[0].body);
+  // The whole point of this test: 500, NOT 2000 + 500 = 2500.
+  expect(posted.value).toBe(500);
+  expect(posted.value).not.toBe(2500);
+  await expect(row.locator('.trow-value')).toHaveText('500 kcal');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V7 — numeric direction label
+// ===========================================================================
+
+test('V7 — numeric rows show a plain-English directionLabel ("less is better" / "more is better"), never the raw enum', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CAL_STATE, T_NUM_BUILD]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const breakRow = page.locator('li.trow[data-trackable-id="6"]'); // T_CAL_STATE, direction:'break'
+  await expect(breakRow.locator('.trow-direction')).toHaveText('less is better');
+
+  const buildRow = page.locator('li.trow[data-trackable-id="7"]'); // T_NUM_BUILD, direction:'build'
+  await expect(buildRow.locator('.trow-direction')).toHaveText('more is better');
+
+  // Never the raw enum value leaking into the DOM.
+  await expect(breakRow.locator('.trow-direction')).not.toHaveText('break');
+  await expect(buildRow.locator('.trow-direction')).not.toHaveText('build');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// V8 — greyscale survivability (WCAG 1.4.1: colour is never the only cue)
+// ===========================================================================
+
+test('V8 — the four boolean statusWord states (Done/Not yet/Clean/Logged) are all distinct text, so meaning survives without colour', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [
+    T_V8_BUILD_LOGGED,
+    T_V8_BUILD_UNLOGGED,
+    T_V8_BREAK_LOGGED,
+    T_V8_BREAK_UNLOGGED,
+  ]);
+  await routeEntries(page, {
+    getFixture: [
+      { id: 800, trackable_id: 10, entry_date: TODAY, value: 1, note: null }, // build, logged
+      // trackable_id 11 (build, unlogged): no entry
+      { id: 801, trackable_id: 12, entry_date: TODAY, value: 1, note: null }, // break, logged
+      // trackable_id 13 (break, unlogged): no entry
+    ],
+  });
+
+  await page.goto('/index.html#/');
+
+  // Use toHaveText (auto-retrying) rather than a raw .textContent() read:
+  // mount()'s refresh sequence renders once after trackables load and again
+  // after entries load (contract §3.2), so a plain one-shot read can
+  // observe the interim trackables-only render — where every row still
+  // looks unlogged — instead of the final state. toHaveText polls until it
+  // matches or the assertion times out, which is what every other
+  // state-reading assertion in this file already relies on.
+  const buildLoggedRow = page.locator('li.trow[data-trackable-id="10"] .trow-value');
+  const buildUnloggedRow = page.locator('li.trow[data-trackable-id="11"] .trow-value');
+  const breakLoggedRow = page.locator('li.trow[data-trackable-id="12"] .trow-value');
+  const breakUnloggedRow = page.locator('li.trow[data-trackable-id="13"] .trow-value');
+
+  await expect(buildLoggedRow).toHaveText('Done');
+  await expect(buildUnloggedRow).toHaveText('Not yet');
+  await expect(breakLoggedRow).toHaveText('Logged');
+  await expect(breakUnloggedRow).toHaveText('Clean');
+
+  // All four must be textually distinct — that is what "meaning is carried
+  // by words, not colour alone" actually requires. Safe to read with a
+  // plain .textContent() now that each has already been confirmed settled
+  // above.
+  const allFour = await Promise.all([
+    buildLoggedRow.textContent(),
+    buildUnloggedRow.textContent(),
+    breakLoggedRow.textContent(),
+    breakUnloggedRow.textContent(),
+  ]);
+  expect(new Set(allFour).size).toBe(4);
 
   expect(unexpected).toEqual([]);
 });

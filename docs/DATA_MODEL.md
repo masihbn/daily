@@ -65,6 +65,20 @@ the client which behavior to use when it re-logs a day; the actual
 upsert still goes through the `(trackable_id, entry_date)` unique
 constraint below.
 
+> **Migration `0004` (applied 2026-08-22) changed the default to
+> `'state'` and converted every existing row.** The user tried both
+> behaviours on device and chose replace-only, so **additive re-logging
+> is no longer offered anywhere in the UI** and every live row is
+> `'state'`.
+>
+> `'cumulative'` is deliberately still **legal** in the check constraint,
+> and `applyRelog()` in `js/aggregate.js` keeps its `cumulative` branch
+> and all its Phase 1 tests. Entry rows written before this migration
+> were produced additively; narrowing the constraint or deleting the code
+> path would make the schema and the code misdescribe how that historical
+> data came to exist. Treat `'cumulative'` as dormant-but-supported, not
+> as dead — and do not "clean it up" without re-reading this note.
+
 **Why `aggregation` is separate from `value_shape`?** They answer
 different questions. `value_shape` is about what a single day's value
 looks like; `aggregation` is about how a *range* of days rolls up into
