@@ -315,6 +315,41 @@ personal**:
 
 ## Test log
 
+### Attempt 7 — 2026-08-22, Step 2.1 deploy checkpoint on the real iPhone
+
+**Goal**: the extra checkpoint the user asked for after Step 2.1 (see
+`BUILD_PLAN.md` Step 2.1's banner). First time the Phase 1 data layer
+(`api.js` / `store.js` / `dates.js` / `aggregate.js`) has run in Mobile
+Safari at all — before this they had only ever executed in Node.
+
+**Seeded data.** The home screen had nothing to tap, because creating
+trackables is Step 2.2. Three real rows were inserted directly with the
+user's explicit approval — `Workout` (boolean), `Calories`
+(numeric/cumulative/kcal), `Weight` (numeric/state/kg), ids 365–367,
+`target_type='none'` and `bounds_enabled=false` since targets and bounds
+are Step 2.2 / Phase 3. They were verified through the app's own
+PostgREST query (`archived=is.false&order=sort_order.asc,id.asc`), not
+just via SQL. **These are real user rows, not test fixtures** — the
+suite's sweep only ever deletes names starting `__test__`, so it cannot
+touch them.
+
+**What passed** (user-confirmed on device): all three rows render in
+`sort_order`; the boolean toggles to Done and back; the numeric keypad
+comes up rather than QWERTY; **cumulative adds** (320 then 500 → 820);
+**state replaces** (78.4 then 79.1 → 79.1, not 157.5); invalid input
+shows "Enter a number" without saving; **an Airplane-Mode log survived a
+force-quit and reconnect** — the first real-world confirmation that the
+`localStorage` outbox works on iOS rather than against a mocked 503; and
+the nav-race fix holds (tap Home then Settings quickly → Settings stays
+highlighted).
+
+**No device-only bugs found this round.** Worth contrasting with Attempt
+6, which found two layout bugs invisible to the suite: the difference is
+that this step's risk was concentrated in logic that the e2e tier could
+genuinely exercise in a real browser, whereas Phase 0's risk was in
+`env()` insets and standalone display mode, which Playwright does not
+emulate at all.
+
 ### Attempt 6 — 2026-08-22, Phase 0 gate on the real iPhone
 
 **Goal**: verify the renamed URL, the new app shell, and Add to Home

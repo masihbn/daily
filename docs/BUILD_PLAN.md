@@ -1488,6 +1488,22 @@ survives iOS storage pressure and PWA backgrounding, and whether the
 outbox behaves on a genuinely flaky connection rather than a mocked 503.
 Deferred to the extra deploy checkpoint this step carries.
 
+**DEPLOY CHECKPOINT PASSED — 2026-08-22, verified on the user's iPhone.**
+
+Three real trackables were seeded first, with the user's explicit
+approval, because the create form is Step 2.2 and the screen was
+otherwise empty: `Workout` (boolean), `Calories` (numeric/cumulative,
+kcal), `Weight` (numeric/state, kg) — ids 365–367. Real user rows, not
+`__test__` fixtures, so the suite's sweep cannot delete them.
+
+All four device-only unknowns above came back clean: the keypad is
+numeric rather than QWERTY, cumulative added (320 → 500 → **820**), state
+replaced (78.4 → 79.1 → **79.1**, not 157.5), and **an Airplane-Mode log
+survived a force-quit and reconnect** — the first real-world proof the
+outbox works on iOS rather than against a mocked 503. The nav-race fix
+also held on device. No new bugs found. Full write-up in
+`PROJECT_NOTES.md` → Attempt 7.
+
 ---
 
 ## Step 2.2 — Create / edit a trackable
