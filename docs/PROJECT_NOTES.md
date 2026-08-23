@@ -315,6 +315,28 @@ personal**:
 
 ## Test log
 
+### Attempt 8 — 2026-08-23, Step 2.1b on the real iPhone
+
+**Goal**: verify the two product changes the user asked for after using
+2.1 — replace-only logging, and direction-aware good/bad visuals.
+
+**User-confirmed on device: all good, no issues found.** Four rows render;
+`Smoking` (a `break` boolean) shows the green check reading **Clean**
+before anything is logged and flips to a red cross reading **Logged** when
+tapped; `Workout` (a `build` boolean) goes muted → green check;
+re-logging `Calories` **replaced** rather than added.
+
+**The design point worth remembering:** a green check means *"today is
+good"*, not *"logged"*. Both a done Workout and an untouched Smoking show
+green, because both mean today went well. This reads as a bug to anyone
+who assumes check = logged — it is deliberate, and the reasoning
+(WCAG 1.4.1 plus how Loop / Streaks / Quitzilla handle negative habits) is
+recorded in `APP_CONCEPT.md` under the 2026-08-22 decision.
+
+**Live trackables at this point** (real user rows, NOT `__test__`
+fixtures, so the suite's sweep cannot touch them): `Workout` 365,
+`Calories` 366, `Weight` 367, `Smoking` 468.
+
 ### Attempt 7 — 2026-08-22, Step 2.1 deploy checkpoint on the real iPhone
 
 **Goal**: the extra checkpoint the user asked for after Step 2.1 (see
