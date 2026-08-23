@@ -1777,7 +1777,12 @@ of isolation.
 
 ## Step 2.4 — Phase 2 gate feedback: form fixes, per-shape targets, bounds verdict
 
-**Status:** DONE (2026-08-23) — code complete, **not yet device-verified.**
+**Status:** DONE (2026-08-23) — device-verified at the Phase 2 gate,
+2026-08-23. Defects 1, 2, 3, 5 and 6 confirmed fixed on the phone.
+**Defect 4's `weekly_average` half is stored but not yet observable** —
+nothing reads it back until Step 3.2, so the gate could only confirm the
+form offers the right choice per shape, not that the target does
+anything. See the open question on Step 3.2.
 
 Six defects the user found on their phone at the Phase 2 gate. Suite:
 **1108 green** (994 unit, 43 integration, 71 e2e), up from 1057.
@@ -1836,7 +1841,13 @@ further schema change.
 
 ## Step 2.5 — Icons, and making `color` actually do something
 
-**Status:** DONE (2026-08-23) — code complete, **not yet device-verified.**
+**Status:** DONE (2026-08-23) — device-verified at the Phase 2 gate,
+2026-08-23. The user confirmed the tinted icons render on the phone,
+which is the fix this step exists for. This mattered more than a usual
+device check: see the process caveat at the end of this step — its tests
+were written after the implementation rather than blind against it, so
+device confirmation is carrying more of the evidential weight here than
+elsewhere in the plan.
 
 Suite: **1519 green** (1397 unit, 43 integration, 79 e2e), up from 1108.
 `sw.js` `CACHE` `daily-v16` → `daily-v17`, `./js/icons.js` added to
@@ -1944,6 +1955,60 @@ phone, re-log the same day to confirm the cumulative/state behavior
 reads correctly, and edit a past day. Their feel for the quick-log flow
 matters more here than any test result. **Wait before Phase 3.**
 
+**PASSED — 2026-08-23, verified on the user's iPhone.** No defects found.
+
+This gate ran twice. The first pass produced the six defects fixed in
+Step 2.4 and the colour-has-no-visual-effect bug fixed in Step 2.5; this
+entry records the **re-verification** of those fixes against
+`daily-v17`.
+
+*Suite and deploy state at gate time (orchestrator-verified, not
+assumed):* **1519 green** — 1397 unit, 43 integration, 79 e2e, zero
+failures. `main` clean and in sync with `origin`. The **live** Pages
+`sw.js` was fetched and reports `CACHE = 'daily-v17'`, and
+`js/icons.js` returns 200 — so the icon set was confirmed *deployed*,
+not merely committed. Post-run isolation check: 0 `__test__` rows, 0
+orphaned entries, `app_settings` still a singleton at
+`rolling_window_days = 90`, `counter` intact.
+
+*Verified by database evidence rather than self-report:* the `Smoking`
+entry for 2026-08-23 was found with `created_at == updated_at` at
+21:18 on a row that demonstrably existed earlier in the day — i.e. it
+was **deleted and re-inserted**, which is the un-log → re-log
+round-trip. **This is the first time `removeEntry` has ever executed on
+the physical device**; before this it had only run against stubs in the
+unit tier. Worth recording because `home.js` deliberately clears a
+boolean day with a DELETE rather than `saveEntry({value: 0})` —
+`applyRelog()` forbids an un-toggle path — so this is the only proof
+that branch works in Mobile Safari.
+
+*User-confirmed by eye* (read-only observations that correctly leave no
+database trace): the opening-screen prediction (icon glyph, tint,
+status word and verdict colour for all five visible rows, with the
+archived `Numerx` correctly absent), the manual-bounds
+`In range`/`Out of range` verdict from Step 2.4 DEFECT 5, the icon
+picker, and the Step 2.4 form fixes.
+
+*One checklist item was dropped as unfalsifiable, not as untested.*
+The script asked the user to exercise `weekly_average` ("Average per
+week", migration `0005`). On investigation **nothing reads that value
+back** — `js/views/trackable.js` is the only non-test file that
+mentions it, so it is write-only today. It is consumed by the weekly
+chart in Step 3.2, and there was therefore nothing on screen for the
+user to judge. Recorded here so a later reader does not mistake this
+for a coverage gap at the gate; see the open question added to Step
+3.2.
+
+*Method note worth keeping:* the user's initial verdict was a bare
+"everything seems good". Rather than record that verbatim, the
+orchestrator diffed the live database against its pre-checklist
+snapshot and found three items with no trace, then asked which had
+actually been done. Two had been (and simply leave no trace); the third
+turned out to be untestable by construction. **A device gate reported
+in prose should be reconciled against whatever state the device
+actually changed** — it costs one query and it is the difference
+between a real evidence trail and a decorative one.
+
 ---
 
 # PHASE 3 — Charts
@@ -2016,6 +2081,52 @@ line.
   A hash-router that re-renders a view without destroying the old canvas
   leaks the instance and produces the classic "tooltips from the
   previous chart" bug.
+
+**⚠️ OPEN QUESTION — resolve with the user before implementing (raised
+2026-08-23 at the Phase 2 gate).**
+
+**`aggregation` and `target_type` can describe different kinds of
+number, and this step as written would draw them on the same axis.**
+
+The notes above say bar height comes from
+`rollup(entries, 'week', trackable.aggregation)` and the target line is
+an annotation at `target_value`. That silently assumes the two are
+commensurable. They are not always:
+
+- The user's real `Calories` trackable is `aggregation: 'sum'`. Its bars
+  are therefore weekly **totals** — on the order of 14,000 kcal.
+- If its `target_type` is `weekly_average` with `target_value: 2000`,
+  the line is drawn at **2000** — a per-day average.
+
+A 14,000-high bar against a line at 2000 pins the line to the floor and
+communicates nothing. The chart would not error, look broken, or fail a
+test; it would just quietly be meaningless, which is worse.
+
+This is not hypothetical: `weekly_average` was added in Step 2.4 for
+exactly this trackable, and migration `0005` lets any numeric trackable
+hold that combination today.
+
+Three candidate resolutions, **not to be chosen unilaterally** — the
+first two change what the chart means, and `APP_CONCEPT.md` is the
+record of the user's decisions:
+
+1. **Let `target_type` override the rollup for the chart** — when
+   `target_type = 'weekly_average'`, plot the weekly *average* even
+   though `aggregation` says `sum`. The line becomes meaningful; the
+   bars stop matching what the rest of the app shows for that trackable.
+2. **Scale the line to the bars** — keep `sum` bars and draw the line at
+   `target_value × (days with an entry that week)`. Honest, but the line
+   then moves week to week, which is a strange thing for a "target" to
+   do.
+3. **Constrain it in the form** — make `weekly_average` selectable only
+   when `aggregation = 'average'`, so the mismatch cannot be created.
+   Cleanest, but it is a Step 2.2/2.4 form change reaching backwards
+   into a shipped screen, and it would strand any row already saved with
+   the combination.
+
+Note the same class of mismatch exists for `weekly_count` on a boolean
+whose `aggregation` is `count` — that pair *is* commensurable, which is
+why the problem did not surface before `weekly_average` existed.
 
 **Test Subjects.**
 

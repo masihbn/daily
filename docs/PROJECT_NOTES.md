@@ -315,6 +315,61 @@ personal**:
 
 ## Test log
 
+### Attempt 9 — 2026-08-23, Phase 2 gate (re-run) on the real iPhone
+
+**Goal**: re-verify the Step 2.4 defect fixes and the Step 2.5 icon/colour
+fix against the deployed `daily-v17`. Both steps had been sitting at
+"code complete, not yet device-verified".
+
+**User-confirmed on device: all good, no defects found.** Phase 2 gate
+**PASSED**; Phase 3 is unblocked.
+
+**Deploy state was verified live, not assumed.** The Pages `sw.js` was
+fetched over HTTPS and reported `CACHE = 'daily-v17'`, and
+`https://masihbn.github.io/daily/js/icons.js` returned 200. Worth doing
+every time: a green suite plus a clean `git status` proves the code is
+*committed*, not that Pages has *served* it, and the whole failure mode
+of this project is a phone quietly running an old cached build.
+
+**Suite at gate time**: 1519 green (1397 unit, 43 integration, 79 e2e).
+Post-run isolation check clean — 0 `__test__` rows, 0 orphaned entries,
+`counter` intact, `app_settings` still a singleton at 90.
+
+**The technique worth reusing: reconcile a prose verdict against the
+database.** The user's first answer was "everything seems good". Diffing
+the live tables against the pre-checklist snapshot showed three of the
+seven scripted items had left no trace at all — bounds still disabled
+everywhere, no row using `weekly_average`, three trackables still on the
+`dot` fallback. Asking which had actually been done resolved it: two had
+been (they are read-only observations and *correctly* leave no trace),
+and the third was untestable by construction. Without that query the log
+would now claim device verification for a feature nobody could have
+seen. One SQL query separated a real evidence trail from a decorative
+one.
+
+**`removeEntry` ran on the physical device for the first time.** The
+`Smoking` entry for 2026-08-23 was found with `created_at ==
+updated_at` at 21:18 on a row that had existed earlier that day — proof
+of a DELETE followed by a fresh INSERT, i.e. the un-log → re-log
+round-trip. `home.js` clears a boolean day with a DELETE rather than
+`saveEntry({value: 0})` (`applyRelog()` forbids an un-toggle path), so
+until this gate that branch had only ever run against unit-tier stubs.
+
+**A feature was found to be write-only.** `weekly_average` ("Average per
+week", migration `0005`) is written by the form and read by nothing —
+`js/views/trackable.js` is its only non-test mention. It is consumed by
+the Step 3.2 weekly chart, so there was nothing on screen to verify. It
+also turns out to collide with `aggregation`: a `sum` trackable draws
+weekly totals (~14,000 kcal) while an "average per week" target line
+draws at 2000. Logged as an open question on Step 3.2 rather than
+resolved here — it changes what a chart *means*, which is the user's
+call, not the orchestrator's.
+
+**Live trackables at this point** (real user rows, NOT `__test__`
+fixtures): `Workout` 365, `Test random` 694, `Calories` 366, `Weight`
+367, `Smoking` 468, plus archived `Numerx` 695 (correctly absent from
+home, which is itself the archive feature working).
+
 ### Attempt 8 — 2026-08-23, Step 2.1b on the real iPhone
 
 **Goal**: verify the two product changes the user asked for after using
