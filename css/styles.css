@@ -226,6 +226,29 @@ button {
   border-left-color: var(--danger);
 }
 
+/* Step 2.5: the trackable's identity colour (which thing is this),
+   carried ONLY by this icon's tint — never by data-verdict, which colours
+   the row border/background and .trow-symbol instead. See
+   CONTRACT-2.5.md §0 "the channel rule". color is set inline per-row from
+   the trackable's stored colour (home.js); when absent this falls back to
+   the same muted tone the symbol ring uses, so an uncoloured trackable
+   still reads as a coherent (if neutral) icon. */
+.trow-icon {
+  order: -1;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+
+.trow-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
 .trow-symbol {
   order: 0;
   flex: 0 0 auto;
@@ -541,6 +564,76 @@ button {
   font-size: 15px;
 }
 
+/* Step 2.5: the icon picker. Same visually-collapsed-radio pattern as
+   .tform-color-group below. The grid's own `color` is set inline from the
+   currently-selected colour swatch (trackable.js iconField()) so every
+   glyph in it previews the icon+colour combination together before
+   saving — see CONTRACT-2.5.md §3.3. Bounded height + vertical scroll so
+   ~54 options don't push the rest of the form far down the page; the page
+   itself must never scroll horizontally at 390px, which this grid (flex
+   + wrap, no fixed widths wider than the viewport) does not risk. */
+.tform-icon-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.tform-icon-grid input[type="radio"] {
+  /* Same rationale as .tform-color-group input[type="radio"] below: kept
+     native (not display:none) for keyboard/AT focusability, just visually
+     collapsed — the label carries the visible affordance. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.tform-icon-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: var(--bg-elevated);
+  color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tform-icon-glyph {
+  width: 24px;
+  height: 24px;
+  display: flex;
+}
+
+.tform-icon-glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Same unmistakable-selection treatment as the colour swatch fix in Step
+   2.4 (CONTRACT-2.4.md §8) — an outline clearly separated from the option,
+   not colour alone (WCAG 1.4.1). outline-offset is 2px here (vs 3px for
+   the colour swatch) per CONTRACT-2.5.md §3.3. */
+.tform-icon-grid input[type="radio"]:checked + .tform-icon-option {
+  outline: 3px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.tform-icon-grid input[type="radio"]:focus-visible + .tform-icon-option {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .tform-color-group {
   display: flex;
   flex-wrap: wrap;
@@ -681,6 +774,27 @@ button {
   column-gap: 10px;
   row-gap: 6px;
   margin: 0 0 16px;
+}
+
+/* Step 2.5: same tinted-icon treatment as .trow-icon, at a larger size
+   for the detail header. Tinted by the trackable's colour only — this
+   screen doesn't even compute a verdict, so there is nothing for it to
+   conflict with. No explicit `order` needed: this is appended first in
+   detail.js and detail-head's other children carry no order of their own,
+   so DOM order already puts it first. */
+.detail-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+
+.detail-icon svg {
+  width: 32px;
+  height: 32px;
 }
 
 .detail-name {

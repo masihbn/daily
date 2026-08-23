@@ -451,6 +451,115 @@ test('DEFECT6 — selecting a colour swatch marks its radio checked (and the pre
 });
 
 // ===========================================================================
+// CONTRACT-2.5.md §3.3/§4.2 — the icon picker
+// ===========================================================================
+//
+// Per contract §3.3: a new .tform-icon-grid field, data-field="icon",
+// placed immediately before color and always visible; defaultsFor() gains
+// icon:'dot' so the "dot" radio is checked by default; the grid itself is
+// tinted by the currently-selected colour swatch (set via `color` on
+// .tform-icon-grid from formState.color) so the user previews the
+// combination before saving.
+
+test('ICON-T1 — the icon grid (.tform-icon-grid) is visible on #/new, with the "dot" radio checked by default (defaultsFor gains icon:"dot")', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const grid = page.locator('.tform-icon-grid');
+  await expect(grid).toBeVisible();
+  await expect(page.locator('input[name="icon"][value="dot"]')).toBeChecked();
+
+  expect(unexpected).toEqual([]);
+});
+
+test('ICON-T2 — clicking an icon option checks its radio, and the previously-selected default ("dot") is no longer checked', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const dumbbellRadio = page.locator('input[name="icon"][value="dumbbell"]');
+  const dumbbellId = await dumbbellRadio.getAttribute('id');
+  expect(dumbbellId).toBeTruthy();
+  // §3.3: the radio stays "focusable-but-visually-collapsed" (same pattern
+  // colour swatches already use) — click its <label>, the real tap target.
+  await page.locator(`label[for="${dumbbellId}"]`).click();
+
+  await expect(dumbbellRadio).toBeChecked();
+  await expect(page.locator('input[name="icon"][value="dot"]')).not.toBeChecked();
+
+  expect(unexpected).toEqual([]);
+});
+
+test('ICON-T3 — saving with the dumbbell icon selected POSTs a body whose icon equals "dumbbell"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const { postRequests } = await routeTrackables(page, {
+    getFixture: [],
+    post: {
+      body: [
+        {
+          id: 950,
+          name: 'Workout',
+          value_shape: 'boolean',
+          relog_semantic: 'state',
+          aggregation: 'count',
+          direction: 'build',
+          target_type: 'none',
+          icon: 'dumbbell',
+          color: '#34c759',
+          archived: false,
+          sort_order: 0,
+        },
+      ],
+    },
+  });
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/new');
+  await page.locator('input[name="name"]').fill('Workout');
+  const dumbbellRadio = page.locator('input[name="icon"][value="dumbbell"]');
+  const dumbbellId = await dumbbellRadio.getAttribute('id');
+  await page.locator(`label[for="${dumbbellId}"]`).click();
+  await page.locator('.tform-save').click();
+
+  await expect(page).toHaveURL(/#\/$/);
+
+  expect(postRequests.length).toBe(1);
+  const body = JSON.parse(postRequests[0].body);
+  expect(body.icon).toBe('dumbbell');
+
+  expect(unexpected).toEqual([]);
+});
+
+test('ICON-T4 — the icon grid\'s computed colour follows the currently-selected colour swatch', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const grid = page.locator('.tform-icon-grid');
+  // Default colour swatch is #34c759 (F1's documented default) -> rgb(52, 199, 89).
+  await expect(grid).toHaveCSS('color', 'rgb(52, 199, 89)');
+
+  const blueSwatch = page.locator('input[name="color"][value="#3478f6"]');
+  const blueId = await blueSwatch.getAttribute('id');
+  expect(blueId).toBeTruthy();
+  await page.locator(`label[for="${blueId}"]`).click();
+
+  // #3478f6 -> rgb(52, 120, 246).
+  await expect(grid).toHaveCSS('color', 'rgb(52, 120, 246)');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
 // F4 — empty name validation
 // ===========================================================================
 

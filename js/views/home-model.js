@@ -255,6 +255,7 @@ export function rowModel(trackable, entry, status) {
       hint: '',
       state,
       color: null,
+      icon: null,
       verdict: 'neutral',
       statusWord: '',
       statusSymbol: 'empty',
@@ -278,6 +279,11 @@ export function rowModel(trackable, entry, status) {
     hint: relogHint(trackable, entry),
     state,
     color: typeof trackable.color === 'string' && trackable.color !== '' ? trackable.color : null,
+    // Step 2.5: the icon key, or null when the trackable has none set — the
+    // view falls back to 'dot' for both null and an unrecognized key (see
+    // home.js buildRow()), so the trackable's colour is visible even before
+    // an icon is picked.
+    icon: typeof trackable.icon === 'string' && trackable.icon !== '' ? trackable.icon : null,
     verdict: verdict(trackable, entry),
     statusWord: statusWord(trackable, entry),
     statusSymbol: statusSymbol(trackable, entry),

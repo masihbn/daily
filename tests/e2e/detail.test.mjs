@@ -489,6 +489,38 @@ test('D10 — .detail-count reads "1 entry in range" for one entry and "3 entrie
 });
 
 // ===========================================================================
+// CONTRACT-2.5.md §3.2/§4.2 — the detail header renders a tinted icon
+// ===========================================================================
+//
+// T_NUM_BOUNDS already carries icon-agnostic fixture data plus a non-null
+// color (#34c759); extending it with icon:'dumbbell' here (rather than
+// inventing a new fixture) keeps this test's other DOM expectations (name,
+// unit, slot count) identical to D1/D3's already-established baseline.
+
+test('ICON-DETAIL1 — the detail header renders .detail-icon[data-icon="dumbbell"] containing an svg, tinted by the trackable colour (CONTRACT-2.5.md §3.2)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const trackableWithIcon = { ...T_NUM_BOUNDS, icon: 'dumbbell' };
+  await routeTrackables(page, [trackableWithIcon, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+
+  const section = page.locator('section.detail');
+  await expect(section).toHaveAttribute('data-detail-state', 'ready');
+
+  const icon = section.locator('.detail-icon');
+  await expect(icon).toHaveAttribute('data-icon', 'dumbbell');
+  await expect(icon.locator('svg')).toHaveCount(1);
+  // Same binding regression-guard as home.test.mjs's ICON1: the colour must
+  // be REALLY applied (computed style), not merely stored.
+  await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
 // D11 — no uncaught errors, no horizontal scroll, tap targets
 // ===========================================================================
 

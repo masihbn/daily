@@ -20,11 +20,15 @@
 import { getStore } from '../store.js';
 import * as apiModule from '../api.js';
 import { parseNumericInput } from './home-model.js';
+import { ICONS, ICON_KEYS, iconSvg, hasIcon } from '../icons.js';
 
 // --- shared constants ------------------------------------------------------
 
 // DOM order for the `div.tform-field[data-field]` wrappers — also the
 // order visibleFields() returns. Binding per CONTRACT-2.2.md §3.8.
+// Step 2.5: 'icon' sits immediately before 'color' — the icon picker is
+// tinted by the currently-selected colour, so showing colour right after
+// icon in the DOM keeps the two fields that visually interact adjacent.
 const FIELD_ORDER = [
   'name',
   'value_shape',
@@ -37,6 +41,7 @@ const FIELD_ORDER = [
   'bounds_mode',
   'bound_lower',
   'bound_upper',
+  'icon',
   'color',
 ];
 
@@ -88,6 +93,10 @@ export function defaultsFor(valueShape) {
     bounds_mode: 'auto',
     bound_lower: '',
     bound_upper: '',
+    // Step 2.5: 'dot' is the documented fallback icon (js/icons.js) — every
+    // new trackable starts with it selected so the icon grid always shows
+    // a checked option, matching how `color` always starts on PALETTE[0].
+    icon: 'dot',
     color: PALETTE[0],
   };
 }
@@ -164,6 +173,8 @@ export function visibleFields(state) {
     bounds_mode: boundsOn,
     bound_lower: manual,
     bound_upper: manual,
+    // Step 2.5: always visible for both shapes, same as color.
+    icon: true,
     color: true,
   };
 
@@ -236,6 +247,12 @@ export function buildPayload(state) {
     aggregation: s.aggregation,
     direction: s.direction === 'break' ? 'break' : 'build',
     target_type: targetType,
+    // Step 2.5: falls back to 'dot' (the documented fallback icon) for any
+    // unrecognized/missing value, mirroring how the picker itself always
+    // has a real ICON_KEYS entry checked. Never sends a raw, unvalidated
+    // string straight through — hasIcon() is the single source of truth
+    // for "is this a real icon key."
+    icon: hasIcon(s.icon) ? s.icon : 'dot',
     color: s.color,
     // `archived` is deliberately never sent from this form: there is no
     // archived control here, and archiving is a separate explicit action
@@ -298,6 +315,9 @@ function stateFromTrackable(t) {
     bounds_mode: t.bounds_mode === 'manual' ? 'manual' : 'auto',
     bound_lower: stringifyNum(t.bound_lower),
     bound_upper: stringifyNum(t.bound_upper),
+    // Step 2.5: falls back to 'dot' for null/empty/unrecognized, same rule
+    // buildPayload() applies on the way out.
+    icon: hasIcon(t.icon) ? t.icon : 'dot',
     color: typeof t.color === 'string' && t.color !== '' ? t.color : PALETTE[0],
   };
 }
@@ -458,6 +478,65 @@ export function createTrackableView({ mode, id, api, store } = {}) {
     return wrap;
   }
 
+  // Step 2.5: the icon picker. Same visually-collapsed-radio +
+  // styled-label pattern colorField() already uses below, so the two
+  // fields behave identically for keyboard/AT users. The whole grid is
+  // tinted by the CURRENTLY-SELECTED colour (not yet-saved — this reads
+  // live formState.color) so the user sees the icon+colour combination
+  // before saving, exactly as CONTRACT-2.5.md §3.3 asks.
+  function iconField() {
+    const wrap = document.createElement('div');
+    wrap.className = 'tform-field';
+    wrap.dataset.field = 'icon';
+
+    const legend = document.createElement('span');
+    legend.className = 'tform-label';
+    legend.textContent = 'Icon';
+    wrap.appendChild(legend);
+
+    const grid = document.createElement('div');
+    grid.className = 'tform-icon-grid';
+    if (typeof formState.color === 'string' && formState.color !== '') {
+      grid.style.color = formState.color;
+    }
+
+    for (const key of ICON_KEYS) {
+      const entry = ICONS[key];
+      const id = `tf-icon-${key}`;
+
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.id = id;
+      input.name = 'icon';
+      input.value = key;
+      input.checked = formState.icon === key;
+      grid.appendChild(input);
+
+      const lab = document.createElement('label');
+      lab.setAttribute('for', id);
+      lab.className = 'tform-icon-option';
+      lab.title = entry.label;
+
+      const srText = document.createElement('span');
+      srText.className = 'visually-hidden';
+      srText.textContent = entry.label;
+      lab.appendChild(srText);
+
+      // Own constant SVG markup only (js/icons.js) — every other node
+      // built by this form uses textContent for anything user-supplied.
+      const iconWrap = document.createElement('span');
+      iconWrap.className = 'tform-icon-glyph';
+      iconWrap.setAttribute('aria-hidden', 'true');
+      iconWrap.innerHTML = iconSvg(key);
+      lab.appendChild(iconWrap);
+
+      grid.appendChild(lab);
+    }
+    wrap.appendChild(grid);
+
+    return wrap;
+  }
+
   function colorField() {
     const wrap = document.createElement('div');
     wrap.className = 'tform-field';
@@ -565,6 +644,9 @@ export function createTrackableView({ mode, id, api, store } = {}) {
         break;
       case 'bound_upper':
         wrap = textField('bound_upper', 'Upper bound', { decimal: true });
+        break;
+      case 'icon':
+        wrap = iconField();
         break;
       case 'color':
         wrap = colorField();

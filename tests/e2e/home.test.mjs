@@ -1104,6 +1104,113 @@ test('BOUNDS3 — the same trackable with bounds_mode "auto" (not yet wired to a
 });
 
 // ===========================================================================
+// CONTRACT-2.5.md §4.2 — icons + "make colour actually do something"
+// ===========================================================================
+//
+// The reported bug: a per-trackable `color` was stored and computed
+// (rowModel already returned it) but rendered NOWHERE — picking a colour
+// had no visible effect at all. The fix renders an icon (js/icons.js, a
+// tinted monochrome SVG set) as the FIRST child of each li.trow, tinted by
+// the trackable's colour via inline `style.color` (which the SVG's
+// `stroke="currentColor"`/`fill="currentColor"` picks up).
+//
+// T_ICON below is deliberately its own fixture (not reusing T_BOOL etc.)
+// because none of the existing fixtures in this file set both `icon` and a
+// non-null `color` together, and this is the one case that matters most:
+// per CONTRACT-2.5.md §0, "the icon is the thing the colour tints."
+const T_ICON = {
+  id: 30,
+  name: 'Workout',
+  value_shape: 'boolean',
+  relog_semantic: 'state',
+  aggregation: 'count',
+  direction: 'build',
+  unit: null,
+  icon: 'dumbbell',
+  color: '#34c759',
+  sort_order: 30,
+  archived: false,
+};
+
+const T_ICON_NULL = { ...T_ICON, id: 31, icon: null, color: null };
+const T_ICON_BOGUS = { ...T_ICON, id: 32, icon: 'bogus' };
+
+test('ICON1 — a trackable with icon:"dumbbell" and color:"#34c759" renders .trow-icon[data-icon="dumbbell"] containing an svg, tinted rgb(52, 199, 89) via COMPUTED style — the regression guard for the colour-has-no-visual-effect bug', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_ICON]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="30"]');
+  const icon = row.locator('.trow-icon');
+  await expect(icon).toHaveAttribute('data-icon', 'dumbbell');
+  await expect(icon.locator('svg')).toHaveCount(1);
+
+  // THE BINDING ASSERTION (CONTRACT-2.5.md §0 / this task's brief): the
+  // colour must be observably applied via getComputedStyle, not merely
+  // stored as a data-/style- attribute string. Before the fix, `color` was
+  // stored on the trackable and even computed by rowModel(), but nothing in
+  // home.js ever read it — an assertion that only checked, say,
+  // `.trow-icon`'s `style` attribute string or a `data-color` attribute
+  // would have passed against that broken build (the attribute could exist
+  // with the right value while the element rendered with no visible tint
+  // at all, exactly like CONTRACT-2.4.md's DEFECT 1, where a `hidden`
+  // *attribute* was asserted while the field was plainly visible on
+  // screen). toHaveCSS reads the element's actual computed style, i.e.
+  // what a real user's eye would see.
+  await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
+
+  expect(unexpected).toEqual([]);
+});
+
+test('ICON2 — a trackable with icon:null renders .trow-icon[data-icon="dot"] (the documented fallback), with no inline colour style when color is also null', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_ICON_NULL]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="31"]');
+  const icon = row.locator('.trow-icon');
+  await expect(icon).toHaveAttribute('data-icon', 'dot');
+  await expect(icon.locator('svg')).toHaveCount(1);
+  // CONTRACT-2.5.md §3.1: "When trackable.color is null/empty, omit the
+  // inline style and let it inherit the muted default" — so el.style.color
+  // must be unset, not merely "some computed colour" (which is always true
+  // of every element and would prove nothing about whether the omit rule
+  // was honoured).
+  const inlineColor = await icon.evaluate((el) => el.style.color);
+  expect(inlineColor).toBe('');
+
+  expect(unexpected).toEqual([]);
+});
+
+test('ICON3 — a trackable with an unknown icon key ("bogus") also renders .trow-icon[data-icon="dot"] — unknown keys fall back, they do not render an empty box', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_ICON_BOGUS]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="32"]');
+  const icon = row.locator('.trow-icon');
+  await expect(icon).toHaveAttribute('data-icon', 'dot');
+  await expect(icon.locator('svg')).toHaveCount(1);
+  // Still tinted, per T_ICON_BOGUS's inherited color:'#34c759' — an unknown
+  // icon key must not also lose the colour tint.
+  await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
 // NAV-RACE — a render suspended mid-mount must not clobber a later render
 // ===========================================================================
 //

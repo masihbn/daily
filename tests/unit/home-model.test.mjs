@@ -911,6 +911,9 @@ describe('rowModel — worked examples (contract §2.6, assert exactly; extended
       hint: 'Tap to log today',
       state: 'idle',
       color: null,
+      // CONTRACT-2.5.md §3.1: rowModel adds icon the same way it already
+      // handles color. No icon on the trackable -> null.
+      icon: null,
       // missing direction -> treated as 'build'; not logged -> neutral/'Not yet'/'empty'
       verdict: 'neutral',
       statusWord: 'Not yet',
@@ -943,6 +946,8 @@ describe('rowModel — worked examples (contract §2.6, assert exactly; extended
       hint: 'Today: 320 kcal · tap to change',
       state: 'pending',
       color: '#ff0',
+      // CONTRACT-2.5.md §3.1: no icon on this fixture -> null.
+      icon: null,
       // numeric rows are always verdict-neutral (no target to judge against
       // yet — Phase 3), statusWord is empty (valueText carries the number),
       // statusSymbol follows verdict, and this fixture has no direction.
@@ -1015,6 +1020,8 @@ describe('rowModel — additional documented rules', () => {
       hint: '',
       state: 'failed',
       color: null,
+      // CONTRACT-2.5.md §3.1: same null-trackable fallback applies to icon.
+      icon: null,
       verdict: 'neutral',
       statusWord: '',
       statusSymbol: 'empty',
@@ -1030,6 +1037,7 @@ describe('rowModel — additional documented rules', () => {
     assert.equal(result.statusWord, '');
     assert.equal(result.statusSymbol, 'empty');
     assert.equal(result.directionLabel, '');
+    assert.equal(result.icon, null);
   });
 
   it("shape is 'unknown' for an unrecognized value_shape", () => {
@@ -1054,6 +1062,39 @@ describe('rowModel — additional documented rules', () => {
     assert.equal(
       rowModel({ id: 1, name: 'X', value_shape: 'boolean', color: 5 }, null, 'idle').color,
       null
+    );
+  });
+
+  // CONTRACT-2.5.md §3.1: "rowModel() in home-model.js already returns
+  // color; add icon to it the same way (typeof trackable.icon === 'string'
+  // && trackable.icon !== '' ? trackable.icon : null)." Mirrors the color
+  // block immediately above, one-for-one, per that exact rule.
+  it('icon: non-empty string kept; empty string, null, missing, or non-string becomes null (CONTRACT-2.5.md §3.1)', () => {
+    assert.equal(
+      rowModel({ id: 1, name: 'X', value_shape: 'boolean', icon: 'dumbbell' }, null, 'idle').icon,
+      'dumbbell'
+    );
+    assert.equal(
+      rowModel({ id: 1, name: 'X', value_shape: 'boolean', icon: '' }, null, 'idle').icon,
+      null
+    );
+    assert.equal(
+      rowModel({ id: 1, name: 'X', value_shape: 'boolean', icon: null }, null, 'idle').icon,
+      null
+    );
+    assert.equal(rowModel({ id: 1, name: 'X', value_shape: 'boolean' }, null, 'idle').icon, null);
+    assert.equal(
+      rowModel({ id: 1, name: 'X', value_shape: 'boolean', icon: 5 }, null, 'idle').icon,
+      null
+    );
+    // Unknown icon keys (e.g. not present in js/icons.js's ICONS table) are
+    // NOT rowModel's concern — CONTRACT-2.5.md §3.1's formula only checks
+    // "is this a non-empty string", not "is this a known key". Falling back
+    // to the 'dot' icon for an unrecognized key is home.js's job when it
+    // renders data-icon, not rowModel's.
+    assert.equal(
+      rowModel({ id: 1, name: 'X', value_shape: 'boolean', icon: 'bogus' }, null, 'idle').icon,
+      'bogus'
     );
   });
 

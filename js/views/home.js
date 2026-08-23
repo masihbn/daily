@@ -12,6 +12,7 @@
 import { getStore } from '../store.js';
 import { todayLocal } from '../dates.js';
 import { visibleTrackables, parseNumericInput, nextValueFor, rowModel } from './home-model.js';
+import { iconSvg, hasIcon } from '../icons.js';
 
 export function createHomeView({ store, today } = {}) {
   const st = store || getStore();
@@ -112,6 +113,36 @@ export function createHomeView({ store, today } = {}) {
     // flips green-check -> red-cross immediately, before the network call
     // resolves.
     li.dataset.verdict = model.verdict;
+
+    // Step 2.5: the trackable's identity colour, carried by the icon glyph
+    // ONLY — never by the verdict. See CONTRACT-2.5.md §0 "the channel
+    // rule": trackable colour = identity (which thing is this), verdict
+    // green/red = state (is today good or bad). They must never fight for
+    // the same element, so this span's tint is set here from model.color
+    // and is untouched by data-verdict anywhere in this file or in CSS.
+    //
+    // data-icon falls back to 'dot' for both a null icon and an
+    // unrecognized key (hasIcon() covers the latter) so the colour is
+    // still visible before the user ever picks an icon.
+    const iconKey = hasIcon(model.icon) ? model.icon : 'dot';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'trow-icon';
+    iconSpan.dataset.icon = iconKey;
+    iconSpan.setAttribute('aria-hidden', 'true'); // decorative — model.name is the accessible label
+    if (model.color) {
+      // Set via the DOM property, never string-interpolated into markup —
+      // model.color always comes from the trackable's own stored colour,
+      // never user free text, but this is the one place a colour value
+      // reaches an element attribute at all, so it goes through the safe
+      // API regardless.
+      iconSpan.style.color = model.color;
+    }
+    // The SVG markup below is our own constant table (js/icons.js) — this
+    // is the only innerHTML assignment in this file. Everything
+    // user-supplied (model.name, hint text, error text, etc.) is set via
+    // textContent elsewhere in this function.
+    iconSpan.innerHTML = iconSvg(iconKey);
+    li.appendChild(iconSpan);
 
     // Decorative shape+colour cue (WCAG 1.4.1: colour is never the only
     // cue — model.statusWord/valueText already carries the meaning to

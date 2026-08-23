@@ -69,6 +69,16 @@ describe('defaultsFor — §3.3 exact defaults', () => {
       bounds_mode: 'auto',
       bound_lower: '',
       bound_upper: '',
+      // CONTRACT-2.5.md §3.3: "defaultsFor() gains icon: 'dot'." Note: this
+      // file's ownership is NOT listed in CONTRACT-2.5.md §1's Files table
+      // (only tests/unit/icons.test.mjs and the three e2e files are listed
+      // for the Test Author role there) — but §3.3's body text explicitly
+      // mandates this change to defaultsFor()/visibleFields()/buildPayload(),
+      // which this Step-2.2/2.4 suite pins with exact-match assertions. That
+      // is a gap in the contract's file table, reported in the accompanying
+      // summary; the fix below keeps the regression suite green rather than
+      // leaving it broken by an out-of-scope omission.
+      icon: 'dot',
       color: '#34c759',
     });
   });
@@ -86,6 +96,7 @@ describe('defaultsFor — §3.3 exact defaults', () => {
       bounds_mode: 'auto',
       bound_lower: '',
       bound_upper: '',
+      icon: 'dot',
       color: '#34c759',
     });
   });
@@ -296,7 +307,9 @@ describe('targetOptionsFor — per-shape target option list (CONTRACT-2.4.md §6
 describe('visibleFields — boolean shape (unit/aggregation/bounds_* never shown, regardless of bounds_enabled/bounds_mode)', () => {
   it('boolean, target_type "none": only the always-visible fields', () => {
     const state = { ...defaultsFor('boolean'), target_type: 'none' };
-    assert.deepEqual(visibleFields(state), ['name', 'value_shape', 'direction', 'target_type', 'color']);
+    // CONTRACT-2.5.md §3.3: the icon field is "always visible (both
+    // shapes)", placed immediately before color.
+    assert.deepEqual(visibleFields(state), ['name', 'value_shape', 'direction', 'target_type', 'icon', 'color']);
   });
 
   it('boolean, target_type "weekly_count": target_value inserted in its DOM position', () => {
@@ -307,13 +320,14 @@ describe('visibleFields — boolean shape (unit/aggregation/bounds_* never shown
       'direction',
       'target_type',
       'target_value',
+      'icon',
       'color',
     ]);
   });
 
   it('boolean with bounds_enabled/bounds_mode garbage set anyway: bounds_* still never shown (fields are hidden by value_shape, not merely by their own flags)', () => {
     const state = { ...defaultsFor('boolean'), bounds_enabled: true, bounds_mode: 'manual' };
-    assert.deepEqual(visibleFields(state), ['name', 'value_shape', 'direction', 'target_type', 'color']);
+    assert.deepEqual(visibleFields(state), ['name', 'value_shape', 'direction', 'target_type', 'icon', 'color']);
   });
 });
 
@@ -328,6 +342,7 @@ describe('visibleFields — numeric shape: all four combinations of bounds_enabl
       'aggregation',
       'target_type',
       'bounds_enabled',
+      'icon',
       'color',
     ]);
   });
@@ -342,6 +357,7 @@ describe('visibleFields — numeric shape: all four combinations of bounds_enabl
       'aggregation',
       'target_type',
       'bounds_enabled',
+      'icon',
       'color',
     ]);
   });
@@ -357,6 +373,7 @@ describe('visibleFields — numeric shape: all four combinations of bounds_enabl
       'target_type',
       'bounds_enabled',
       'bounds_mode',
+      'icon',
       'color',
     ]);
   });
@@ -374,6 +391,7 @@ describe('visibleFields — numeric shape: all four combinations of bounds_enabl
       'bounds_mode',
       'bound_lower',
       'bound_upper',
+      'icon',
       'color',
     ]);
   });
@@ -400,6 +418,7 @@ describe('visibleFields — numeric with target_type "weekly_count" combined wit
       'bounds_mode',
       'bound_lower',
       'bound_upper',
+      'icon',
       'color',
     ]);
   });
@@ -423,6 +442,7 @@ describe('visibleFields — target_value visibility now covers weekly_average to
       'target_type',
       'target_value',
       'bounds_enabled',
+      'icon',
       'color',
     ]);
   });
@@ -437,6 +457,7 @@ describe('visibleFields — target_value visibility now covers weekly_average to
       'aggregation',
       'target_type',
       'bounds_enabled',
+      'icon',
       'color',
     ]);
   });
@@ -466,6 +487,7 @@ describe('visibleFields — target_value visibility now covers weekly_average to
       'bounds_mode',
       'bound_lower',
       'bound_upper',
+      'icon',
       'color',
     ]);
   });
@@ -716,11 +738,19 @@ describe('buildPayload — boolean, target_type "none": exactly the minimal key 
     const state = validBooleanState({ target_type: 'none' });
     const payload = buildPayload(state);
     // 'archived' is deliberately absent — see the file header note. Do not
-    // add it back to this expected key list.
+    // add it back to this expected key list. 'icon' is present per
+    // CONTRACT-2.5.md §3.3 ("buildPayload() sends icon"), the same way
+    // 'color' already is.
     assert.deepEqual(
       Object.keys(payload).sort(),
-      ['aggregation', 'color', 'direction', 'name', 'relog_semantic', 'target_type', 'value_shape'].sort()
+      ['aggregation', 'color', 'direction', 'icon', 'name', 'relog_semantic', 'target_type', 'value_shape'].sort()
     );
+  });
+
+  it('sends the state\'s icon value verbatim (CONTRACT-2.5.md §3.3: "buildPayload() sends icon")', () => {
+    const state = validBooleanState({ target_type: 'none', icon: 'dumbbell' });
+    const payload = buildPayload(state);
+    assert.equal(payload.icon, 'dumbbell');
   });
 
   it('relog_semantic is always "state"; aggregation is "count" for a boolean; archived is absent', () => {

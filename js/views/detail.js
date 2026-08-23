@@ -22,6 +22,7 @@ import { getStore } from '../store.js';
 import * as apiModule from '../api.js';
 import { todayLocal, addDays } from '../dates.js';
 import { directionLabel, visibleTrackables } from './home-model.js';
+import { iconSvg, hasIcon } from '../icons.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -248,6 +249,26 @@ export function createDetailView({ id, store, api, today } = {}) {
 
     const header = document.createElement('header');
     header.className = 'detail-head';
+
+    // Step 2.5: same tinted-icon treatment as home.js's .trow-icon, at a
+    // larger size (see styles.css). data-icon falls back to 'dot' for both
+    // a null/empty icon and an unrecognized key. Tinted by the trackable's
+    // colour ONLY — never by verdict/state, which this screen doesn't even
+    // compute (see CONTRACT-2.5.md §0).
+    const rawIcon = typeof trackable.icon === 'string' && trackable.icon !== '' ? trackable.icon : null;
+    const iconKey = hasIcon(rawIcon) ? rawIcon : 'dot';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'detail-icon';
+    iconSpan.dataset.icon = iconKey;
+    iconSpan.setAttribute('aria-hidden', 'true');
+    if (typeof trackable.color === 'string' && trackable.color !== '') {
+      iconSpan.style.color = trackable.color;
+    }
+    // Own constant SVG markup only (js/icons.js) — the only innerHTML
+    // assignment in this file. Everything user-supplied (name, unit, etc.)
+    // is set via textContent below.
+    iconSpan.innerHTML = iconSvg(iconKey);
+    header.appendChild(iconSpan);
 
     const h2 = document.createElement('h2');
     h2.className = 'detail-name';

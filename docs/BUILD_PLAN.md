@@ -1834,6 +1834,107 @@ further schema change.
 
 ---
 
+## Step 2.5 — Icons, and making `color` actually do something
+
+**Status:** DONE (2026-08-23) — code complete, **not yet device-verified.**
+
+Suite: **1519 green** (1397 unit, 43 integration, 79 e2e), up from 1108.
+`sw.js` `CACHE` `daily-v16` → `daily-v17`, `./js/icons.js` added to
+`ASSETS`. No migration — `trackables.icon` already existed from `0005`.
+
+**The bug:** the per-trackable `color` was stored, and `rowModel()`
+computed it, but **neither `home.js` nor `detail.js` ever read it** —
+picking a colour had no visual effect anywhere in the app. Reported by
+the user.
+
+**This was flagged and missed.** The Step 2.1b implementer's report said
+plainly: *"`rowModel`'s `color` field is computed but not rendered in the
+DOM — §3.1's DOM snippet shows no color usage anywhere, so I didn't
+invent a swatch/style attribute not in the contract."* That was the right
+call by the agent and the right thing to report; the orchestrator read it
+and did not act. **Lesson: a subagent's "assumption I had to make"
+section is a defect report, not a formality — triage it like one.**
+
+### The two-channel rule (do not blur these)
+
+| Channel | Carries | Where |
+|---|---|---|
+| trackable `color` | *identity* — which thing is this | the icon glyph |
+| verdict green/red | *state* — is today good or bad | left border, `.trow-symbol`, `statusWord` |
+
+The icon is tinted **only** from the trackable's stored colour and is
+never recoloured by the verdict. Nothing in the icon's markup or styling
+reads `verdict`/`statusWord`/`data-verdict`, so there is no path by which
+a "good" verdict could recolour it. Making the icon go green when a habit
+is done would destroy the user's ability to tell trackables apart at a
+glance — do not "helpfully" add it.
+
+### `js/icons.js`
+
+54 hand-written monochrome icons, 24×24, `stroke="currentColor"`,
+`stroke-width="2"`, round caps/joins — no icon library, no build step,
+no emoji. Categories derived from researched habit corpora rather than
+invented: fitness, health, sleep, focus, money, people, learning, mind,
+screen, home, creative, avoid (cigarette/alcohol/ban, pairing with
+`break`-direction trackables), generic.
+
+`dot` is a plain filled circle and is the **fallback**, so the colour is
+visible even before the user picks an icon. An unknown or missing icon
+key falls back to `dot` rather than rendering an empty box.
+
+`innerHTML` is used for the SVG **only** because it is our own constant
+markup, with the key validated through `hasIcon()` first; every
+user-supplied string still goes through `textContent`, and a comment at
+each site records the distinction.
+
+*Verified by the orchestrator independently of the suite:* 54/54 keys
+present in both `ICONS` and `ICON_KEYS` with no orphans either way, no
+duplicates, **no hardcoded hex/rgb/hsl anywhere**, `fill`/`stroke` only
+ever `none` or `currentColor`, every `iconSvg()` output well-formed, and
+all eight hostile inputs returning `''`/`false` without throwing.
+
+*Verified by tests:* 63 unit cases in `tests/unit/icons.test.mjs`, plus
+e2e asserting the **computed** colour of the rendered icon via
+`toHaveCSS('color', 'rgb(52, 199, 89)')`. That assertion is the
+regression guard and is deliberately not an attribute check: before the
+fix the colour was stored and even computed into the row model, so any
+`data-`/inline-style assertion could have passed against a build that
+rendered nothing. Same failure mode as Step 2.4's DEFECT 1.
+
+### Two contract errors, both caught before they became wrong tests
+
+1. **`fill` rule was self-contradictory.** §4.1 said no path may set
+   `fill` to anything but `none` — but `dot` is a *filled* circle and SVG
+   inherits `fill: none` from the wrapper, so `dot` could not render at
+   all without `fill="currentColor"`. The Implementer flagged the
+   contradiction instead of quietly working around it; the contract was
+   corrected to "`fill`/`stroke` may only be `none` or `currentColor`"
+   **before** the Test Author read it, so the impossible rule never
+   became a test.
+2. **The contract's file table omitted `tests/unit/trackable-form.test.mjs`**,
+   while its body text mandated `defaultsFor()` gain `icon: 'dot'` and
+   `buildPayload()` send `icon` — which correctly broke 14 pre-existing
+   exact-match fixtures in a file no one had been told to touch. The Test
+   Author updated those fixtures (the implementation was
+   contract-compliant) and reported the table gap rather than silently
+   widening its own scope.
+
+### Process caveat — recorded honestly
+
+**The tests for this step were written after the implementation, not
+blind against it.** The first parallel run of both agents was killed
+mid-flight by an API session limit, having written nothing to disk; the
+re-run had to be sequential. The Test Author was explicitly instructed to
+derive every expectation from the contract and not to read
+`js/icons.js` or the view files, and it reported a contract/implementation
+gap rather than adopting the implementation's behaviour — but this is a
+**weaker guarantee than every other step in this plan**, where the two
+agents genuinely could not see each other's work. Treat this step's tests
+as slightly less independent evidence than the rest of the suite, and
+prefer device verification here.
+
+---
+
 ## ⛔ PHASE 2 GATE — hard stop
 
 **The most important gate — this is the first time the app is actually
