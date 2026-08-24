@@ -2015,7 +2015,9 @@ between a real evidence trail and a decorative one.
 
 ## Step 3.1 — Calendar heatmap
 
-**Status:** TODO
+**Status:** DONE (2026-08-24) — suite-verified. **Not yet device-verified;**
+the Phase 3 gate is after Step 3.5, so this ships unseen on the phone until
+then. See "Not verifiable from this machine" at the end of this step.
 
 **Goal.** Chart type 1 of 4. A month grid where each day is colored by
 whether/how much was logged.
@@ -2045,7 +2047,173 @@ whether/how much was logged.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **1986 green** — 1850 unit, 43 integration, 93 e2e
+(up from 1519 at the Phase 2 close). New: `js/charts/heatmap.js`, 453 unit
+cases, 14 e2e cases. `sw.js` `CACHE` `daily-v17` → `daily-v18` with
+`./js/charts/heatmap.js` added to `ASSETS`.
+
+*Scope addition, deliberate:* this step also builds the **day editor** in
+`js/views/detail.js`. The plan's deliverable list says only
+`js/charts/heatmap.js`, but its own notes make tap-a-day-to-edit
+non-optional ("the only way to fix a mis-logged past day"), and the editor
+is screen-level state that Steps 3.2–3.5 will share — it does not belong
+inside a chart module. `js/views/home-model.js` also gained one word:
+`hasEntryValue` is now exported (see below).
+
+*Contract decisions made here that the plan did not settle:*
+
+- **Numeric intensity scales against the visible range's max, not the
+  month's.** The plan required picking one and documenting it. Per-month
+  scaling makes months incomparable, which defeats a view whose purpose is
+  spotting trends; the cost (a quiet month looks faint) is bought off with
+  an alpha floor, `MIN_ALPHA = 0.25`, so any logged day stays clearly
+  distinct from an unlogged one.
+- **Resolved the plan's one internal conflict.** Step 3.1 (written pre-2.5)
+  says "binary fill using the trackable's `color`"; Step 2.5's two-channel
+  rule says colour carries *identity* and green/red carries *state*. The
+  detail screen is single-trackable, so identity is already carried by the
+  header icon and is never in question at the cell level. Resolution: **hue
+  comes from `verdict()` where there is an honest verdict, and from the
+  trackable's own colour where `verdict` is `neutral`** (an unbounded
+  numeric — precisely the case with no honest good/bad to show). Magnitude
+  is a second, independent channel (alpha), so the two never fight. Both
+  documents are satisfied without inventing a third rule.
+- **`verdict()` is imported from `home-model.js`, never reimplemented.** It
+  already encodes the `direction` flip the plan demands (a `break` boolean
+  reads an *unlogged* day as `good`), so a clean month for a bad habit is a
+  green month — that is the intent, not a bug. A second copy of good/bad in
+  the charts layer is exactly the divergence this process exists to
+  prevent; U8 asserts the delegation directly (see below).
+- **A fourth cell state, `'before'`, was added — and it is a real bug
+  caught at contract-writing time, not a refinement.** Because a `break`
+  boolean reads an unlogged day as `good`, a month straddling the start of
+  the loaded range would have painted days *we have no data for* as
+  "clean". `'before'` (in-month but earlier than the range's `from`) and
+  `'future'` are both forced to `verdict: 'neutral'`, `hasEntry: false`,
+  `alpha: 0`, untappable, **even when an entry exists for that date**.
+  Never claim a verdict for a day outside the loaded window.
+- **The numeric day editor writes the parsed value DIRECTLY — it does not
+  call `applyRelog`/`nextValueFor`.** Under `relog_semantic: 'cumulative'`
+  a re-log *adds*, which would make it impossible to correct a wrong value
+  downward, and correcting a mis-logged day is the entire reason the
+  affordance exists. Migration `0004` made every live row `'state'`, so
+  this is identical in practice today and differs only for a legacy
+  cumulative row, where replace is the correct behaviour. A comment at the
+  call site records that it must not be "helpfully" unified with
+  `home.js`.
+- **`hasEntryValue` exported from `home-model.js`** so "does this day count
+  as logged" has one implementation, for the same reason `verdict()` does
+  (a boolean row stored as `0` is *not* logged; a numeric `0` *is*).
+- **The heatmap module is stateless.** The displayed month and selected day
+  live in `detail.js`, which already re-renders by wiping its section;
+  `renderHeatmap(model)` is a pure serializer that attaches **no listeners**
+  (`detail.js`'s existing single delegated click listener handles cells and
+  nav, plus one new delegated submit listener). This avoids giving a chart
+  module a lifecycle that `detail.js`'s render loop would destroy anyway.
+
+*Verified by unit tests (`tests/unit/heatmap.test.mjs`, 453 cases):*
+
+- **U8 — the delegation guard, the highest-value case in this step.** A
+  54-combination cross-product of shape × direction × bounds config × entry
+  presence asserts `cell.verdict === verdict(trackable, entry)` using
+  `verdict` **imported from `js/views/home-model.js`**, not a copied table.
+  If a future step writes a private good/bad rule inside `heatmap.js`, this
+  fails.
+- **U7 — a `break` boolean never claims a clean day it has no data for.**
+  `from: '2026-08-10'`, `today: '2026-08-23'`: `08-05` → `'before'`/neutral,
+  `08-25` → `'future'`/neutral, `08-11` (unlogged, in window) → `'good'`,
+  `08-12` (logged) → `'bad'`.
+- **U6 — the forcing is real, not incidental.** Entries were deliberately
+  seeded on `'future'` and `'before'` dates and asserted *not* to surface;
+  a construction where all four states appear in one grid.
+- U5: six months (including 2024-02 leap, and a Monday-first month **found
+  programmatically** rather than hardcoded) checked cell-by-cell against
+  the real `monthGrid`/`parseLocal` from `js/dates.js`.
+- U11: a 300-combination hostile cross-product proving `heatmapModel` never
+  throws and always returns exactly 42 well-formed cells; a malformed
+  `today` is the sole documented throw.
+- U1–U4, U9, U10, U12, U13: `rangeMaxValue`, `monthOf`/`shiftMonth`
+  (including a `-30..30` round-trip property) / `monthLabel` (hardcoded
+  English names, **never `Intl`**, which varies by host ICU build and would
+  make the suite non-deterministic across machines), `monthBoundsFor`,
+  `clampMonth`, the alpha ramp and its `rangeMax === 0` degenerate guard,
+  all eight accessibility-label fixtures, the no-future-navigation rule,
+  and `loggedDayCount`'s exclusion of non-`'day'` cells.
+
+*Verified by e2e (`tests/e2e/heatmap.test.mjs`, 14 cases, zero real
+Supabase calls — guard-first interception copied from `detail.test.mjs`):*
+
+- **H2 — Step 2.3's load-once guarantee still holds.** With the heatmap
+  live, loading the detail screen still issues **exactly one** GET to
+  `/rest/v1/entries`. **H9** asserts the count is *still* 1 after a save,
+  because the grid refreshes from the store's synchronous `getEntries()`,
+  never a re-fetch.
+- **H5/H6 assert computed style, not attributes** — `.hm-fill`'s computed
+  `opacity` and `background-color`. This is deliberate: Step 2.4 DEFECT 1
+  and Step 2.5 both shipped visibly broken screens that attribute-only
+  assertions passed against. Same failure mode, explicitly guarded here.
+- **H8 — the replace-not-relog guard.** With an existing entry of `1850`,
+  saving `1500` POSTs a body whose `value` is exactly `1500`, **not**
+  `3350`.
+- H10 Clear issues a DELETE; H11 a bad number issues **zero** requests;
+  H12 future/outside/before cells are not `<button>`s and carry no
+  `data-date`; H3/H4 month navigation is bounded at the current month and
+  issues zero requests; H14 no page errors, no horizontal scroll at 390px,
+  every cell ≥40px and every nav button ≥44px.
+
+*Two contract errors, both caught by the agents and both fixed before they
+became wrong tests:*
+
+1. **The Implementer found §3's DOM example contradicting its own prose**
+   about whether adjacent-month padding cells render a day number. Prose
+   won (blank cell: outside cells are the only ones belonging to a
+   *different* month, and a dimmed `3` at the foot of August could read as
+   "3 August, nothing logged"). The orchestrator then checked whether the
+   two agents had diverged on it — they had not; the Test Author never
+   asserts `.hm-day`, so no wrong test existed.
+2. **The Test Author found an unreachable fixture.** §2.8's alpha table
+   listed `value 200 → 1 (clamped)` at `rangeMax = 100`, but `rangeMax` is
+   computed over the same `entries` array the value lives in, so it is
+   always `>= |value|` for any rendered cell. It tested the clamp property
+   two other ways and left the reasoning inline rather than guessing at
+   intent or silently dropping the case.
+
+*Orchestrator verification, independent of the suite:* the full diff of all
+five changed files was read (not the agents' summaries). Confirmed
+`home-model.js` changed by exactly one word; `verdict`/`statusWord`/
+`formatValue` are each called on the raw trackable and each guards null
+internally; `hasEntry` gates every path where `value` must be non-null;
+`refreshEntriesFromStore()` calls the store's **synchronous** reader and no
+`loadEntries()` exists in any write path. Post-run isolation check (direct
+SQL): `trackables` 6 rows / **0** `__test__` residue, `entries` 7 / **0**
+orphaned, `app_settings` a singleton still at `rolling_window_days = 90`,
+`counter` 1 row (keepalive intact). The 6 trackables and 7 entries are the
+user's real Phase 2 data and were untouched.
+
+*Process caveat, recorded honestly:* the Implementer finished before the
+Test Author ran its verification, so the unit file **passed 453/453 on its
+first execution**. The tests were *written* blind against the contract —
+and the Test Author flagged a contract gap rather than adopting the
+implementation's behaviour, which is the evidence that actually matters —
+but this is a slightly weaker independence guarantee than a truly
+simultaneous run. Same caveat as Step 2.5; treat these tests as marginally
+less independent than the rest of the suite.
+
+**Not verifiable from this machine — needs the user's device:** how the
+grid reads at a real 390px width, whether 42.9px cells are comfortably
+tappable in practice, whether the `bad`-verdict stripe texture is legible
+on the phone, whether the numeric day-editor input avoids iOS zoom on
+focus, and — the one this project has been bitten by twice — anything
+standalone-only, since Playwright emulates neither standalone display mode
+nor safe-area insets. **The heatmap has never rendered on the phone.**
+Deferred to the Phase 3 gate after Step 3.5.
+
+**One judgement call the user should overrule if it feels wrong:** a
+`build` boolean's logged days render in `--good` green rather than the
+trackable's own colour, because the verdict channel owns state. This is
+consistent with the home screen they approved at the Phase 2 gate, but it
+means picking a colour changes the icon and not the calendar. It is a
+single lookup table in `css/styles.css` if they want it flipped.
 
 ---
 

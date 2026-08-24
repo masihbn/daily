@@ -82,7 +82,7 @@ export function formatValue(trackable, value) {
 
 const DOT = ' · '; // space, MIDDLE DOT, space
 
-function hasEntryValue(trackable, entry) {
+export function hasEntryValue(trackable, entry) {
   if (!entry || typeof entry !== 'object') return false;
   if (!isFiniteNumber(entry.value)) return false;
   if (trackable.value_shape === 'boolean' && entry.value === 0) return false;

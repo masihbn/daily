@@ -21,8 +21,9 @@
 import { getStore } from '../store.js';
 import * as apiModule from '../api.js';
 import { todayLocal, addDays } from '../dates.js';
-import { directionLabel, visibleTrackables } from './home-model.js';
+import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } from './home-model.js';
 import { iconSvg, hasIcon } from '../icons.js';
+import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -155,6 +156,37 @@ export function createDetailView({ id, store, api, today } = {}) {
   let lastEntriesError = null;
   let entriesLoading = false;
 
+  // Step 3.1: calendar heatmap state. The heatmap module itself is
+  // stateless (js/charts/heatmap.js) — the displayed month and the
+  // selected day live here, in the view that owns the render loop. See
+  // CONTRACT-3.1.md §4.2.
+  let monthStr = null; // 'YYYY-MM' currently displayed
+  let selectedDay = null; // 'YYYY-MM-DD' with the day editor open, or null
+  let dayDraft = ''; // numeric editor text
+  let dayError = null; // string | null
+  let dayInFlight = false;
+  // Not part of the contract's formal state list, but needed to mirror
+  // home.js's focus/select pattern (see buildDayEditor()/render() below):
+  // 'select' only right after the editor is freshly opened, so a later
+  // re-render (e.g. after a failed save) refocuses without nuking
+  // whatever the user has typed since.
+  let dayFocusMode = null;
+
+  // Same 'day monthName year' shape js/charts/heatmap.js's heatmapModel()
+  // builds internally for cell labels (its `base`) — duplicated here
+  // because heatmap.js only exports monthLabel() ('Month Year', no day).
+  // The two must stay in agreement; this array is kept identical to
+  // heatmap.js's MONTH_NAMES.
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+
+  function dayEditorDateText(dateStr) {
+    const [yStr, mStr, dStr] = dateStr.split('-');
+    return `${Number(dStr)} ${MONTH_NAMES[Number(mStr) - 1]} ${yStr}`;
+  }
+
   function refreshTrackableFromStore() {
     const all = st.getTrackables();
     const list = Array.isArray(all) ? all : [];
@@ -190,6 +222,35 @@ export function createDetailView({ id, store, api, today } = {}) {
     entriesLoading = false;
     lastEntriesError = result.error;
     entriesForRange = Array.isArray(result.data) ? result.data : [];
+    // The 'all' range's navigable minimum month depends on what actually
+    // got loaded, so re-clamp every time the loaded window changes.
+    clampMonthState();
+  }
+
+  // Keeps monthStr inside the months the current range/entries allow
+  // navigating to (CONTRACT-3.1.md §4.3).
+  function currentBounds() {
+    const { from } = resolveRange(rangeKey, day);
+    return monthBoundsFor({ from, today: day, entries: entriesForRange });
+  }
+
+  function clampMonthState() {
+    const b = currentBounds();
+    monthStr = clampMonth(monthStr === null ? monthOf(day) : monthStr, b);
+  }
+
+  // Synchronous refresh of entriesForRange from the store's in-memory
+  // cache after a write. entriesForRange is a snapshot taken at load
+  // time, so a write that only updates the store's cache would otherwise
+  // leave the heatmap showing stale data. store.getEntries() is
+  // synchronous and issues ZERO requests — do NOT call st.loadEntries()
+  // here, that would re-issue the range GET and break Step 2.3's D6
+  // load-once guarantee (CONTRACT-3.1.md §4.7).
+  function refreshEntriesFromStore() {
+    const { from, to } = resolveRange(rangeKey, day);
+    const filters = { trackableIds: [id], to };
+    if (from !== null) filters.from = from;
+    entriesForRange = st.getEntries(filters);
   }
 
   // --- render --------------------------------------------------------------
@@ -198,9 +259,11 @@ export function createDetailView({ id, store, api, today } = {}) {
     if (sectionEl) return sectionEl;
     sectionEl = document.createElement('section');
     sectionEl.className = 'detail';
-    // Exactly one delegated click listener on this root, attached once
-    // here and removed in unmount().
+    // Exactly one delegated click listener and one delegated submit
+    // listener on this root, attached once here and removed in
+    // unmount().
     sectionEl.addEventListener('click', handleClick);
+    sectionEl.addEventListener('submit', handleSubmit);
     container.appendChild(sectionEl);
     return sectionEl;
   }
@@ -331,10 +394,25 @@ export function createDetailView({ id, store, api, today } = {}) {
       h3.textContent = SLOT_TITLES[slot] || '';
       slotSection.appendChild(h3);
 
-      const placeholder = document.createElement('p');
-      placeholder.className = 'chart-slot-placeholder';
-      placeholder.textContent = 'Chart arrives in Phase 3.';
-      slotSection.appendChild(placeholder);
+      if (slot === 'heatmap') {
+        // monthStr is kept legal (never null) by clampMonthState(), called
+        // right after the first refreshTrackableFromStore() in mount()
+        // and after every entries load — see CONTRACT-3.1.md §4.3/§4.4.
+        // heatmapModel() itself tolerates a garbage month by clamping, but
+        // that is a safety net here, not the normal path.
+        const { from } = resolveRange(rangeKey, day);
+        const model = heatmapModel({ trackable, entries: entriesForRange, month: monthStr, today: day, from });
+        slotSection.appendChild(renderHeatmap(model));
+        if (selectedDay !== null) {
+          slotSection.appendChild(buildDayEditor());
+        }
+      } else {
+        // All other slots keep their existing placeholder — Steps 3.2-3.5.
+        const placeholder = document.createElement('p');
+        placeholder.className = 'chart-slot-placeholder';
+        placeholder.textContent = 'Chart arrives in Phase 3.';
+        slotSection.appendChild(placeholder);
+      }
 
       section.appendChild(slotSection);
     }
@@ -349,6 +427,210 @@ export function createDetailView({ id, store, api, today } = {}) {
       offlineP.textContent = 'You appear to be offline — showing the last saved data.';
       section.appendChild(offlineP);
     }
+
+    // Same focus/select pattern as home.js's numeric editor: focus on
+    // every render while the editor is open, but only select() on the
+    // render right after it was freshly opened, so a later re-render
+    // (e.g. after a failed save) doesn't nuke what the user typed since.
+    if (selectedDay !== null) {
+      const input = section.querySelector('.day-input');
+      if (input) {
+        input.focus();
+        if (dayFocusMode === 'select') input.select();
+      }
+    }
+    dayFocusMode = null;
+  }
+
+  // --- day editor (Step 3.1) ------------------------------------------------
+  //
+  // Tapping a day opens that day's entry for editing — the only way to
+  // fix a mis-logged past day (BUILD_PLAN.md Step 3.1). Unlike home.js's
+  // today-only row editor, this is a deliberate correction of a specific
+  // past date, so it waits for the write to settle rather than updating
+  // optimistically: every button stays disabled (dayInFlight) until the
+  // result is known. See CONTRACT-3.1.md §4.5-§4.7.
+
+  function buildDayEditor() {
+    const existing = entriesForRange.find((e) => e.entry_date === selectedDay) || null;
+    const hasExisting = hasEntryValue(trackable, existing);
+
+    const div = document.createElement('div');
+    div.className = 'day-editor';
+    div.dataset.date = selectedDay;
+
+    const dateP = document.createElement('p');
+    dateP.className = 'day-editor-date';
+    dateP.textContent = dayEditorDateText(selectedDay);
+    div.appendChild(dateP);
+
+    if (trackable.value_shape === 'boolean') {
+      const markBtn = document.createElement('button');
+      markBtn.type = 'button';
+      markBtn.className = 'day-mark';
+      markBtn.dataset.action = 'day-mark';
+      markBtn.disabled = dayInFlight;
+      markBtn.textContent = 'Mark done';
+      div.appendChild(markBtn);
+
+      if (hasExisting) {
+        div.appendChild(makeDayClearButton());
+      }
+      div.appendChild(makeDayCancelButton());
+    } else {
+      // Numeric (and defensively, any other shape) gets the numeric form.
+      const form = document.createElement('form');
+      form.className = 'day-form';
+
+      const input = document.createElement('input');
+      input.className = 'day-input';
+      // type="text" + inputmode="decimal" is deliberate, NOT
+      // type="number" — same reasoning as home.js's trow-input (see its
+      // comment): type="number" would silently discard a decimal-comma
+      // before parseNumericInput() ever sees it.
+      input.type = 'text';
+      input.setAttribute('inputmode', 'decimal');
+      input.setAttribute('autocomplete', 'off');
+      input.setAttribute('enterkeyhint', 'done');
+      input.setAttribute('aria-label', `Value for ${dayEditorDateText(selectedDay)}`);
+      input.value = dayDraft;
+      input.disabled = dayInFlight;
+      form.appendChild(input);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'submit';
+      saveBtn.className = 'day-save';
+      saveBtn.dataset.action = 'day-save';
+      saveBtn.disabled = dayInFlight;
+      saveBtn.textContent = 'Save';
+      form.appendChild(saveBtn);
+
+      if (hasExisting) {
+        form.appendChild(makeDayClearButton());
+      }
+      form.appendChild(makeDayCancelButton());
+
+      div.appendChild(form);
+    }
+
+    if (dayError !== null) {
+      const errP = document.createElement('p');
+      errP.className = 'day-error';
+      errP.setAttribute('role', 'alert');
+      errP.textContent = dayError;
+      div.appendChild(errP);
+    }
+
+    return div;
+  }
+
+  function makeDayClearButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'day-clear';
+    btn.dataset.action = 'day-clear';
+    btn.disabled = dayInFlight;
+    btn.textContent = 'Clear';
+    return btn;
+  }
+
+  function makeDayCancelButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'day-cancel';
+    btn.dataset.action = 'day-cancel';
+    btn.disabled = dayInFlight;
+    btn.textContent = 'Cancel';
+    return btn;
+  }
+
+  function openDayEditor(dateStr) {
+    if (selectedDay === dateStr) {
+      // Tapping the already-selected day closes the editor (toggle).
+      selectedDay = null;
+      dayDraft = '';
+      dayError = null;
+      render();
+      return;
+    }
+    const existing = entriesForRange.find((e) => e.entry_date === dateStr) || null;
+    selectedDay = dateStr;
+    // The user is correcting a day, so the current value must be visible.
+    dayDraft = existing && Number.isFinite(existing.value) ? String(existing.value) : '';
+    dayError = null;
+    dayFocusMode = 'select';
+    render();
+  }
+
+  function applyDayResult(result) {
+    const status = result && result.status;
+    if (status === 'saved' || status === 'queued') {
+      selectedDay = null;
+      dayDraft = '';
+      dayError = null;
+    } else {
+      // 'failed', or a thrown exception normalized to this shape by the
+      // caller.
+      const err = result && result.error;
+      dayError = (err && err.message) || 'Something went wrong.';
+    }
+  }
+
+  function runDayWrite(fn) {
+    dayInFlight = true;
+    render();
+    fn()
+      .then((result) => {
+        if (disposed) return;
+        applyDayResult(result);
+      })
+      .catch((err) => {
+        if (disposed) return;
+        applyDayResult({ status: 'failed', error: err });
+      })
+      .finally(() => {
+        dayInFlight = false;
+        refreshEntriesFromStore();
+        if (!disposed) render();
+      });
+  }
+
+  function handleDayMark() {
+    if (dayInFlight || entriesLoading || !trackable || selectedDay === null) return;
+    runDayWrite(() => st.saveEntry({ trackable_id: trackable.id, entry_date: selectedDay, value: 1 }));
+  }
+
+  function handleDayClear() {
+    if (dayInFlight || entriesLoading || !trackable || selectedDay === null) return;
+    runDayWrite(() => st.removeEntry(trackable.id, selectedDay));
+  }
+
+  function handleDayCancel() {
+    selectedDay = null;
+    dayDraft = '';
+    dayError = null;
+    render();
+  }
+
+  // Note: the numeric day editor writes the parsed value DIRECTLY — it
+  // must NOT call applyRelog/nextValueFor. This is an edit of a past day,
+  // not a re-log of today; under relog_semantic: 'cumulative' a re-log
+  // ADDS, which would make it impossible to correct a wrong value
+  // downward, and correcting a mis-logged day is the entire reason this
+  // affordance exists (BUILD_PLAN.md Step 3.1). Do not "helpfully" route
+  // this through applyRelog for consistency with home.js — see
+  // CONTRACT-3.1.md §4.6 for the full reasoning.
+  function handleDaySave(inputText) {
+    if (dayInFlight || entriesLoading || !trackable || selectedDay === null) return;
+    const n = parseNumericInput(inputText);
+    if (n === null) {
+      dayError = 'Enter a number';
+      dayDraft = inputText;
+      render();
+      return;
+    }
+    dayDraft = inputText;
+    runDayWrite(() => st.saveEntry({ trackable_id: trackable.id, entry_date: selectedDay, value: n }));
   }
 
   // --- event handlers ------------------------------------------------------
@@ -360,18 +642,78 @@ export function createDetailView({ id, store, api, today } = {}) {
 
     rangeKey = key;
     writeStoredRange(key);
+    // A change of range can put the selected day out of the loaded
+    // window, so the day editor cannot survive a range change.
+    selectedDay = null;
+    dayError = null;
+    dayDraft = '';
     render();
 
     await loadEntriesForRange(key);
     if (disposed) return;
+    // loadEntriesForRange() already re-clamps monthStr internally, but the
+    // 'all' range's min depends on exactly this load, so make it explicit
+    // here too (CONTRACT-3.1.md §4.3) — clampMonthState() is idempotent.
+    clampMonthState();
     render();
   }
 
   function handleClick(event) {
     try {
-      const btn = event.target.closest ? event.target.closest('button.detail-range[data-range]') : null;
-      if (!btn || !sectionEl.contains(btn)) return;
-      handleRangeChange(btn.dataset.range);
+      const target = event.target;
+      if (!target || !target.closest) return;
+
+      const rangeBtn = target.closest('button.detail-range[data-range]');
+      if (rangeBtn && sectionEl.contains(rangeBtn)) {
+        handleRangeChange(rangeBtn.dataset.range);
+        return;
+      }
+
+      const navBtn = target.closest('button.hm-nav[data-heatmap-nav]');
+      if (navBtn && sectionEl.contains(navBtn)) {
+        if (entriesLoading) return;
+        const dir = navBtn.dataset.heatmapNav === 'next' ? 1 : -1;
+        monthStr = clampMonth(shiftMonth(monthStr, dir), currentBounds());
+        selectedDay = null;
+        dayError = null;
+        dayDraft = '';
+        render();
+        return;
+      }
+
+      const cellBtn = target.closest('button.hm-cell[data-date]');
+      if (cellBtn && sectionEl.contains(cellBtn)) {
+        if (entriesLoading || dayInFlight) return;
+        openDayEditor(cellBtn.dataset.date);
+        return;
+      }
+
+      const actionBtn = target.closest('button[data-action]');
+      if (actionBtn && sectionEl.contains(actionBtn)) {
+        const action = actionBtn.dataset.action;
+        if (action === 'day-mark') {
+          handleDayMark();
+        } else if (action === 'day-clear') {
+          handleDayClear();
+        } else if (action === 'day-cancel') {
+          handleDayCancel();
+        }
+        // action === 'day-save' is a submit button inside form.day-form;
+        // the delegated 'submit' listener handles it, not this click
+        // listener.
+      }
+    } catch {
+      // No handler may ever let an exception escape.
+    }
+  }
+
+  function handleSubmit(event) {
+    try {
+      const form = event.target && event.target.closest ? event.target.closest('form.day-form') : null;
+      if (!form || !sectionEl.contains(form)) return;
+      event.preventDefault();
+      const input = form.querySelector('.day-input');
+      handleDaySave(input ? input.value : '');
     } catch {
       // No handler may ever let an exception escape.
     }
@@ -387,6 +729,7 @@ export function createDetailView({ id, store, api, today } = {}) {
     // Step 1: synchronous first paint from the store's already-hydrated
     // cache — must happen before any await.
     refreshTrackableFromStore();
+    clampMonthState();
     render();
 
     try {
@@ -425,12 +768,19 @@ export function createDetailView({ id, store, api, today } = {}) {
     disposed = true;
     if (sectionEl) {
       sectionEl.removeEventListener('click', handleClick);
+      sectionEl.removeEventListener('submit', handleSubmit);
     }
     if (container) {
       container.innerHTML = '';
     }
     sectionEl = null;
     container = null;
+    selectedDay = null;
+    dayDraft = '';
+    dayError = null;
+    dayInFlight = false;
+    monthStr = null;
+    dayFocusMode = null;
   }
 
   return { mount, unmount };

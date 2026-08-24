@@ -900,3 +900,216 @@ button {
   color: var(--danger);
   font-size: 13px;
 }
+
+/* Calendar heatmap (Step 3.1) --------------------------------------------
+   Cell hue comes from the verdict (good/bad) where there is an honest
+   verdict, and from the trackable's own identity colour (--hm-identity)
+   where verdict is neutral (an unbounded numeric day) — see
+   CONTRACT-3.1.md §0. Magnitude is a second, independent channel: alpha
+   on the nested .hm-fill element, never on .hm-cell itself — fading the
+   cell would fade the day number too and destroy legibility. A nested
+   fill element with opacity is used precisely so no color-mix() or other
+   modern colour function is needed. */
+
+.heatmap {
+  width: 100%;
+}
+
+.hm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.hm-nav {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hm-nav:disabled {
+  opacity: 0.4;
+}
+
+.hm-month {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.hm-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin: 0 0 4px;
+}
+
+.hm-weekday {
+  text-align: center;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.hm-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.hm-cell {
+  position: relative;
+  aspect-ratio: 1;
+  min-height: 40px;
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.hm-cell {
+  cursor: pointer;
+}
+
+.hm-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--hm-fill-color);
+  opacity: var(--hm-alpha, 0);
+}
+
+.hm-day {
+  position: relative; /* above the fill */
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.hm-cell[data-verdict="good"] {
+  --hm-fill-color: var(--good);
+}
+
+.hm-cell[data-verdict="bad"] {
+  --hm-fill-color: var(--bad);
+}
+
+.hm-cell[data-verdict="neutral"] {
+  --hm-fill-color: var(--hm-identity, var(--accent));
+}
+
+/* Non-colour cue (WCAG 1.4.1): a 'bad' cell must differ from 'good' by
+   more than hue. The day number stays visible either way, and the full
+   reading is always in the cell's aria-label. */
+.hm-cell[data-verdict="bad"] .hm-fill {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.22) 0,
+    rgba(0, 0, 0, 0.22) 2px,
+    transparent 2px,
+    transparent 6px
+  );
+}
+
+.hm-cell[data-cell-state="outside"],
+.hm-cell[data-cell-state="future"],
+.hm-cell[data-cell-state="before"] {
+  background: transparent;
+}
+
+.hm-cell[data-cell-state="outside"] .hm-day,
+.hm-cell[data-cell-state="future"] .hm-day,
+.hm-cell[data-cell-state="before"] .hm-day {
+  color: var(--fg-muted);
+  opacity: 0.5;
+}
+
+/* Day editor (Step 3.1) --------------------------------------------------
+   Deliberately NOT optimistic (contrast home.js's .trow-editor): a
+   correction of a specific past day waits for the write to settle, so
+   every control here is disabled while the write is in flight. */
+
+.day-editor {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.day-editor-date {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.day-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.day-input {
+  flex: 1 1 100px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.day-mark,
+.day-save,
+.day-clear,
+.day-cancel {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 14px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.day-mark,
+.day-save {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.day-mark:disabled,
+.day-save:disabled,
+.day-clear:disabled,
+.day-cancel:disabled {
+  opacity: 0.6;
+}
+
+.day-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
