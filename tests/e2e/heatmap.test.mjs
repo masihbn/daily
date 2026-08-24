@@ -640,3 +640,114 @@ test('H14 — no uncaught page errors, no horizontal scroll at 390px, every .hm-
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
 });
+
+// ===========================================================================
+// B15 — CONTRACT-3.2b D1 on a real page: a clean day is visibly filled, not
+// black/empty. Asserts COMPUTED STYLE (opacity, background-color), not the
+// data-verdict attribute — an attribute-level assertion passed against this
+// exact bug for a whole step (Step 2.4/2.5's postmortem, per the contract).
+// ===========================================================================
+
+test('B15 — D1 on a real page: a clean day on a break boolean has computed opacity > 0, distinct from an empty neutral cell', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_BOOL_BREAK]);
+  await routeEntries(page, { getFixture: [] }); // no entries at all -> every in-window day is "clean"
+
+  await page.goto('/index.html#/t/5');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  const cleanCell = page.locator(`.hm-cell[data-date="${PAST_DATE}"]`);
+  await expect(cleanCell).toHaveAttribute('data-verdict', 'good');
+  await expect(cleanCell).toHaveAttribute('data-logged', 'false');
+
+  const cleanOpacity = Number(
+    await cleanCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).opacity)
+  );
+  expect(cleanOpacity).toBeGreaterThan(0);
+
+  // A break boolean never produces a neutral, unlogged 'day' cell (unlogged
+  // always reads 'good' under this fix) — so the only "empty" cells on this
+  // fixture are the non-day states. 'future' is tried first; 'outside' is
+  // the unconditional fallback, since every 42-cell month grid has at least
+  // one padding cell (same reasoning as this file's own H12).
+  let emptyCell = page.locator('.hm-cell[data-cell-state="future"]').first();
+  if ((await emptyCell.count()) === 0) {
+    emptyCell = page.locator('.hm-cell[data-cell-state="outside"]').first();
+  }
+  await expect(emptyCell).toHaveCount(1);
+
+  // Per Step 3.1's contract (§3, shipped/device-verified): a non-tappable
+  // cell ('outside'/'future'/'before') is rendered with NO data-verdict
+  // attribute at all — only tappable 'day' cells carry one. So the correct
+  // assertion here is absence, not data-verdict="neutral". This also pins
+  // down the real, contract-specified marker of "empty": inert (not a
+  // <button>) with alpha forced to 0 — both asserted below.
+  await expect(emptyCell).not.toHaveAttribute('data-verdict');
+  const emptyTag = await emptyCell.evaluate((el) => el.tagName);
+  expect(emptyTag).not.toBe('BUTTON');
+  const emptyOpacity = Number(
+    await emptyCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).opacity)
+  );
+  expect(emptyOpacity).toBe(0);
+
+  const emptyColor = await emptyCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).backgroundColor);
+  const cleanColor = await cleanCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(cleanColor).not.toBe(emptyColor);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// B15b — the true A/B for D1: on ONE page, a break boolean's unlogged 'day'
+// cell (clean, visible) versus a build boolean's unlogged 'day' cell
+// (neutral, correctly still blank) — both are real, tappable 'day' cells,
+// so this is a stronger same-shape comparison than B15's clean-vs-non-day
+// comparison above.
+// ===========================================================================
+
+test('B15b — a break boolean\'s unlogged day cell (clean) is visible; a build boolean\'s unlogged day cell (neutral) stays at opacity 0', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeEntries(page, { getFixture: [] }); // no entries anywhere
+
+  // Break boolean: the unlogged PAST_DATE cell is a real 'day' cell, verdict
+  // 'good' (clean), and per the D1 fix must now be visibly filled. Each
+  // page.route() call below registers ON TOP of the previous one and is
+  // never deferred via route.fallback(), so it fully overrides matching
+  // requests from here on — a single-element trackables fixture per
+  // navigation, matching this file's established convention, rather than
+  // relying on the app to pick the right row out of a multi-row response
+  // the real (unmocked) endpoint would never actually return for a
+  // filtered query.
+  await routeTrackables(page, [T_BOOL_BREAK]);
+  await page.goto('/index.html#/t/5');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  const breakCell = page.locator(`.hm-cell[data-date="${PAST_DATE}"]`);
+  await expect(breakCell).toHaveAttribute('data-verdict', 'good');
+  await expect(breakCell).toHaveAttribute('data-logged', 'false');
+  const breakOpacity = Number(
+    await breakCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).opacity)
+  );
+  expect(breakOpacity).toBeGreaterThan(0);
+
+  // Build boolean: the unlogged PAST_DATE cell is also a real 'day' cell,
+  // but verdict 'neutral' (not yet done) — this must stay blank, unaffected
+  // by the D1 fix (CONTRACT-3.2b §2 rule 5 / B4's unit-level twin).
+  await routeTrackables(page, [T_BOOL_BUILD]);
+  await page.goto('/index.html#/t/1');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  const buildCell = page.locator(`.hm-cell[data-date="${PAST_DATE}"]`);
+  await expect(buildCell).toHaveAttribute('data-verdict', 'neutral');
+  await expect(buildCell).toHaveAttribute('data-logged', 'false');
+  const buildOpacity = Number(
+    await buildCell.locator('.hm-fill').evaluate((el) => getComputedStyle(el).opacity)
+  );
+  expect(buildOpacity).toBe(0);
+
+  expect(breakOpacity).toBeGreaterThan(buildOpacity);
+
+  expect(unexpected).toEqual([]);
+});

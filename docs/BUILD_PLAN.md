@@ -2482,6 +2482,139 @@ cold cache on the phone). Deferred to the Phase 3 gate.
 
 ---
 
+## Step 3.2b — Mid-phase device feedback: chart defects + loading state
+
+**Status:** DONE (2026-08-24) — suite-verified, **awaiting device re-check.**
+
+Six items the user found on their iPhone after 3.1 and 3.2 were deployed
+mid-phase. **The user asked to test after two charts rather than waiting
+for the Phase 3 gate after 3.5**, on the reasoning that 3.3–3.5 build on
+this styling and would inherit any mistake. That was the right call — it
+found a defect that made a whole screen unreadable. Same instinct as the
+extra checkpoint they requested after Step 2.1; treat mid-phase device
+checks as cheap and worth repeating.
+
+Suite: **2411 green** (2263 unit, 43 integration, 105 e2e), up from 2379.
+`sw.js` `CACHE` `daily-v19` → `daily-v20`; `ASSETS` unchanged, no new
+files.
+
+**Every one of the six was invisible to a 2379-test suite**, so this
+step's rule was: each fix needs a test that would have *failed* against
+the pre-fix code. The Test Author was required to report, case by case,
+whether it would have — and correctly flagged that B3–B7, B14 and B17 are
+invariant locks that already passed, rather than letting them pad the
+count.
+
+| # | Symptom on device | Root cause | Fix |
+|---|---|---|---|
+| **D1** | A `break` boolean's clean days rendered **black**. The whole Smoking month was blank except the one logged red day. | **Orchestrator contract error (Step 3.1 §2.8).** `alpha = 0` whenever `hasEntry === false` — but a clean day has *no entry* and a **`good`** verdict, so the fill was painted at zero opacity. The verdict was always right; only the fill was invisible. | Alpha is now driven by verdict as well as entry presence. New exported `CLEAN_ALPHA = 0.4` — deliberately muted, so a clean month reads as a quiet wash and the logged red day still pops. One named constant, so intensity is one number to change. |
+| **D2** | Workout's weekly y-axis read `1.5, 2, 2.5, 3`. | `scales.y` had no integer constraint. | `axisBoundsFor()` derives `integer` **from the data** (all values and the target are integers) rather than hardcoding `aggregation === 'count'`, so an all-integer `sum` series benefits too. |
+| **D3** | Calories' target line invisible. | Axis max came from the data max (1700) and the target was also 1700, so the annotation was drawn exactly on the chart's top border. It rendered; it could not be seen. | The axis now folds the target into its span before padding: 1530–1870, line mid-chart. |
+| **D4** | Weight's axis spanned `0–80` for a single point at 80. | One data point gives Chart.js no range to derive, so it falls back to zero. `beginAtZero` was correctly off, but nothing supplied a window. | Padded span around the data: 72–88. |
+| **D5** | Weekly labels read `W28, W30, W32` — looked like missing weeks. | Chart.js `autoSkip` thins crowded labels; bare week numbers make thinning indistinguishable from gaps. | Labels are now the week's Monday as `'17 Aug'`. Full ISO key still in the tooltip. |
+| **U1** | ~1s of provisional content before charts/colours settled when online. | `detail.js` paints from cache, then re-renders after the entries load. Correct, but shows provisional content first. | Per-slot `Loading…` sized to the chart so nothing jumps. **First load only** — blanking charts on every range tap would be worse than the problem. |
+
+*Design decision recorded:* the user explicitly accepted the green-verdict
+/ trackable-colour split on the heatmap ("it's okay on the green versus
+[colour] part, don't worry about it"), closing the judgement call flagged
+in Step 3.1. The colour lives on the icon; green/red means good/bad.
+
+*Also asked and answered:* the user asked whether the range control should
+move above the weekly chart. **Kept where it is** — it also bounds the
+heatmap's navigable months and the `'before'` cutoff (the behaviour they
+verified in May), so attaching it to one chart would misrepresent its
+scope. The granularity control they asked for goes on the trend chart
+itself in Step 3.2c: range is global, bucketing is per-chart.
+
+*Verified empirically, contradicting this step's own contract:* the
+contract warned that `ticks.stepSize = 1` might produce hundreds of ticks
+on a wide axis. The Implementer tested it on a live chart and found
+Chart.js re-nices to ~9–11 ticks regardless, so **the stated risk was
+wrong**. It shipped `precision: 0` alone anyway — sufficient and minimal —
+and reported the discrepancy rather than silently following a false
+rationale. Recorded because a contract's *reasoning* being wrong is worth
+knowing even when its *instruction* happens to be right.
+
+*Defect-reproducing tests (each fails against the pre-fix code):*
+
+- **B2/B15/B15b — D1.** B15b is the true A/B on one page: a `break`
+  boolean's unlogged past day has computed opacity **0.4**, a `build`
+  boolean's unlogged past day has computed opacity **exactly 0**, asserted
+  against each other. Under the old rule both were `0`, so both fail.
+  Asserted on **computed style**, not attributes — Steps 2.4 and 2.5 both
+  shipped visibly broken screens that attribute-level assertions passed.
+- **B5/B6 — the non-regressions that mattered most.** `'before'`,
+  `'future'` and `'outside'` cells still force `alpha: 0` *even for a
+  `break` boolean*, where the verdict would otherwise be `good`. That is
+  the May-cutoff behaviour the user verified on device. And
+  `loggedDayCount` still counts only real entries — a month of clean days
+  reads **0**, not 28, so the entry count on that screen cannot start
+  lying.
+- **B9/B10/B11/B18 — the axis.** Strict inequalities (`suggestedMax >
+  target`, `suggestedMin > 0`) so a regression to the old behaviour fails
+  rather than merely looking different. B18 reads the **resolved** y-axis
+  max off the live chart.
+- **B12/B13 — labels.** `'2026-W34'` → `'17 Aug'`, and **`'2026-W01'` →
+  `'29 Dec'`** (ISO week 1 of 2026 starts in December 2025). B13 proves
+  the week→Monday mapping round-trips (`isoWeekKey(monday) === key`) for
+  every key across an 18-month span rather than only the sample fixtures.
+- **B16/B17 — the loading state**, including that it still issues exactly
+  **one** entries GET and does **not** reappear on a range change.
+
+*A false fixture inherited from Step 3.2, found by the Test Author:* the
+existing `weekLabel` case asserted `'2025-W53'`. **ISO year 2025 has no
+week 53** — 29 Dec 2025 already belongs to `2026-W01`. Harmless while the
+function only sliced the string; unsatisfiable once it had to derive a
+real Monday. Replaced with `'2026-W53'`, verified genuine (28 Dec 2026 –
+3 Jan 2027). Orchestrator confirmed both facts directly. **This is the
+fifth bad fixture in this project, and every one came from arithmetic done
+from memory rather than computed** — re-deriving from the real modules is
+not ceremony.
+
+### A latent race in the Step 2.1 e2e tests, exposed not caused
+
+The first green-suite attempt failed in `tests/e2e/home.test.mjs` **E9** —
+a file neither agent touched. It passes 5/5 in isolation and failed only
+under a full parallel run, because adding tests changed Playwright's
+worker scheduling.
+
+**Root cause: the test, not the app.** `home.js` sets
+`data-state="pending"` **synchronously on tap**, before the network call
+is issued — deliberate, it is what makes the tap feel instant. E9 waited
+for that attribute and then immediately read `localStorage.outbox`, which
+is only written when the 503 resolves. The attribute never implied the
+thing being asserted; the intercepted response just usually won the race.
+
+Fixed by polling the real signal, with every assertion's meaning and
+expected value unchanged. **The audit then found three more sites** —
+E6, E7 and **V6, the file's own "primary regression guard"** — sampling
+`postRequests.length` immediately after `.click()` with *no wait at all*.
+`click()` resolving means the DOM event dispatched, not that Playwright's
+route interception observed the fetch. All were passing by luck.
+
+Five further sites were examined and correctly judged safe, with reasons
+recorded: E4/E5/E12 wait for `data-state="idle"`, which only appears after
+the response is processed; E10 waits for the settled `"failed"` state and
+the non-retryable path never writes the outbox at all; **E8 asserts
+*absence* after synchronous client-side validation, which is not
+timing-sensitive the way asserting presence is.** That last distinction is
+why this was an audit rather than a blanket "add polling everywhere".
+
+**Transferable lesson:** in this app, a DOM attribute set by an optimistic
+render is *not* evidence that the write behind it completed. Any e2e
+assertion about storage or network state must wait on a settled signal,
+not on the optimistic one. Suite stability was confirmed with
+`--repeat-each=3` on that file (90/90) and **two consecutive full-suite
+runs**, both 2411 green — one green run is not evidence against a
+scheduling-dependent flake.
+
+**Not verifiable from this machine:** whether `CLEAN_ALPHA = 0.4` reads
+well on the physical screen, whether the dated labels are legible at 390px,
+and whether the loading placeholder's height genuinely prevents a jump.
+Deployed for the user to re-check.
+
+---
+
 ## Step 3.3 — Two-bars threshold chart
 
 **Status:** TODO

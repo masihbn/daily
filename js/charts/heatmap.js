@@ -38,6 +38,17 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 // clearly distinguishable from an unlogged one.
 export const MIN_ALPHA = 0.25;
 
+// Step 3.2b (CONTRACT-3.2b.md §2, fixing D1): the fill alpha for an
+// unlogged 'day' cell that still carries an honest verdict — a clean day
+// on a `break` habit (no entry, verdict 'good') or, symmetrically, a
+// 'bad' verdict with no entry (currently unreachable, see below). Why a
+// separate, lower constant rather than 1: a clean day is the *absence* of
+// a bad thing, not an achievement — it should read as a quiet wash of
+// colour so a logged day (alpha 1) still stands out against a whole clean
+// month. Kept as one named constant so the exact intensity is one number
+// to change, not a magic literal scattered through the alpha rule below.
+export const CLEAN_ALPHA = 0.4;
+
 // --- §2.2 rangeMaxValue ----------------------------------------------------
 
 // Largest Math.abs(e.value) over entries whose value is a finite number.
@@ -248,18 +259,41 @@ export function heatmapModel({ trackable, entries, month, today, from } = {}) {
     // directly, do not reimplement it here.
     const cellVerdict = verdict(trackable, entry);
 
+    // Step 3.2b (CONTRACT-3.2b.md §2, fixing D1). The old rule zeroed
+    // alpha whenever hasEntry was false, full stop — but a `break`
+    // boolean's clean day has NO entry and a `good` verdict, so that rule
+    // painted a whole clean month invisible (black/empty, not green). The
+    // corrected rule is total and ordered:
+    //   1. logged boolean            -> 1
+    //   2. logged numeric/other      -> the existing magnitude ramp
+    //   3. unlogged, verdict 'good'  -> CLEAN_ALPHA
+    //   4. unlogged, verdict 'bad'   -> CLEAN_ALPHA (same value; currently
+    //      unreachable — no verdict() path returns 'bad' with no entry —
+    //      but stated so a future verdict change can't silently produce
+    //      an invisible red day, which is exactly this bug)
+    //   5. unlogged, verdict 'neutral' -> 0 (a not-yet-done 'build'
+    //      workout must stay blank, not read as clean)
+    // Cases 'outside'/'future'/'before' never reach this code at all —
+    // they are forced to alpha 0 above, before an entry is even looked
+    // up. That must not change: it is the May-cutoff behaviour verified
+    // on device for a `break` boolean (a day we have no data for must
+    // never be painted "clean").
     let alphaRaw;
-    if (!hasEntry) {
-      alphaRaw = 0;
-    } else if (shape === 'boolean') {
+    if (hasEntry && shape === 'boolean') {
       alphaRaw = 1;
-    } else if (rangeMax > 0 && Number.isFinite(rangeMax)) {
-      alphaRaw = MIN_ALPHA + (1 - MIN_ALPHA) * Math.min(1, Math.abs(value) / rangeMax);
+    } else if (hasEntry) {
+      if (rangeMax > 0 && Number.isFinite(rangeMax)) {
+        alphaRaw = MIN_ALPHA + (1 - MIN_ALPHA) * Math.min(1, Math.abs(value) / rangeMax);
+      } else {
+        // Degenerate guard, same class as aggregate.js's normalizeSeries
+        // min === max case: with no spread to normalize against, a logged
+        // day is simply fully opaque.
+        alphaRaw = 1;
+      }
+    } else if (cellVerdict === 'good' || cellVerdict === 'bad') {
+      alphaRaw = CLEAN_ALPHA;
     } else {
-      // Degenerate guard, same class as aggregate.js's normalizeSeries
-      // min === max case: with no spread to normalize against, a logged
-      // day is simply fully opaque.
-      alphaRaw = 1;
+      alphaRaw = 0;
     }
     const alpha = Math.round(alphaRaw * 1000) / 1000;
 

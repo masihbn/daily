@@ -1,4 +1,4 @@
-const CACHE = 'daily-v19';
+const CACHE = 'daily-v20';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [

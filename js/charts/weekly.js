@@ -74,14 +74,56 @@ export function fillValueFor(aggregation) {
 
 // --- §2.3 weekLabel ----------------------------------------------------
 
-// 'YYYY-Www' -> 'Www'. Short because this is a phone screen and a 1-year
-// range is 52 categories; the full key stays available for the tooltip
-// (weekKeys, read by renderWeekly()).
+// Step 3.2b (CONTRACT-3.2b.md §4, fixing D5): bare week numbers ('W34')
+// made Chart.js's autoSkip label-thinning look like whole weeks were
+// missing on device. 'YYYY-Www' -> the week's Monday, formatted 'd MMM'
+// (e.g. '17 Aug', no leading zero on the day) instead. The full key stays
+// available for the tooltip (weekKeys, read by renderWeekly()) — nothing
+// is lost, only the axis gets shorter.
+//
+// Hardcoded English month abbreviations — deliberately NOT
+// toLocaleString/Intl, which varies by host ICU build and would make the
+// suite non-deterministic (same reasoning as heatmap.js's MONTH_NAMES).
+const MONTH_ABBR = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+// Maps a week key to that week's Monday as a 'YYYY-MM-DD' string. This is
+// the arithmetic inverse of dates.js#isoWeekKey (Jan 4 is always in ISO
+// week 1 of its year; week 1's Monday is Jan 4 minus its own ISO weekday
+// offset; every later week's Monday is 7*(weekNum-1) days after that) —
+// done in Date.UTC, same as isoWeekKey itself, so this is DST-free and
+// never touches local-time parsing/formatting (the date trap dates.js's
+// header warns about). Verified at implementation time (not from memory)
+// to round-trip — isoWeekKey(isoWeekKeyToMonday(k)) === k — for every key
+// isoWeeksInRange() produces across an 18+ month span crossing a year
+// boundary, including the 'W01 starts in December' trap ('2026-W01' ->
+// '2025-12-29'). Local to this module; js/dates.js is not modified, per
+// this step's boundaries.
+function isoWeekKeyToMonday(weekKey) {
+  const isoYear = Number(weekKey.slice(0, 4));
+  const weekNum = Number(weekKey.slice(6));
+  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+  const jan4Dow = (jan4.getUTCDay() + 6) % 7; // Monday=0 .. Sunday=6
+  const week1Monday = new Date(jan4.getTime());
+  week1Monday.setUTCDate(jan4.getUTCDate() - jan4Dow);
+  const monday = new Date(week1Monday.getTime());
+  monday.setUTCDate(week1Monday.getUTCDate() + (weekNum - 1) * 7);
+  const y = monday.getUTCFullYear();
+  const m = monday.getUTCMonth() + 1;
+  const d = monday.getUTCDate();
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 export function weekLabel(weekKey) {
   if (typeof weekKey !== 'string' || !WEEK_KEY_RE.test(weekKey)) {
     throw new RangeError(`weekLabel: expected a 'YYYY-Www' string, got: ${JSON.stringify(weekKey)}`);
   }
-  return weekKey.slice(5);
+  const monday = isoWeekKeyToMonday(weekKey);
+  const day = Number(monday.slice(8, 10));
+  const month = Number(monday.slice(5, 7));
+  return `${day} ${MONTH_ABBR[month - 1]}`;
 }
 
 // --- §2.4 targetFor ----------------------------------------------------
@@ -136,6 +178,73 @@ export function weekVerdict(value, target, direction) {
     return value <= target.value ? 'good' : 'bad';
   }
   return value >= target.value ? 'good' : 'bad';
+}
+
+// --- §2.7 axisBoundsFor (Step 3.2b, fixing D2/D3/D4) --------------------
+//
+// PURE — inputs come only from the model (`values`, `target`,
+// `aggregation`), no DOM and no Chart.js, so it is unit-testable in Node.
+// One gap produced all three device defects: `scales.y` had no integer
+// constraint (D2, fractional tick labels on a count series), no framing
+// around the target (D3, a target equal to the data max sits exactly on
+// the axis border and is invisible), and nothing to fall back on with a
+// single data point (D4, Chart.js has no range to derive and defaults to
+// 0, flattening a single-point weight chart into a tall empty bar).
+// CONTRACT-3.2b.md §3. Never throws for any input.
+export function axisBoundsFor(model) {
+  const rawValues = model && Array.isArray(model.values) ? model.values : [];
+  const finite = rawValues.filter((v) => typeof v === 'number' && Number.isFinite(v));
+
+  const aggregation = model && typeof model === 'object' ? model.aggregation : undefined;
+  // Unchanged from Step 3.2 — forcing a weight/average chart to start at
+  // zero flattens every real change into a straight line near the top.
+  const beginAtZero = aggregation === 'sum' || aggregation === 'count';
+
+  const rawTarget = model && typeof model === 'object' ? model.target : null;
+  const hasTarget =
+    !!rawTarget &&
+    typeof rawTarget === 'object' &&
+    typeof rawTarget.value === 'number' &&
+    Number.isFinite(rawTarget.value);
+
+  // True iff every value AND (when present) the target are integers — a
+  // `count` series benefits directly, and an all-integer `sum` series
+  // (e.g. whole-number calories) benefits too, without hardcoding to
+  // `aggregation === 'count'`. Vacuously true for an empty `finite` with
+  // no target, per contract.
+  const integer = finite.every((v) => Number.isInteger(v)) && (!hasTarget || Number.isInteger(rawTarget.value));
+
+  if (finite.length === 0 && !hasTarget) {
+    // Nothing to frame — let Chart.js do whatever it likes.
+    return { beginAtZero, suggestedMin: undefined, suggestedMax: undefined, integer };
+  }
+
+  // The target is folded into the span so its line is always drawn
+  // strictly inside the chart, never on the border (D3).
+  let lo = finite.length > 0 ? Math.min(...finite) : rawTarget.value;
+  let hi = finite.length > 0 ? Math.max(...finite) : rawTarget.value;
+  if (hasTarget) {
+    lo = Math.min(lo, rawTarget.value);
+    hi = Math.max(hi, rawTarget.value);
+  }
+
+  const span = hi - lo;
+  // A flat/single-point series (span 0) has nothing to derive a window
+  // from — pad by a fraction of the magnitude instead, floored at 1 so a
+  // value of 0 still gets a visible window (D4).
+  const pad = span > 0 ? span * 0.15 : Math.max(1, Math.abs(hi) * 0.1);
+
+  let suggestedMax = hi + pad;
+  let suggestedMin = beginAtZero ? 0 : lo - pad;
+
+  if (integer) {
+    // Round outward, never inward — inward rounding could clip the very
+    // data/target point the padding was added to protect.
+    suggestedMin = Math.floor(suggestedMin);
+    suggestedMax = Math.ceil(suggestedMax);
+  }
+
+  return { beginAtZero, suggestedMin, suggestedMax, integer };
 }
 
 // --- shared trackable-field readers, null-safe ------------------------
@@ -398,7 +507,7 @@ export function renderWeekly(model) {
     legend: { display: false },
     tooltip: {
       callbacks: {
-        // The axis only shows the short 'W34' label (weekLabel()) — the
+        // The axis only shows the short 'd MMM' label (weekLabel()) — the
         // tooltip title shows the full 'YYYY-Www' key instead.
         title(items) {
           if (!items || items.length === 0) return '';
@@ -429,15 +538,31 @@ export function renderWeekly(model) {
     };
   }
 
+  // Step 3.2b (CONTRACT-3.2b.md §3, fixing D2/D3/D4): axisBoundsFor() is
+  // the single source of the y-axis window — see its own comment for why
+  // each of the three device defects traced back to this one gap.
+  const bounds = axisBoundsFor(model);
   const scales = {
     x: { type: 'category' },
     y: {},
   };
-  // Forcing beginAtZero for 'average'/'last' would flatten every real
-  // change in something like a weight chart into a straight line — see
-  // CONTRACT-3.2.md §3.
-  if (model.aggregation === 'sum' || model.aggregation === 'count') {
-    scales.y.beginAtZero = true;
+  if (bounds.beginAtZero) scales.y.beginAtZero = true;
+  if (bounds.suggestedMin !== undefined) scales.y.suggestedMin = bounds.suggestedMin;
+  if (bounds.suggestedMax !== undefined) scales.y.suggestedMax = bounds.suggestedMax;
+  if (bounds.integer) {
+    // Verified at implementation time against the pinned chart.js@4.5.1
+    // build (a live Playwright-driven chart, not from memory):
+    // `ticks: { precision: 0 }` alone fully suppresses fractional tick
+    // labels, on both a narrow integer range (0-3, the Workout/D2 case)
+    // and a wide one (1530-1870, the Calories-shaped case) — Chart.js's
+    // own default tick-count budget (~11) already renders a handful of
+    // evenly spaced ticks on the wide range, not hundreds. `stepSize: 1`
+    // is deliberately NOT added: it is unnecessary once precision:0 does
+    // the job, and forcing it is the shape of change that risks an
+    // absurd tick count on a wide axis if that default budget ever
+    // changes upstream. See this step's implementer report for the exact
+    // numbers measured.
+    scales.y.ticks = { precision: 0 };
   }
 
   try {

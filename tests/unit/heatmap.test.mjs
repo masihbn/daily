@@ -21,6 +21,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MIN_ALPHA,
+  CLEAN_ALPHA,
   rangeMaxValue,
   monthOf,
   shiftMonth,
@@ -859,5 +860,131 @@ describe('U13 — loggedDayCount counts only state:"day" cells with an entry', (
 
     const model = heatmapModel({ trackable, entries, month, today, from });
     assert.equal(model.loggedDayCount, 2);
+  });
+});
+
+// ===========================================================================
+// CONTRACT-3.2b §2 / §6.1 — D1 fix: clean days must be visible (cases B1-B7)
+//
+// Root cause (§0): heatmapModel forced alpha to 0 whenever hasEntry===false,
+// with no regard to verdict — so a `break` boolean's clean day (no entry,
+// verdict 'good') rendered at alpha 0, i.e. invisible. The corrected rule
+// (§2) gives an unlogged 'good' or 'bad' day the new CLEAN_ALPHA constant
+// instead, while leaving every other rule (numeric ramp, boolean-logged,
+// non-'day' states, a 'neutral' unlogged day) exactly as it was.
+// ===========================================================================
+
+describe('B1 — CLEAN_ALPHA is exported and is > 0', () => {
+  it('CLEAN_ALPHA is a positive number', () => {
+    assert.equal(typeof CLEAN_ALPHA, 'number');
+    assert.ok(CLEAN_ALPHA > 0, `CLEAN_ALPHA must be > 0, got ${CLEAN_ALPHA}`);
+  });
+});
+
+describe('B2 — THE D1 REGRESSION CASE: a break boolean\'s clean day is visible', () => {
+  it('an unlogged in-window past day on a break boolean has verdict good and alpha === CLEAN_ALPHA, explicitly not 0', () => {
+    const trackable = { id: 5, value_shape: 'boolean', direction: 'break' };
+    const model = heatmapModel({
+      trackable, entries: [], month: '2026-08', today: '2026-08-23', from: '2026-08-01',
+    });
+    const cell = model.cells.find((c) => c.date === '2026-08-11');
+    assert.equal(cell.state, 'day');
+    assert.equal(cell.hasEntry, false);
+    assert.equal(cell.verdict, 'good');
+    assert.equal(cell.alpha, CLEAN_ALPHA);
+    assert.notEqual(cell.alpha, 0, 'this is the exact cell that rendered black on device');
+  });
+});
+
+describe('B3 — a logged day on the same break-boolean trackable still has alpha 1', () => {
+  it('clean (CLEAN_ALPHA) and logged (1) stay visually distinct', () => {
+    const trackable = { id: 5, value_shape: 'boolean', direction: 'break' };
+    const entries = [{ trackable_id: 5, entry_date: '2026-08-11', value: 1 }];
+    const model = heatmapModel({
+      trackable, entries, month: '2026-08', today: '2026-08-23', from: '2026-08-01',
+    });
+    const cell = model.cells.find((c) => c.date === '2026-08-11');
+    assert.equal(cell.hasEntry, true);
+    assert.equal(cell.verdict, 'bad');
+    assert.equal(cell.alpha, 1);
+    assert.notEqual(cell.alpha, CLEAN_ALPHA);
+  });
+});
+
+describe('B4 — a build boolean\'s unlogged day stays verdict neutral and alpha 0', () => {
+  it('a not-yet-done workout must stay blank, not read as "clean"', () => {
+    const trackable = { id: 1, value_shape: 'boolean', direction: 'build' };
+    const model = heatmapModel({
+      trackable, entries: [], month: '2026-08', today: '2026-08-23', from: '2026-08-01',
+    });
+    const cell = model.cells.find((c) => c.date === '2026-08-11');
+    assert.equal(cell.state, 'day');
+    assert.equal(cell.verdict, 'neutral');
+    assert.equal(cell.alpha, 0);
+  });
+});
+
+describe('B5 — before/future/outside cells stay alpha 0 for a break boolean, even where the verdict would otherwise read good', () => {
+  it('the May-cutoff behaviour verified on device must not regress', () => {
+    const trackable = { id: 5, value_shape: 'boolean', direction: 'break' };
+    const model = heatmapModel({
+      trackable, entries: [], month: '2026-08', today: '2026-08-15', from: '2026-08-10',
+    });
+    const outsideCell = model.cells.find((c) => c.state === 'outside');
+    const futureCell = model.cells.find((c) => c.state === 'future');
+    const beforeCell = model.cells.find((c) => c.state === 'before');
+    assert.ok(outsideCell, 'expected an outside cell');
+    assert.ok(futureCell, 'expected a future cell');
+    assert.ok(beforeCell, 'expected a before cell');
+    for (const cell of [outsideCell, futureCell, beforeCell]) {
+      assert.equal(cell.alpha, 0, `${cell.state} cell (${cell.date}) alpha should stay 0`);
+      assert.equal(cell.verdict, 'neutral', `${cell.state} cell (${cell.date}) verdict should stay neutral`);
+      assert.equal(cell.hasEntry, false, `${cell.state} cell (${cell.date}) hasEntry should stay false`);
+    }
+  });
+});
+
+describe('B6 — loggedDayCount is unchanged by the D1 fix', () => {
+  it('a month of clean days on a break boolean counts 0, not 28+', () => {
+    const trackable = { id: 5, value_shape: 'boolean', direction: 'break' };
+    const model = heatmapModel({
+      trackable, entries: [], month: '2026-08', today: '2026-09-30', from: '2026-08-01',
+    });
+    // Every day cell in August is now visibly "clean" (alpha CLEAN_ALPHA),
+    // but a clean day is NOT a logged day.
+    const augustDayCells = model.cells.filter((c) => c.state === 'day');
+    assert.ok(augustDayCells.length >= 28, 'expected the whole of August to be in-window "day" cells');
+    for (const cell of augustDayCells) {
+      assert.equal(cell.alpha, CLEAN_ALPHA);
+    }
+    assert.equal(model.loggedDayCount, 0);
+  });
+});
+
+describe('B7 — numeric alpha ramp cases from Step 3.1 still hold, unchanged by the D1 fix', () => {
+  const NUM_T = { id: 9, value_shape: 'numeric', direction: 'build', unit: 'kcal', bounds_enabled: false };
+  const targetDate = '2026-08-12';
+  const month = '2026-08';
+  const today = '2026-08-23';
+  const anchor = { trackable_id: 9, entry_date: '1999-01-01', value: 100 };
+
+  function alphaFor(value) {
+    const entries = [anchor, { trackable_id: 9, entry_date: targetDate, value }];
+    const model = heatmapModel({ trackable: NUM_T, entries, month, today, from: null });
+    assert.equal(model.rangeMax, 100, 'anchor invariant broken: rangeMax should stay pinned at 100');
+    return model.cells.find((c) => c.date === targetDate).alpha;
+  }
+
+  it('value 100, rangeMax 100 -> alpha 1 (rule 2 unaffected by the new rules 3-5)', () => {
+    assert.equal(alphaFor(100), 1);
+  });
+  it('value 50, rangeMax 100 -> alpha 0.625', () => {
+    assert.equal(alphaFor(50), 0.625);
+  });
+  it('value 1, rangeMax 100 -> alpha 0.258', () => {
+    assert.equal(alphaFor(1), 0.258);
+  });
+  it('value -50, rangeMax 100 -> alpha 0.625 (magnitude, not sign)', () => {
+    assert.equal(alphaFor(-50), 0.625);
   });
 });

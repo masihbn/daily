@@ -24,9 +24,10 @@ import {
   targetFor,
   weekVerdict,
   weeklyModel,
+  axisBoundsFor,
 } from '../../js/charts/weekly.js';
 import { rollup, fillSeries } from '../../js/aggregate.js';
-import { isoWeeksInRange, isoWeekKey, addDays } from '../../js/dates.js';
+import { isoWeeksInRange, isoWeekKey, addDays, startOfIsoWeek, parseLocal } from '../../js/dates.js';
 
 // ===========================================================================
 // W1 — seriesAggregationFor (contract §2.1) — THE §0(a) DECISION IN CODE
@@ -137,11 +138,33 @@ describe('W2 — fillValueFor', () => {
 // W3 — weekLabel (contract §2.3)
 // ===========================================================================
 
-describe('W3 — weekLabel', () => {
+// CONTRACT-3.2b §4 / D5: weekLabel now returns the week's Monday formatted
+// 'd MMM' (e.g. '17 Aug'), not the bare 'W34' suffix — Chart.js's autoSkip
+// label-thinning made bare week numbers look like missing data. The
+// fixtures below are re-derived from the REAL js/dates.js rather than
+// trusted, per this file's header (and this project's repeated history of
+// wrong hardcoded fixtures becoming wrong tests):
+//   - isoWeekKey('2026-08-17') === '2026-W34', so '2026-W34' -> '17 Aug'.
+//   - isoWeekKey('2025-12-29') === '2026-W01' (ISO week 1 of 2026 begins in
+//     December 2025 — the year-boundary trap dates.js's header warns
+//     about), so '2026-W01' -> '29 Dec'.
+//   - the OLD '2025-W53' fixture here (kept from Step 3.2, W3) turns out to
+//     be INVALID: 2025 is not a leap year and 1 Jan 2025 is a Wednesday, so
+//     ISO year 2025 has only 52 weeks — isoWeekKey() never produces
+//     '2025-W53' for any real date (isoWeekKey('2025-12-29') resolves to
+//     '2026-W01', not '2025-W53'). The bare-number format never had to
+//     notice this (it never derives a real date), but the new
+//     Monday-derived format does, and per this file's own fixture-accuracy
+//     rule a fixture that cannot correspond to any real ISO week cannot be
+//     given a principled expected value — see this file's report for the
+//     full note. Replaced with '2026-W53', a genuinely real 53-week ISO
+//     year (verified: isoWeekKey('2026-12-28') === '2026-W53').
+describe('W3 — weekLabel (D5: the week\'s Monday, formatted "d MMM")', () => {
   const fixtures = [
-    ['2026-W34', 'W34'],
-    ['2026-W01', 'W01'],
-    ['2025-W53', 'W53'],
+    ['2026-W34', '17 Aug'],
+    ['2026-W01', '29 Dec'], // the ISO year-boundary case, required by CONTRACT-3.2b §6.2 B12
+    ['2026-W53', '28 Dec'], // a genuine 53-week ISO year
+    ['2026-W37', '7 Sep'], // single-digit day: proves no leading zero
   ];
   for (const [input, expected] of fixtures) {
     it(`weekLabel('${input}') === '${expected}'`, () => {
@@ -149,23 +172,67 @@ describe('W3 — weekLabel', () => {
     });
   }
 
+  it('never produces a leading zero on the day', () => {
+    assert.ok(!/^0/.test(weekLabel('2026-W37')), `expected no leading zero, got '${weekLabel('2026-W37')}'`);
+  });
+
   const badCases = ['2026-34', '2026-W3', null, 20260834, undefined, '', '2026-W3A', 'garbage', {}, []];
   for (const bad of badCases) {
     it(`weekLabel(${JSON.stringify(bad)}) throws RangeError`, () => {
       assert.throws(() => weekLabel(bad), RangeError);
     });
   }
+});
 
-  // Cross-check against the REAL isoWeeksInRange output: every real key it
-  // ever produces must survive weekLabel() and come back as the 'Wnn'
-  // suffix, for a broad calendar span including a year boundary.
-  it('every real isoWeeksInRange() key across a year-boundary-spanning range round-trips through weekLabel', () => {
-    const keys = isoWeeksInRange('2025-12-01', '2026-01-31');
-    assert.ok(keys.length > 0);
+// ===========================================================================
+// B13 — the label round-trip property, over an 18+ month span spanning TWO
+// ISO year boundaries (2025->2026 and 2026->2027)
+// ===========================================================================
+
+describe('B13 — weekLabel derives the correct Monday for every real isoWeeksInRange() key across an 18+ month span', () => {
+  // Independent reference implementation of "week key -> its Monday", built
+  // ONLY from real js/dates.js exports (startOfIsoWeek, addDays) and the
+  // same "ISO week 1 always contains 4 January" fact isoWeekKey's own
+  // header comment documents. This is NOT read from js/charts/weekly.js —
+  // it lets this test independently verify which Monday a key MUST map to,
+  // then check that weekLabel's output was built from exactly that Monday
+  // (rather than trusting weekLabel to grade its own homework).
+  function mondayForWeekKey(key) {
+    const m = /^(\d{4})-W(\d{2})$/.exec(key);
+    const isoYear = Number(m[1]);
+    const weekNum = Number(m[2]);
+    const week1Monday = startOfIsoWeek(`${isoYear}-01-04`);
+    return addDays(week1Monday, (weekNum - 1) * 7);
+  }
+
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function expectedLabelFor(mondayStr) {
+    const d = parseLocal(mondayStr);
+    return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  }
+
+  // Well over 18 months, deliberately straddling TWO real ISO year
+  // boundaries — the one documented trap.
+  const keys = isoWeeksInRange('2025-06-01', '2027-01-31');
+
+  it('sanity: the span covers at least 18 months of weeks and crosses a year boundary', () => {
+    assert.ok(keys.length >= 78, `expected at least 78 weeks (~18 months), got ${keys.length}`);
+    assert.ok(keys.some((k) => k.startsWith('2025-')));
+    assert.ok(keys.some((k) => k.startsWith('2026-')));
+    assert.ok(keys.some((k) => k.startsWith('2027-')));
+  });
+
+  it('mondayForWeekKey is itself verified correct: isoWeekKey(monday) === key, for every key in the span', () => {
     for (const key of keys) {
-      const label = weekLabel(key);
-      assert.equal(label, `W${key.slice(6)}`);
-      assert.match(label, /^W\d{2}$/);
+      const monday = mondayForWeekKey(key);
+      assert.equal(isoWeekKey(monday), key, `mondayForWeekKey(${key}) = ${monday} does not round-trip`);
+    }
+  });
+
+  it('weekLabel(key) matches the independently-derived Monday, formatted "d MMM", for every key in the span', () => {
+    for (const key of keys) {
+      const monday = mondayForWeekKey(key);
+      assert.equal(weekLabel(key), expectedLabelFor(monday), `weekLabel(${key}) mismatch`);
     }
   });
 });
@@ -807,5 +874,123 @@ describe('W11 — weeklyModel delegates to the real rollup(), not a second group
     const buckets = rollup(entries, 'week', 'sum');
     assert.equal(model.values[0], buckets[0].value);
     assert.equal(model.values[0], 150);
+  });
+});
+
+// ===========================================================================
+// CONTRACT-3.2b §3 / §6.2 — D2/D3/D4 fix: axisBoundsFor (cases B8-B11)
+//
+// Root cause (§0): scales.y had no bounds derivation at all — Chart.js fell
+// back to its own defaults, which produced fractional count ticks (D2), a
+// target line sitting exactly on the axis border (D3), and a 0-80 axis for
+// a single 80-value point (D4). axisBoundsFor is a brand-new pure function;
+// it does not exist in the pre-fix module at all, so every case below fails
+// to even import against pre-fix code.
+// ===========================================================================
+
+describe('B8 — axisBoundsFor against all five CONTRACT-3.2b §3 worked rows, field by field', () => {
+  it('D3 Calories: values [1700], target 1700 -> lo=hi=1700, pad=170, suggestedMin 1530, suggestedMax 1870', () => {
+    const bounds = axisBoundsFor({ values: [1700], target: { value: 1700 }, aggregation: 'average' });
+    assert.equal(bounds.beginAtZero, false);
+    assert.equal(bounds.integer, true);
+    assert.equal(bounds.suggestedMin, 1530);
+    assert.equal(bounds.suggestedMax, 1870);
+  });
+
+  it('D4 Weight: single value 80, no target, aggregation "last" -> beginAtZero false, 72...88 (NOT 0...80)', () => {
+    const bounds = axisBoundsFor({ values: [80], target: null, aggregation: 'last' });
+    assert.equal(bounds.beginAtZero, false);
+    assert.equal(bounds.suggestedMin, 72);
+    assert.equal(bounds.suggestedMax, 88);
+  });
+
+  it('D2 Workout: aggregation "count", values [0,0,2,0] -> beginAtZero true, integer true, suggestedMin 0, suggestedMax 3', () => {
+    const bounds = axisBoundsFor({ values: [0, 0, 2, 0], target: null, aggregation: 'count' });
+    assert.equal(bounds.beginAtZero, true);
+    assert.equal(bounds.integer, true);
+    assert.equal(bounds.suggestedMin, 0);
+    assert.equal(bounds.suggestedMax, 3);
+  });
+
+  it('Empty: no values, no target -> suggestedMin/suggestedMax both undefined', () => {
+    const bounds = axisBoundsFor({ values: [], target: null, aggregation: 'sum' });
+    assert.equal(bounds.suggestedMin, undefined);
+    assert.equal(bounds.suggestedMax, undefined);
+  });
+
+  it('Target only: no values, target 3, non-zero-based aggregation -> 2...4', () => {
+    const bounds = axisBoundsFor({ values: [], target: { value: 3 }, aggregation: 'last' });
+    assert.equal(bounds.beginAtZero, false);
+    assert.equal(bounds.suggestedMin, 2);
+    assert.equal(bounds.suggestedMax, 4);
+  });
+
+  it('Target only: no values, target 3, zero-based aggregation -> 0...4', () => {
+    const bounds = axisBoundsFor({ values: [], target: { value: 3 }, aggregation: 'count' });
+    assert.equal(bounds.beginAtZero, true);
+    assert.equal(bounds.suggestedMin, 0);
+    assert.equal(bounds.suggestedMax, 4);
+  });
+});
+
+describe('B9 — THE D3 CASE, NAMED: the target line is strictly inside the axis, never on its edge', () => {
+  it('values [1700], target 1700 -> suggestedMax > 1700 strictly', () => {
+    const bounds = axisBoundsFor({ values: [1700], target: { value: 1700 }, aggregation: 'average' });
+    assert.ok(bounds.suggestedMax > 1700, `expected suggestedMax > 1700, got ${bounds.suggestedMax}`);
+  });
+});
+
+describe('B10 — THE D4 CASE, NAMED: a single data point does not fall back to a zero-based axis', () => {
+  it("single value 80, aggregation 'last' -> beginAtZero false and suggestedMin > 0 strictly", () => {
+    const bounds = axisBoundsFor({ values: [80], target: null, aggregation: 'last' });
+    assert.equal(bounds.beginAtZero, false);
+    assert.ok(bounds.suggestedMin > 0, `expected suggestedMin > 0, got ${bounds.suggestedMin}`);
+  });
+});
+
+describe('B11 — THE D2 CASE, NAMED: integer axis suppression', () => {
+  it("aggregation 'count', values [0,0,2,0] -> integer true (stops the 1.5, 2, 2.5, 3 ticks)", () => {
+    const bounds = axisBoundsFor({ values: [0, 0, 2, 0], target: null, aggregation: 'count' });
+    assert.equal(bounds.integer, true);
+  });
+
+  it('a series containing 1.5 -> integer false', () => {
+    const bounds = axisBoundsFor({ values: [0, 1.5, 2], target: null, aggregation: 'count' });
+    assert.equal(bounds.integer, false);
+  });
+
+  it('an all-integer series with a fractional target -> integer false', () => {
+    const bounds = axisBoundsFor({ values: [0, 1, 2], target: { value: 1.5 }, aggregation: 'sum' });
+    assert.equal(bounds.integer, false);
+  });
+
+  it('an all-integer series with an integer target -> integer true', () => {
+    const bounds = axisBoundsFor({ values: [0, 1, 2], target: { value: 3 }, aggregation: 'sum' });
+    assert.equal(bounds.integer, true);
+  });
+});
+
+// ===========================================================================
+// B14 — model.weekKeys still carries full ISO keys, unchanged by the D5
+// label change (the tooltip's source, per CONTRACT-3.2b §4's final note)
+// ===========================================================================
+
+describe('B14 — weeklyModel.weekKeys still carries full ISO week keys after the D5 label shortening', () => {
+  it('weekKeys stay in the full YYYY-Wnn shape, distinct in form from the new short labels', () => {
+    const trackable = { aggregation: 'sum', target_type: 'none' };
+    const entries = [
+      { entry_date: '2026-08-17', value: 1 },
+      { entry_date: '2026-08-24', value: 1 },
+    ];
+    const model = weeklyModel({ trackable, entries, from: null, to: '2026-08-30' });
+    assert.ok(model.weekKeys.length > 0);
+    for (const key of model.weekKeys) {
+      assert.match(key, /^\d{4}-W\d{2}$/, `weekKeys entry '${key}' is not a full ISO key`);
+    }
+    // labels are the new SHORT form; weekKeys must remain the FULL form —
+    // proving the tooltip's source (weekKeys) wasn't collapsed to match the
+    // shortened axis labels.
+    assert.notEqual(model.labels[0], model.weekKeys[0]);
+    assert.equal(model.labels[0], weekLabel(model.weekKeys[0]));
   });
 });

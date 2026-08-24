@@ -889,6 +889,30 @@ button {
   font-size: 13px;
 }
 
+/* Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): shown instead of a slot's
+   chart/placeholder until the first entries load settles. min-height is
+   set per-slot via the data-slot attribute already on .chart-slot, close
+   to that slot's real rendered height (heatmap .hm-grid + .hm-head/
+   .hm-weekdays ≈ 300px; .weekly-canvas-wrap is a fixed 200px), so the
+   page does not jump when real content replaces this. */
+.chart-slot-loading {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.chart-slot[data-slot="heatmap"] .chart-slot-loading {
+  min-height: 300px;
+}
+
+.chart-slot[data-slot="weekly"] .chart-slot-loading {
+  min-height: 200px;
+}
+
 .detail-offline {
   margin: 0 0 12px;
   color: var(--fg-muted);

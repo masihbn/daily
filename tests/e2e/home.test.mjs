@@ -458,7 +458,15 @@ test('E6 — a numeric trackable whose DATA still says relog_semantic:"cumulativ
   await input.fill('500');
   await row.locator('.trow-save').click();
 
-  expect(postRequests.length).toBe(1);
+  // click() resolves once the DOM click event has been dispatched; it does
+  // NOT wait for whatever async work the handler goes on to do. postRequests
+  // is populated by Playwright's own route interception when the browser
+  // actually issues the request, which is a separate channel from click()'s
+  // resolution — sampling it once, immediately after click(), is the exact
+  // same latent race as E9's optimistic-attribute read (same class of bug,
+  // caught in a full-suite/parallel run, not in isolation). Poll instead —
+  // same idiom already used for this in tests/e2e/heatmap.test.mjs's H8.
+  await expect.poll(() => postRequests.length).toBe(1);
   expect(JSON.parse(postRequests[0].body).value).toBe(820);
   await expect(row.locator('.trow-value')).toHaveText('820 kcal');
 
@@ -489,7 +497,9 @@ test('E7 — the numeric state editor replaces the existing value, does not add 
   await input.fill('79.1');
   await row.locator('.trow-save').click();
 
-  expect(postRequests.length).toBe(1);
+  // Same latent race as E6/E9: click() resolving does not imply the request
+  // Playwright's route handler observed has landed in postRequests yet.
+  await expect.poll(() => postRequests.length).toBe(1);
   // Must be exactly 79.1 (the replacement), NOT 157.5 (78.4 + 79.1).
   expect(JSON.parse(postRequests[0].body).value).toBe(79.1);
 
@@ -545,8 +555,19 @@ test('E9 — a retryable (503) failure leaves the row pending and persists the o
   await expect(row).toHaveAttribute('data-state', 'pending');
   await expect(row).toHaveAttribute('data-logged', 'true');
 
+  // data-state="pending" and data-logged="true" are painted SYNCHRONOUSLY by
+  // home.js's handleToggle() before the network call is even awaited (the
+  // optimistic render) — they do NOT imply the outbox write has happened
+  // yet. That write only occurs later, when the 503 response resolves and
+  // store.saveEntry() enqueues + persistOutbox(). Poll for the real signal
+  // instead of sampling localStorage once right after the optimistic
+  // attributes appear.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('daily.outbox.v1')), {
+      message: 'outbox should be persisted after the 503 resolves',
+    })
+    .not.toBeNull();
   const outboxRaw = await page.evaluate(() => localStorage.getItem('daily.outbox.v1'));
-  expect(outboxRaw).not.toBeNull();
   const outbox = JSON.parse(outboxRaw);
   expect(outbox.ops.length).toBe(1);
   expect(outbox.ops[0].key).toBe(`1|${TODAY}`);
@@ -923,7 +944,9 @@ test('V6 — numeric re-log REPLACES the day\'s value; the POST body must be 500
   await input.fill('500');
   await row.locator('.trow-save').click();
 
-  expect(postRequests.length).toBe(1);
+  // Same latent race as E6/E7/E9 — poll for the request to actually land
+  // rather than sampling postRequests once right after click() resolves.
+  await expect.poll(() => postRequests.length).toBe(1);
   const posted = JSON.parse(postRequests[0].body);
   // The whole point of this test: 500, NOT 2000 + 500 = 2500.
   expect(posted.value).toBe(500);

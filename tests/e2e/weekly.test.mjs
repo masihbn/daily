@@ -130,7 +130,10 @@ async function routeTrackables(page, trackables) {
   });
 }
 
-async function routeEntries(page, { getFixture = [] } = {}) {
+// getDelayMs is new for CONTRACT-3.2b's B16 (U1 loading-state case): every
+// other existing call site omits it (defaults to 0), so this is additive
+// and does not change any existing test's behaviour.
+async function routeEntries(page, { getFixture = [], getDelayMs = 0 } = {}) {
   const getRequests = [];
   await page.route('**/rest/v1/entries*', async (route) => {
     const req = route.request();
@@ -139,6 +142,7 @@ async function routeEntries(page, { getFixture = [] } = {}) {
       return;
     }
     getRequests.push({ url: req.url() });
+    if (getDelayMs) await new Promise((resolve) => setTimeout(resolve, getDelayMs));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -400,5 +404,111 @@ test('X7 — no uncaught page errors, no horizontal scroll at 390px, and .weekly
   expect(wrapBox.width).toBeGreaterThan(0);
 
   expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-3.2b §5 / §6.3 — U1 fix: per-chart loading state (cases B16-B17)
+//
+// Root cause (§0): detail.js painted charts from cache first, then
+// re-rendered after entries loaded — provisional content snapping to real
+// content ~1s later online. The fix adds `chartsPending`, true from mount()
+// until the first loadEntriesForRange() settles, during which every visible
+// chart slot shows ONLY a `.chart-slot-loading` placeholder in place of its
+// chart. `.chart-slot-loading` does not exist at all pre-fix.
+// ===========================================================================
+
+test('B16 — U1: every visible chart slot shows the loading placeholder until the (delayed) entries response resolves, then shows real charts; still exactly one entries GET', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  const { getRequests } = await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
+    getDelayMs: 800,
+  });
+
+  await page.goto('/index.html#/t/366');
+
+  const heatmapSlot = page.locator('.chart-slot[data-slot="heatmap"]');
+  const weeklySlot = page.locator('.chart-slot[data-slot="weekly"]');
+
+  // While the (deliberately delayed) entries GET is still in flight, every
+  // visible chart slot must show the loading placeholder and NOT its chart.
+  await expect(heatmapSlot.locator('.chart-slot-loading')).toBeVisible();
+  await expect(weeklySlot.locator('.chart-slot-loading')).toBeVisible();
+  await expect(heatmapSlot.locator('.heatmap')).toHaveCount(0);
+  await expect(weeklySlot.locator('.weekly')).toHaveCount(0);
+
+  await expect.poll(() => getRequests.length).toBe(1);
+
+  // After the delayed response resolves: loading placeholders are gone, the
+  // real charts are present, and it was still exactly ONE entries GET (the
+  // same load-once guard as X2/H2 — this fix must not add a network call).
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(heatmapSlot.locator('.chart-slot-loading')).toHaveCount(0);
+  await expect(weeklySlot.locator('.chart-slot-loading')).toHaveCount(0);
+  await expect(heatmapSlot.locator('.heatmap')).toHaveCount(1);
+  await expect(weeklySlot.locator('.weekly')).toHaveCount(1);
+
+  expect(getRequests.length).toBe(1);
+
+  expect(unexpected).toEqual([]);
+});
+
+test('B17 — U1 does not re-trigger on a range change: after the first load completes, changing range never re-shows the loading placeholder', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
+
+  await page.locator('.detail-range[data-range="6m"]').click();
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '6m');
+  await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
+
+  await page.locator('.detail-range[data-range="1y"]').click();
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '1y');
+  await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// B18 — CONTRACT-3.2b D3 end to end: the live chart's resolved y-axis max
+// must sit strictly above the target, not on the border where it renders
+// but cannot be seen.
+// ===========================================================================
+
+test('B18 — D3 end to end: the live chart\'s resolved y-axis max is strictly greater than the target value', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]); // target_value: 1700
+  await routeEntries(page, {
+    // A single entry whose week-average equals the target exactly (1700) —
+    // the precise D3 scenario: data max === target, so a naive data-derived
+    // axis max lands exactly on the target line.
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 1700, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+
+  const resolvedMax = await page.evaluate(() => {
+    const canvas = document.querySelector('.weekly-canvas');
+    const chart = window.Chart.getChart(canvas);
+    return chart.scales.y.max;
+  });
+
+  expect(resolvedMax).toBeGreaterThan(1700);
+
   expect(unexpected).toEqual([]);
 });

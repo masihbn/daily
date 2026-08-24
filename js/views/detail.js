@@ -157,6 +157,21 @@ export function createDetailView({ id, store, api, today } = {}) {
   let lastEntriesError = null;
   let entriesLoading = false;
 
+  // Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): true from the start of
+  // mount() until the FIRST loadEntriesForRange() settles — success or
+  // failure alike, since an offline failure still returns real cached
+  // rows from the store that must be shown, not treated as "still
+  // loading". While true, every visible chart slot renders a "Loading…"
+  // placeholder instead of its chart/placeholder, so the user never sees
+  // provisional/cached-only content snap into real content ~1s later.
+  // First-load only, by design: it is set false exactly once, in
+  // loadEntriesForRange(), and nothing ever sets it back to true — a
+  // range change re-populates the same charts with plausible data
+  // already in hand, so blanking them again would be worse than the
+  // snap-in this fixes. See loadEntriesForRange() and mount()'s catch
+  // block for the two paths that settle it.
+  let chartsPending = true;
+
   // Step 3.1: calendar heatmap state. The heatmap module itself is
   // stateless (js/charts/heatmap.js) — the displayed month and the
   // selected day live here, in the view that owns the render loop. See
@@ -221,6 +236,10 @@ export function createDetailView({ id, store, api, today } = {}) {
 
     const result = await st.loadEntries(filters);
     entriesLoading = false;
+    // Settles chartsPending unconditionally — idempotent after the first
+    // call (see the flag's own comment above for why it must never flip
+    // back to true on a later range change).
+    chartsPending = false;
     lastEntriesError = result.error;
     entriesForRange = Array.isArray(result.data) ? result.data : [];
     // The 'all' range's navigable minimum month depends on what actually
@@ -402,7 +421,19 @@ export function createDetailView({ id, store, api, today } = {}) {
       h3.textContent = SLOT_TITLES[slot] || '';
       slotSection.appendChild(h3);
 
-      if (slot === 'heatmap') {
+      if (chartsPending) {
+        // Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): before the first
+        // entries load has settled, every visible slot shows only this
+        // placeholder — never its chart, and never the Phase-3
+        // placeholder either. Min-height is set per-slot in CSS off the
+        // data-slot attribute already on slotSection, so the page does
+        // not jump when real content replaces it.
+        const loadingP = document.createElement('p');
+        loadingP.className = 'chart-slot-loading';
+        loadingP.setAttribute('aria-live', 'polite');
+        loadingP.textContent = 'Loading…';
+        slotSection.appendChild(loadingP);
+      } else if (slot === 'heatmap') {
         // monthStr is kept legal (never null) by clampMonthState(), called
         // right after the first refreshTrackableFromStore() in mount()
         // and after every entries load — see CONTRACT-3.1.md §4.3/§4.4.
@@ -767,7 +798,13 @@ export function createDetailView({ id, store, api, today } = {}) {
     } catch (err) {
       if (disposed) return;
       // store.loadTrackables()/loadEntries() never reject, but guard the
-      // whole sequence anyway (mirrors home.js's identical guard).
+      // whole sequence anyway (mirrors home.js's identical guard). Also
+      // settle chartsPending here: if the trackable was already warm in
+      // the store's cache, the very first synchronous render above could
+      // already be showing chart slots (state 'ready' from cache) with
+      // chartsPending still true — an exception on this path must not
+      // leave them stuck on "Loading…" forever.
+      chartsPending = false;
       if (!lastTrackablesError) lastTrackablesError = err;
       trackablesLoaded = true;
       render();
