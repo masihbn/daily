@@ -2219,7 +2219,8 @@ single lookup table in `css/styles.css` if they want it flipped.
 
 ## Step 3.2 — Weekly trend chart + target line
 
-**Status:** TODO
+**Status:** DONE (2026-08-24) — suite-verified. **Not yet device-verified;**
+the Phase 3 gate is after Step 3.5.
 
 **Goal.** Chart type 2 of 4. One bar/point per ISO week, aggregated per
 the trackable's `aggregation`, with the target drawn as a reference
@@ -2250,8 +2251,32 @@ line.
   leaks the instance and produces the classic "tooltips from the
   previous chart" bug.
 
-**⚠️ OPEN QUESTION — resolve with the user before implementing (raised
-2026-08-23 at the Phase 2 gate).**
+**✅ RESOLVED 2026-08-24 by the user: option 1 — the target defines the
+chart's unit.** When `target_type = 'weekly_average'`, the weekly chart
+plots the weekly **average** even if `aggregation` says `sum`, so the
+bars and the target line are always in the same unit. `aggregation` still
+governs every trackable whose `target_type` is `'none'` or
+`'weekly_count'`. Recorded in `APP_CONCEPT.md` → "Target lines" → "The
+target defines the chart's unit", with the rejected alternatives and
+their reasons.
+
+Two things established while putting the question to the user, worth
+keeping:
+
+- **The mismatch is live, not hypothetical.** The real `Calories` row is
+  `aggregation: 'sum'` + `target_type: 'weekly_average'` +
+  `target_value: 1700` — weekly-total bars near 11,900 kcal against a
+  line at 1,700.
+- **Option 1's usual cost is zero here.** `aggregation` is written by
+  `js/views/trackable.js` and read by nothing but `rollup()`; the weekly
+  chart is its first consumer (verified by grep, not assumed). So "the
+  bars stop matching the rest of the app" has nothing to mismatch with
+  yet. If a later step surfaces `aggregation` elsewhere, revisit.
+
+The original question is preserved below for the reasoning trail.
+
+**⚠️ OPEN QUESTION (now resolved above) — raised 2026-08-23 at the Phase
+2 gate.**
 
 **`aggregation` and `target_type` can describe different kinds of
 number, and this step as written would draw them on the same axis.**
@@ -2298,7 +2323,162 @@ why the problem did not surface before `weekly_average` existed.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **2379 green** — 2236 unit, 43 integration, 100 e2e
+(up from 1986 after 3.1). New: `js/charts/weekly.js`, 386 unit cases, 7
+e2e cases. `sw.js` `CACHE` `daily-v18` → `daily-v19` with
+`./js/charts/weekly.js` added to `ASSETS`.
+
+*Implements the 2026-08-24 user decision* recorded in `APP_CONCEPT.md` →
+"The target defines the chart's unit": `seriesAggregationFor()` returns
+`'average'` whenever `target_type === 'weekly_average'`, regardless of
+`aggregation`. W1 pins this with a named regression test, and
+`.weekly-meaning` states on screen what the bars actually are ("Average
+per week · kcal"), because the bars are no longer always what
+`aggregation` says.
+
+*Contract decisions made here that the plan did not settle:*
+
+- **The zero-versus-gap rule is deliberately NOT uniform.** `sum`/`count`
+  weeks with no entries fill with `0`; `average`/`last` fill with `null`.
+  A week you didn't log is genuinely zero workouts, but it is *not* a week
+  you weighed 0 kg — plotting that as zero would drag the whole trend to
+  the floor. BUILD_PLAN's "explicit zero/gap" sanctions both; which one is
+  honest depends on the aggregation.
+- **`y.beginAtZero` follows the same split** — on for `sum`/`count`, off
+  for `average`/`last`, because forcing a weight chart to start at zero
+  flattens every real change into a straight line.
+- **Destroy-and-recreate for the Chart.js instance, not a persistent
+  chart.** Keeping it alive would mean `detail.js` had to stop wiping its
+  section — a large change to a shipped render loop for a screen that
+  re-renders a dozen times per visit, not per frame. `animation: false`
+  keeps the recreation invisible. Recorded so a later step does not
+  "optimise" the destroy away: **if flicker shows up on the device, the
+  fix is to preserve the slot, not to skip the destroy.**
+- **Degrade, never throw.** A missing `window.Chart` renders "Chart
+  unavailable offline" and a missing annotation plugin draws the chart
+  without the target line. `sw.js` caches the two CDN files
+  independently, so Chart.js can be present while the plugin is not.
+
+*Verified empirically at implementation time, by both agents
+independently and by different methods — not taken from memory, per the
+Architecture decision requiring chart-library specifics be checked when
+built:*
+
+- **The annotation plugin self-registers.** Its UMD factory ends in
+  `Chart.register(...)` at script-load time, so no app-code
+  `Chart.register()` call is needed. The Implementer proved this by
+  executing both pinned CDN files in a `vm` sandbox with no
+  `module`/`exports`/`define` in scope (reproducing real `<script>`
+  semantics); the Test Author proved it by probing a live page and
+  finding `Chart.registry.plugins.get('annotation')` populated before any
+  chart existed. `weekly.js` still *checks* for the plugin before adding
+  annotation config, because the two CDN files are cached separately.
+- **`Chart.instances` is a plain object keyed by id, not an array.** The
+  leaked-instance guard counts `Object.keys(Chart.instances).length`. An
+  assumed-array implementation would have produced a test that passes
+  against a leak.
+
+*Verified by unit tests (`tests/unit/weekly.test.mjs`, 386 cases):*
+
+- **W6 — the worked Calories case, the highest-value unit case.** Three
+  logs in ISO week `2026-W34` (1600/1800/1700) produce a bar of **1700**
+  (the average, derived via the real `rollup()`), asserted explicitly to
+  be **not 5100** (the sum). Target `{value: 1700, kind:
+  'weekly_average'}`, verdict `'good'` on the inclusive boundary. Had this
+  plotted `sum`, the bar would have been 5100 against a line at 1700 —
+  the exact failure the user decision exists to prevent.
+- **W4 — `targetFor` coercion.** `1700` and `'1700'` give identical
+  results; `''`, `null` and `undefined` give `null` rather than a target
+  at zero. `Number('')` and `Number(null)` are both `0`, so a
+  coerce-first implementation would silently draw a target line on the
+  floor for every trackable with no target.
+- **W11 — the delegation guard (§0(b)).** `weeklyModel`'s bucket values
+  are asserted equal to `rollup(entries, 'week',
+  seriesAggregationFor(trackable))` using `rollup` imported from the real
+  `js/aggregate.js`, so a future reimplementation of weekly grouping in
+  the charts layer fails. Mirrors Step 3.1's U8 verdict-delegation guard.
+- **W7 — zero-entry weeks are never omitted.** Two weeks of data
+  separated by three empty ones; the week list is cross-checked against
+  the real `isoWeeksInRange`, and the gaps read `0` for a `sum` trackable
+  and `null` for an `average` one.
+- W2, W3, W5, W8, W9, W10: the fill rule, week labels, both inclusive
+  verdict boundaries, array alignment across all four parallel arrays,
+  the `'all'` range's earliest-entry derivation and empty model, and a
+  105-combination totality cross-product proving `weeklyModel` never
+  throws.
+
+*Verified by e2e (`tests/e2e/weekly.test.mjs`, 7 cases, zero real
+Supabase calls):*
+
+- **X2 — the load-once guarantee still holds** with three chart slots
+  live: exactly one GET to `/rest/v1/entries`. Steps 2.3 D6 and 3.1 H2/H9
+  must not regress.
+- **X4 — no leaked Chart instance.** Changing range repeatedly and
+  navigating away and back never leaves more than one live instance. This
+  is the guard for the "tooltips from the previous chart" bug the plan
+  calls out.
+- **X7 — the canvas wrapper has non-zero height.** A collapsed wrapper is
+  the classic `maintainAspectRatio: false` failure: it renders an
+  invisible chart that every attribute-level assertion still passes. Same
+  failure mode as Step 2.4 DEFECT 1 and Step 2.5.
+- X1, X3, X5, X6: the canvas mounts, `.weekly-meaning` reads "Average per
+  week · kcal" for the Calories fixture, the annotation is readable back
+  off the live chart at 1700, and a trackable with no entries renders
+  `.weekly-empty` with no canvas at all.
+
+*A real defect in the orchestrator's contract, found by the Implementer:*
+
+**`rollup()` throws on a malformed `entry_date`.** It guards non-finite
+*values* but does not validate dates before its internal `isoWeekKey()`
+call, so the contract's own hostile fixture `[{entry_date: 'oops', value:
+1}]` collided with its "never throws" requirement — a literal reading of
+the algorithm would have crashed. `weeklyModel` now filters to entries
+with a real calendar date before calling `rollup()`; every surviving
+entry is passed through unchanged, so this is input sanitization, not a
+second grouping implementation. A related subtlety the same agent caught:
+validating `to` with a plain regex would let a shape-valid but
+calendar-invalid `'2026-02-30'` slip past the early-return paths without
+throwing, so `to` is validated via `isoWeekKey(to)` on the function's
+very first line, before any return.
+
+**Orchestrator-verified blast radius:** `js/charts/weekly.js` is
+`rollup()`'s only shipped consumer, so nothing else was ever exposed to
+this. Steps 3.3 and 3.5 will also call into `js/aggregate.js` and should
+sanitize their inputs the same way — `aggregate.js` assumes well-formed
+`entry_date`s, which is true of anything that came from the server (the
+column is a `date`) but not of arbitrary input.
+
+*One contract ambiguity, found independently by BOTH agents and resolved
+identically by each:* §2.4's one-line predicate ("not a finite number
+after `Number()` coercion") contradicted its own explicit reject list,
+since `Number([])` is `0` and `Number(true)` is `1` — both finite. Each
+agent treated the enumerated list as authoritative and flagged the
+tension rather than guessing. **The orchestrator verified the convergence
+directly rather than assuming it**: `targetFor` was exercised against all
+fourteen values and rejects `[]`, `{}`, `true`, `false`, `''`, `null`,
+`undefined`, `'abc'`, `NaN` and `Infinity`, exactly as the independently
+written tests assert.
+
+*Orchestrator verification, independent of the suite:* the full diff was
+read. `js/views/detail.js` received exactly the four specified additions
+plus one comment correction, with Step 3.1's heatmap slot, day editor,
+`refreshEntriesFromStore()` and range control untouched. Post-run
+isolation check (direct SQL): `trackables` 6 / **0** `__test__` residue,
+`entries` 7 / **0** orphaned, `app_settings` singleton, `counter` intact.
+
+*Process caveat:* as in Steps 2.5 and 3.1, the Implementer finished first,
+so the Test Author's unit file passed 386/386 on its first execution. The
+tests were *written* blind and the Test Author independently reported a
+contract ambiguity rather than adopting the implementation's behaviour —
+but treat this as marginally weaker independence than a truly
+simultaneous run.
+
+**Not verifiable from this machine:** whether 52 category labels are
+legible at 390px on the real device, whether the destroy-and-recreate
+flickers perceptibly on an iPhone, and whether the chart renders at all
+when the CDN is cold (the offline-degradation path has only been
+exercised against a stubbed missing `window.Chart`, never a genuinely
+cold cache on the phone). Deferred to the Phase 3 gate.
 
 ---
 

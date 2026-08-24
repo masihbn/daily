@@ -24,6 +24,7 @@ import { todayLocal, addDays } from '../dates.js';
 import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } from './home-model.js';
 import { iconSvg, hasIcon } from '../icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
+import { renderWeekly, destroyWeekly, weeklyModel } from '../charts/weekly.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -271,6 +272,13 @@ export function createDetailView({ id, store, api, today } = {}) {
   function render() {
     if (disposed || !container) return;
 
+    // Step 3.2 (CONTRACT-3.2.md §4): destroy any existing weekly Chart.js
+    // instance before the section's innerHTML is wiped below. The wipe
+    // detaches the canvas but does not destroy the Chart instance holding
+    // it, which leaks and produces the classic "tooltips from the
+    // previous chart" bug.
+    destroyWeekly();
+
     const section = ensureSection();
     const state = computeState();
     section.setAttribute('data-detail-state', state);
@@ -406,8 +414,11 @@ export function createDetailView({ id, store, api, today } = {}) {
         if (selectedDay !== null) {
           slotSection.appendChild(buildDayEditor());
         }
+      } else if (slot === 'weekly') {
+        const { from, to } = resolveRange(rangeKey, day);
+        slotSection.appendChild(renderWeekly(weeklyModel({ trackable, entries: entriesForRange, from, to })));
       } else {
-        // All other slots keep their existing placeholder — Steps 3.2-3.5.
+        // bounds/overlay keep their existing placeholder — Steps 3.3-3.5.
         const placeholder = document.createElement('p');
         placeholder.className = 'chart-slot-placeholder';
         placeholder.textContent = 'Chart arrives in Phase 3.';
@@ -766,6 +777,10 @@ export function createDetailView({ id, store, api, today } = {}) {
   function unmount() {
     if (disposed) return;
     disposed = true;
+    // Step 3.2 (CONTRACT-3.2.md §4): also destroy on unmount, not just on
+    // the next render — otherwise navigating away from the detail screen
+    // for good (not just re-rendering it) leaks the instance.
+    destroyWeekly();
     if (sectionEl) {
       sectionEl.removeEventListener('click', handleClick);
       sectionEl.removeEventListener('submit', handleSubmit);

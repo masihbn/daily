@@ -188,6 +188,42 @@ already in the live schema — `build` = floor (hit-or-exceed is good, e.g.
 workouts), `break` = ceiling (stay under is good, e.g. a calorie diet
 limit).
 
+### The target defines the chart's unit (resolved 2026-08-24)
+
+`aggregation` and `target_type` can describe different kinds of number,
+and the weekly chart would otherwise draw them on the same axis. The live
+`Calories` trackable is `aggregation: 'sum'` with
+`target_type: 'weekly_average'` and `target_value: 1700` — weekly-total
+bars near 11,900 kcal against a line at 1,700, which pins the line to the
+floor and communicates nothing. It would not error or fail a test; it
+would quietly be meaningless, which is worse.
+
+**Resolved: `target_type` decides what the weekly chart plots.** When
+`target_type = 'weekly_average'`, the bars are the weekly *average* even
+if `aggregation` says `sum`. The target sets the question the chart
+answers — "am I averaging under 1,700 a day?" — and the bars must be in
+the unit that answers it.
+
+Rejected alternatives, and why:
+
+- **Scaling the line to the bars** (`target_value × days logged that
+  week`) is arithmetically honest but makes the "target" move week to
+  week — a week with 3 days logged gets a line at 5,100 and a full week
+  gets 11,900. A target that moves is not a target.
+- **Forbidding the combination in the form** is cleanest schema-wise but
+  reaches backwards into a shipped screen and would strand the existing
+  `Calories` row until it was re-edited.
+
+The usual objection to this choice — that the bars stop matching what the
+rest of the app shows for that trackable — **costs nothing here**:
+`aggregation` is written by the trackable form and read by nothing except
+`rollup()`. The weekly chart is its first consumer, verified by grep at
+resolution time. If a later step surfaces `aggregation` somewhere else,
+revisit this.
+
+`aggregation` remains the default and still governs every trackable whose
+`target_type` is `'none'` or `'weekly_count'`.
+
 ## Face ID / auth — needs scope clarification before building
 
 Read of the request: a **lightweight local app-lock** (WebAuthn platform
@@ -358,3 +394,9 @@ this is ever shared, exposed more broadly, or treated as finished.
   design question. Resolution for v1: ship the schema column
   (`target_days`), defer the UI. Nothing discussed so far needs it over
   a weekly-count target, so it must not block v1.
+- **2026-08-24** — **The target defines the weekly chart's unit.** When
+  `target_type = 'weekly_average'`, the weekly chart plots the weekly
+  average even if `aggregation` says `sum`, so the bars and the target
+  line are always in the same unit. Rationale and rejected alternatives
+  recorded above under "Target lines". Closes the open question raised at
+  the Phase 2 gate and blocking `BUILD_PLAN.md` Step 3.2.

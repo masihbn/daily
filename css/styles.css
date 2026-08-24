@@ -1113,3 +1113,40 @@ button.hm-cell {
   color: var(--danger);
   font-size: 13px;
 }
+
+/* Weekly trend chart (Step 3.2) -------------------------------------------
+   Bars are colored by target verdict (--good/--bad), falling back to the
+   trackable's own identity colour when there is no honest verdict for that
+   week (no target, or a gap week) — same two-channel convention as the
+   heatmap above, applied by js/charts/weekly.js at render time via
+   getComputedStyle rather than hardcoded here. .weekly-canvas-wrap needs an
+   explicit height: maintainAspectRatio:false makes the canvas fill its
+   parent, and a parent with no height collapses to zero. */
+
+.weekly {
+  width: 100%;
+}
+
+.weekly-meaning {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.weekly-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 200px;
+}
+
+.weekly-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.weekly-empty,
+.weekly-unavailable {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
