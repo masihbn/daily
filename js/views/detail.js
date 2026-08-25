@@ -25,6 +25,7 @@ import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } f
 import { iconSvg, hasIcon } from '../icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
 import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/weekly.js';
+import { renderBounds, destroyBounds, boundsModel } from '../charts/bounds.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -328,8 +329,10 @@ export function createDetailView({ id, store, api, today } = {}) {
     // instance before the section's innerHTML is wiped below. The wipe
     // detaches the canvas but does not destroy the Chart instance holding
     // it, which leaks and produces the classic "tooltips from the
-    // previous chart" bug.
+    // previous chart" bug. Step 3.3 adds a second chart (bounds) with the
+    // same lifecycle requirement.
     destroyWeekly();
+    destroyBounds();
 
     const section = ensureSection();
     const state = computeState();
@@ -485,8 +488,13 @@ export function createDetailView({ id, store, api, today } = {}) {
         slotSection.appendChild(
           renderWeekly(trendModel({ trackable, entries: entriesForRange, from, to, period: periodKey }))
         );
+      } else if (slot === 'bounds') {
+        const { from, to } = resolveRange(rangeKey, day);
+        slotSection.appendChild(
+          renderBounds(boundsModel({ trackable, entries: entriesForRange, from, to }))
+        );
       } else {
-        // bounds/overlay keep their existing placeholder — Steps 3.3-3.5.
+        // overlay keeps its existing placeholder — Step 3.4.
         const placeholder = document.createElement('p');
         placeholder.className = 'chart-slot-placeholder';
         placeholder.textContent = 'Chart arrives in Phase 3.';
@@ -902,8 +910,10 @@ export function createDetailView({ id, store, api, today } = {}) {
     disposed = true;
     // Step 3.2 (CONTRACT-3.2.md §4): also destroy on unmount, not just on
     // the next render — otherwise navigating away from the detail screen
-    // for good (not just re-rendering it) leaks the instance.
+    // for good (not just re-rendering it) leaks the instance. Step 3.3
+    // adds the bounds chart to the same rule.
     destroyWeekly();
+    destroyBounds();
     if (sectionEl) {
       sectionEl.removeEventListener('click', handleClick);
       sectionEl.removeEventListener('submit', handleSubmit);

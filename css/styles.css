@@ -913,6 +913,10 @@ button {
   min-height: 200px;
 }
 
+.chart-slot[data-slot="bounds"] .chart-slot-loading {
+  min-height: 200px;
+}
+
 .detail-offline {
   margin: 0 0 12px;
   color: var(--fg-muted);
@@ -1208,4 +1212,50 @@ button.hm-cell {
 
 .trend-period:disabled {
   opacity: 0.4;
+}
+
+/* Two-bars threshold chart (Step 3.3) -------------------------------------
+   .bounds-summary is the non-colour cue (WCAG 1.4.1): the zone word is
+   readable with no colour perception at all, and data-zone below is only
+   a supplementary tint. Zone shading itself (the box/line annotations) is
+   drawn by chartjs-plugin-annotation using the existing --good-bg/--bad-bg
+   tokens, so nothing about the shading needs its own CSS here — only the
+   summary line's tint and the canvas-wrap sizing do. Same "wrap needs an
+   explicit height" note as .weekly-canvas-wrap. */
+
+.bounds {
+  width: 100%;
+}
+
+.bounds-summary {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.bounds-summary[data-zone="in"] {
+  color: var(--good);
+}
+
+.bounds-summary[data-zone="below"],
+.bounds-summary[data-zone="above"] {
+  color: var(--bad);
+}
+
+.bounds-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 200px;
+}
+
+.bounds-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.bounds-unavailable {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
 }

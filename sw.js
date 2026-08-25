@@ -1,4 +1,4 @@
-const CACHE = 'daily-v21';
+const CACHE = 'daily-v22';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -16,6 +16,7 @@ const ASSETS = [
   './js/icons.js',
   './js/charts/heatmap.js',
   './js/charts/weekly.js',
+  './js/charts/bounds.js',
   './js/views/home.js',
   './js/views/home-model.js',
   './js/views/trackable.js',

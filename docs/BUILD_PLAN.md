@@ -2796,7 +2796,7 @@ readable. Deployed for the user to check.
 
 ## Step 3.3 — Two-bars threshold chart
 
-**Status:** TODO
+**Status:** DONE (2026-08-24) — suite-verified, **awaiting device check.**
 
 **Goal.** Chart type 3 of 4 — the mechanic that motivated the whole
 reframing. A numeric metric over time with upper/lower bound lines and
@@ -2817,9 +2817,17 @@ zone shading.
 - Bounds source: `bounds_mode='manual'` → `bound_lower`/`bound_upper`
   columns. `bounds_mode='auto'` → `aggregate.deriveBounds()` over the
   global `rolling_window_days` from `app_settings`.
-- **Resolve the open statistic question first** (Architecture decisions
-  → open questions): raw window min/max vs. 10th/90th percentile. Ask
-  the user; do not silently pick one.
+- ~~**Resolve the open statistic question first**: raw window min/max vs.
+  10th/90th percentile. Ask the user; do not silently pick one.~~
+  **STALE — struck 2026-08-24.** This note predates the resolution. The
+  statistic was settled on **2026-08-21**: **p10/p90 of the rolling
+  window**, recorded in this file's own Architecture decisions ("Raw
+  min/max was rejected — it is set by exactly two readings, which are the
+  two most likely to be measurement noise, and one bad weigh-in would
+  permanently widen the band") and in `APP_CONCEPT.md` → Bounded metrics.
+  `aggregate.deriveBounds()` already implements it as its default method.
+  **Do not re-ask the user a question they have already answered and
+  recorded** — that is what the decision log exists to prevent.
 - Zone shading via annotation `box` regions + a gradient on the line as
   it approaches a bound. **v1 behavior is visual only** — no
   notifications, resolved explicitly.
@@ -2833,7 +2841,134 @@ zone shading.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite: **3287 green**, confirmed by two consecutive full runs (3123 unit,
+43 integration, 121 e2e), up from 2939. New: `js/charts/bounds.js`, 339
+unit cases, 9 e2e cases. `sw.js` `CACHE` `daily-v21` → `daily-v22` with
+`./js/charts/bounds.js` added to `ASSETS`.
+
+*Decisions made here:*
+
+- **Cold-start threshold `MIN_BOUND_READINGS = 12`, derived then
+  measured.** `deriveBounds` uses R-7 percentiles, where p10's index is
+  `0.1 × (n − 1)` — so p10 only stops being pinned to the single lowest
+  reading once `n ≥ 11`. Verified against the real function with one
+  outlier at 50 among readings at 80+: p10 reads 53.1 at n=2, 77.9 at
+  n=10, and **81 at n=11** — the outlier stops mattering exactly where the
+  arithmetic predicts. Below the threshold the chart says "Not enough data
+  yet — 5 of 12 readings" rather than drawing the noise-driven band the
+  2026-08-21 p10/p90 decision exists to avoid.
+- **Gaps bridge up to 7 days, break beyond.** Breaking on every unlogged
+  day would shatter a weight line into isolated dots (weight is logged
+  2–3×/week); a three-week silence must read as a break, not a confident
+  straight line through data that does not exist.
+- **Bounds are symmetric — `direction` is deliberately NOT applied to zone
+  shading.** The two-bars mechanic is symmetric by design, matching
+  `home-model.js`'s `verdict()`, which already treats a bounded numeric as
+  bad on both sides, inclusive.
+- **A `manual` config with missing or reversed bounds reports `invalid`
+  and says so**, rather than silently falling back to auto. It is a
+  config problem the user can fix.
+- **`DEFAULT_ROLLING_WINDOW_DAYS = 90` is a deliberate deferral.**
+  `app_settings.rolling_window_days` is the real source and is 90 live,
+  but reading it means a second round trip and touching every e2e
+  fixture, and nothing can change it until **Step 4.1** ships the settings
+  screen. A comment names 4.1 as the step that must replace it.
+
+*The contract was wrong twice about gap bridging, and both were caught by
+measurement rather than argument:*
+
+1. **`spanGaps` as a number does not work on a category scale** in the
+   pinned `chart.js@4.5.1` — it behaves identically to `spanGaps: false`.
+2. **The contract's own suggested fallback was also wrong.** With
+   `spanGaps: true` the `segment` callback fires once per *physically
+   adjacent* index pair, so `ctx.p1DataIndex - ctx.p0DataIndex` measures
+   exactly `1` on every call — including pairs inside a long null run. It
+   cannot distinguish a one-day gap from a twenty-day one.
+
+Shipped instead: a precomputed `segmentVisibility()` table (pure JS, no
+Chart.js) looked up by `ctx.p0DataIndex`, which *was* confirmed to equal
+the segment's own left index. Verified live at the boundary — 7 missing
+days bridges, 8 breaks. **Either of the contract's mechanisms would have
+shipped a line that never breaks or always breaks, and neither would have
+been caught by a config-level test.**
+
+*Two orchestrator contract errors, both fixed:*
+
+- **`boundsAxisFor`'s return shape was under-specified** ("same shape as
+  `weekly.js`'s"), which made a test assertion vacuous — a
+  `beginAtZero: false` key would have passed `notEqual(x, true)`. Pinned
+  to **exactly `{suggestedMin, suggestedMax}`**, no `beginAtZero` key at
+  all: this chart is never zero-based, and a permanently-false flag
+  invites someone to flip it. Absence is a stronger guarantee than a false
+  value. The decision was sent to the Implementer *before* reading its
+  output, so it came from principle rather than ratifying what was built.
+  Same guard pattern as Step 3.2c's `targetFor` shape fix.
+- **The allowed-import list was needlessly tight**, forcing a local
+  `addDaysLocal`. It was DST-safe (calendar-component arithmetic), but a
+  second implementation of day arithmetic is what this codebase's whole
+  discipline forbids. Now imports the real `addDays`. **The swap surfaced
+  a real consequence:** `addDays` throws on a non-integer `n` where the
+  local copy silently tolerated it — i.e. the duplicate was *more
+  permissive* and was masking bad input. `sanitizeWindowDays` now floors
+  to a safe positive integer. Verified behaviour-identical by an
+  independent from-scratch reference implementation across five window
+  sizes on a series **crossing the 2026 spring-forward DST boundary**.
+
+*Verified by tests:*
+
+- **N2 — the cold-start boundary**, asserted in both directions from the
+  imported constant (one short → `insufficient` with null bounds; exactly
+  `MIN_BOUND_READINGS` → `ok` with finite bounds).
+- **N3 — the delegation guard.** `boundsFor`'s auto bounds equal
+  `deriveBounds(entries, windowDays)`'s, using the **real**
+  `js/aggregate.js`, at both the default 90-day window and a non-default
+  30-day one (so a silently-hardcoded window fails).
+- **N7b — `segmentVisibility`, the function that actually decides whether
+  the line breaks.** It was initially untested because the contract named
+  only `shouldBridge` (its per-gap predicate), which the renderer never
+  consults directly — an orchestrator omission, now closed with 26 cases
+  including the `MAX_BRIDGE_DAYS` / `+1` boundary pair and a consistency
+  property computed independently in the test.
+- **N10 — the shape guard**, across six models including non-ok bounds and
+  the empty model.
+- **P4 — reads the RESOLVED y-axis** off a live chart, asserting
+  `min < lower` and `max > upper` strictly. Step 3.2b's D3 defect (a bound
+  drawn on the chart border) and Step 3.2c's C12 lesson, applied
+  pre-emptively.
+- N1, N4–N6, N8, N9, N11, P1–P3, P5–P9: manual coercion rejects,
+  out-of-window exclusion, disabled states, array alignment, status
+  precedence, an 11-fixture totality sweep, zone shading annotations,
+  cold-start and invalid states rendering **no canvas**, layout, and no
+  leaked Chart instance now that **two** charts share the screen.
+
+*Test-authoring rigour worth recording as a pattern:* the Test Author
+built a scratch reference implementation from the contract (never touching
+`js/`), ran its cases against it, then **injected the specific bug it
+claimed to catch** — `<` instead of `<=` in `shouldBridge` — and measured
+the result. The "exactly 7" half failed loudly; the "8" half **would have
+passed vacuously against that same bug**. That is why the contract asked
+for both halves. It also caught and corrected its own wrong fixtures by
+running the real `deriveBounds`.
+
+*Orchestrator verification:* the full diff was read. `js/views/detail.js`
+received exactly the four §4 additions plus honest comment updates, with
+the heatmap slot, day editor, period control, Daily cap and
+`chartsPending` untouched. Independently exercised in Node: the cold-start
+boundary flipping at 12, delegation to `deriveBounds`, reversed manual →
+`invalid`, both inclusive zone edges, the 7/8-day gap boundary, and the
+axis returning exactly two keys while framing both bounds strictly inside.
+Post-run isolation (direct SQL): `trackables` 6 / **0** `__test__`
+residue, `entries` 27 / **0** orphaned, `app_settings` singleton,
+`counter` intact.
+
+**Not verifiable from this machine:** whether the zone shading actually
+reads as "where in the band am I" at a glance on the phone — which is the
+entire point of this chart and cannot be asserted — whether the low-alpha
+tints are visible in both light and dark, and whether a broken line reads
+as missing data rather than as a rendering fault. The user's `Calories`
+row (manual 1700–2100) exercises the manual path; **nothing currently
+exercises the auto path**, which needs `bounds_enabled` on a numeric with
+12+ readings.
 
 ---
 
