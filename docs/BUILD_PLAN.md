@@ -2615,6 +2615,169 @@ Deployed for the user to re-check.
 
 ---
 
+## Step 3.2c — Selectable granularity (Daily / Weekly / Monthly)
+
+**Status:** DONE (2026-08-24) — suite-verified, **awaiting device check.**
+
+The user asked, after testing 3.1/3.2 on their phone, to choose the trend
+chart's bucketing. Also folds in the one device defect Step 3.2b failed to
+fix.
+
+Suite: **2939 green** (2784 unit, 43 integration, 112 e2e), up from 2411 — confirmed by two consecutive full runs.
+`sw.js` `CACHE` `daily-v20` → `daily-v21`; `ASSETS` unchanged.
+
+### Recorded user decisions (2026-08-24)
+
+**Count targets by period.** A `weekly_count` target ("3 times per week")
+is meaningless on a daily chart and needs scaling on a monthly one:
+
+| `target_type` | Daily | Weekly | Monthly |
+|---|---|---|---|
+| `weekly_count` | **no line** | `target_value` | **`target_value × 4`** |
+| `weekly_average` | `target_value` | `target_value` | `target_value` |
+
+`weekly_average` is a **rate**, so it answers the same question at any
+granularity and is never scaled. The monthly multiplier is a flat **×4**,
+chosen by the user over the arithmetically-truer 4.345 because it is how
+people think about it. Accepted consequence, stated at decision time: a
+31-day month is marginally easier than hitting 3 every week. The rendered
+line carries the **computed** number (`12 / month`) so a scaled target is
+self-explaining rather than mysterious.
+
+**Daily caps the range at 3 months.** 365 daily marks on a 390px screen is
+unreadable. Selecting Daily forces `3m` and disables `6M`/`1Y`/`All`;
+leaving Daily re-enables them and leaves the range where it is (no
+auto-restore — predictable beats clever).
+
+**Control placement, answering the user's question.** The `3M/6M/1Y/All`
+range control **stays global at the top**: it also bounds the heatmap's
+navigable months and its `'before'` cutoff — the behaviour the user
+verified in May on device. Attaching it to one chart would misrepresent
+its scope. Granularity affects only the trend chart, so it sits **on that
+chart**. Range is global; bucketing is local.
+
+### The Weight axis — fixed properly, at the third attempt
+
+Step 3.2b tried `suggestedMin`. It failed on device and the user reported
+it still showed `0–80`. **Verified on a live chart rather than reasoned
+about:** with identical options (`suggestedMin: 72, suggestedMax: 88`) a
+**bar** chart resolves to `0–90` while a **line** chart resolves to
+`72–88`. A bar is drawn from a zero baseline, so Chart.js forces 0 into
+range no matter what is suggested.
+
+So the fix is the **mark type**, not the axis — `chartTypeFor()`:
+`sum`/`count` are amounts accumulated → bars; `average`/`last` are levels
+sampled → line. Which is what this plan's Step 3.2 asked for all along
+("one bar/**point** per ISO week", "Chart.js bar/**line**").
+
+> **The transferable lesson, and it cost a shipped defect: a unit test on
+> chart CONFIG cannot catch the library overriding that config at render
+> time.** `axisBoundsFor` was correct and its unit test passed while the
+> phone showed `0–80`. Only reading the **resolved** scale off a live
+> chart catches this class of bug. That is now case C12.
+
+### An orchestrator design error the existing suite caught
+
+The first implementation widened `targetFor`'s return from `{value, kind}`
+to `{value, kind, baseValue, scaled, label}`. **Six existing tests failed
+immediately** — they deep-equal against the shape Step 3.2 pinned.
+
+Judged **code wrong, tests right**, and fixed by keeping the shape exactly
+`{value, kind}` and adding separate pure exports `targetLabel(target,
+period)` and `targetIsScaled(target, period)`. Presentation strings do not
+belong inside a model object whose shape is part of a tested contract.
+"Just updating the six tests" would have produced a green suite, a worse
+design, and six tests that no longer pinned anything. A new assertion now
+pins `Object.keys(targetFor(...))` to exactly `['kind','value']`, turning
+the mistake into a permanent guard.
+
+### Verified by tests
+
+- **C12 — the Weight regression, the most important case.** Reads
+  `Chart.getChart(canvas).scales.y.min` — the **resolved** scale, not
+  `axisBoundsFor`'s return and not the options object — asserting
+  `min > 0` strictly plus `config.type === 'line'`.
+- **C15/C16 — the user's two decisions, on a real page.** Daily disables
+  the wider ranges and pulls `1Y` down to `3m`; the Monthly annotation
+  sits at **12** with `12` in its label, and Daily has **no annotation at
+  all**.
+- **C14 — changing period issues ZERO requests.** Waits until the live
+  chart's own `data.labels` actually change (proof of re-render) before
+  asserting the GET count is unchanged — otherwise it passes vacuously.
+  Applies the race lesson from Step 3.2b.
+- **C7b — `multiYear` as a property**, not fixtures:
+  `model.multiYear === (distinct years in weekKeys > 1)` across 4 ranges ×
+  3 periods, one spanning 2024→2027, with a non-empty guard so it cannot
+  pass vacuously.
+- **C1/C2** — `monthsInRange` fixtures plus the correspondence property
+  (`rangeDays(...).map(slice(0,7))` deduped **equals** `monthsInRange`),
+  which is what proves the keys line up with `rollup(…, 'month', …)`.
+- **C3/C4** — the per-period target table, `targetLabel`/`targetIsScaled`,
+  and that no-arg `targetFor(t)` deep-equals `targetFor(t, 'week')` across
+  8 fixtures.
+- C5–C11, C13, C17, C18: `chartTypeFor`, gap-free keys at every period,
+  all twelve `meaningText` combinations, the `rollup` delegation guard at
+  all three periods, a 315-combination totality cross-product, bar type
+  for a genuine count series, period persistence, and layout.
+
+### Honest accounting of how this was built — read before trusting it
+
+**The orchestrator wrote the feature code itself**, violating
+`ORCHESTRATION.md` §1 ("You (Opus) never write feature code"). Forced:
+**four** subagent attempts were killed by API session limits — two
+Implementer runs and two Test Author runs across two dispatches. The
+protocol presumes subagents are available.
+
+What that costs, stated plainly: **this step has no two-agents-who-cannot-
+see-each-other guarantee.** The same author wrote the contract and the
+implementation, which is precisely the situation the process exists to
+avoid.
+
+What partially offsets it:
+
+1. The Test Author was dispatched separately, **did not read
+   `weekly.js` or `detail.js`**, and wrote C1–C18 from the contract.
+2. It **found a coverage gap the orchestrator created** (nothing tested
+   how `trendModel` derives `multiYear` — C7 tested `periodLabel` in
+   isolation and no case covered the derivation), now closed as C7b.
+3. It **disclosed a process violation against its own interest**: it read
+   `js/dates.js` without a line range and so saw `monthsInRange`'s
+   implementation. Impact judged low — its C1 fixtures came from the
+   contract, which the orchestrator had verified by computation *before*
+   dispatch — but it is recorded rather than waved away.
+4. It **flagged three cases that would pass against a wrong
+   implementation**, including an asymmetry in its own C16 (reading
+   annotation config rather than a resolved value — correct, since
+   Chart.js clamps scales but not annotation options).
+5. It **declined a test the orchestrator asked for**, correctly: a
+   `multiYear` derivation comparing only the first and last key is not a
+   *wrong* derivation, because `weekKeys` is guaranteed ascending and the
+   year component is monotonically non-decreasing along it. The two forms
+   are mathematically equivalent, so no test on correctly-ordered keys
+   could distinguish them, and one chasing it would be vacuous or would
+   duplicate C6.
+6. **The pre-existing 2411 tests caught the orchestrator's real design
+   error unprompted** (the `targetFor` shape widening).
+
+Treat this step's evidence as **weaker than the rest of the plan** and
+prefer device verification here — the same posture Step 2.5 recorded, for
+the same reason.
+
+**Also preserved deliberately, so no existing test needed editing:**
+`weeklyModel(args)` remains exported and returns output identical to
+`trendModel({...args, period: 'week'})`, and `targetFor(trackable)` with
+no period argument behaves exactly as before. ~386 existing cases depend
+on both; a test edited to accommodate a new implementation has stopped
+testing anything.
+
+**Not verifiable from this machine:** whether ~90 daily bars are legible
+at 390px, whether the line chart reads better than bars for Weight on the
+physical screen, whether the granularity control is comfortably tappable
+under the chart, and whether the `12 / month` annotation label is
+readable. Deployed for the user to check.
+
+---
+
 ## Step 3.3 — Two-bars threshold chart
 
 **Status:** TODO

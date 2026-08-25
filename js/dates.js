@@ -142,6 +142,35 @@ export function isoWeeksInRange(from, to) {
   return weeks;
 }
 
+// Step 3.2c: ascending 'YYYY-MM' keys covering every calendar month touched
+// by the inclusive [from, to] range. Mirrors isoWeeksInRange's shape exactly
+// (same validation, same from>to throw), and its keys are exactly what
+// aggregate.js#rollup produces for period 'month' (it buckets by
+// entry_date.slice(0,7)) — that correspondence is what lets the trend chart
+// fill empty months rather than silently omitting them.
+//
+// Arithmetic is on the absolute month index (y*12 + (m-1)), never through
+// Date: adding months via Date rolls the day-of-month over (31 Mar plus one
+// month is ambiguous), which is the trap this file's header warns about.
+export function monthsInRange(from, to) {
+  const fromDate = toDate(from, 'from');
+  const toDateVal = toDate(to, 'to');
+  const fromStr = formatLocal(fromDate);
+  const toStr = formatLocal(toDateVal);
+  if (fromStr > toStr) {
+    throw new RangeError(`monthsInRange: from (${fromStr}) must be <= to (${toStr})`);
+  }
+  const fromIdx = fromDate.getFullYear() * 12 + fromDate.getMonth();
+  const toIdx = toDateVal.getFullYear() * 12 + toDateVal.getMonth();
+  const months = [];
+  for (let idx = fromIdx; idx <= toIdx; idx++) {
+    const y = Math.floor(idx / 12);
+    const m = idx - y * 12 + 1;
+    months.push(`${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`);
+  }
+  return months;
+}
+
 export function rangeDays(from, to) {
   const fromDate = toDate(from, 'from');
   const toDateVal = toDate(to, 'to');

@@ -24,7 +24,7 @@ import { todayLocal, addDays } from '../dates.js';
 import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } from './home-model.js';
 import { iconSvg, hasIcon } from '../icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
-import { renderWeekly, destroyWeekly, weeklyModel } from '../charts/weekly.js';
+import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/weekly.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -106,6 +106,14 @@ export const SLOT_TITLES = {
 // =============================================================================
 
 const RANGE_STORAGE_KEY = 'daily.detail.range.v1';
+const PERIOD_STORAGE_KEY = 'daily.detail.period.v1';
+
+// Step 3.2c: Daily is capped at 3 months (recorded user decision,
+// 2026-08-24). 365 daily marks on a 390px screen is unreadable, so
+// selecting Daily forces the range to 3M and disables the wider options
+// while it is active. Leaving Daily re-enables them and leaves the range
+// where it is — no auto-restore, because predictable beats clever.
+const DAILY_RANGE_KEY = '3m';
 
 // iOS private mode throws on setItem/getItem — a logging app must never
 // die on that. Every storage access here is wrapped individually, same
@@ -128,6 +136,26 @@ function writeStoredRange(key) {
   } catch {
     // Best-effort only — an unreadable/unwritable store just means the
     // selection won't persist across visits, which is not fatal.
+  }
+}
+
+function readStoredPeriod() {
+  try {
+    const raw = localStorage.getItem(PERIOD_STORAGE_KEY);
+    if (typeof raw === 'string' && PERIODS.some((p) => p.key === raw)) {
+      return raw;
+    }
+  } catch {
+    // Fall through to the default below.
+  }
+  return 'week';
+}
+
+function writeStoredPeriod(key) {
+  try {
+    localStorage.setItem(PERIOD_STORAGE_KEY, key);
+  } catch {
+    // Best-effort only, same as writeStoredRange.
   }
 }
 
@@ -171,6 +199,11 @@ export function createDetailView({ id, store, api, today } = {}) {
   // snap-in this fixes. See loadEntriesForRange() and mount()'s catch
   // block for the two paths that settle it.
   let chartsPending = true;
+
+  // Step 3.2c: trend-chart granularity ('day' | 'week' | 'month'). Lives
+  // here rather than in the chart module for the same reason monthStr does
+  // — js/charts/weekly.js is stateless and this view owns the render loop.
+  let periodKey = 'week';
 
   // Step 3.1: calendar heatmap state. The heatmap module itself is
   // stateless (js/charts/heatmap.js) — the displayed month and the
@@ -398,7 +431,9 @@ export function createDetailView({ id, store, api, today } = {}) {
       btn.type = 'button';
       btn.dataset.range = r.key;
       btn.setAttribute('aria-pressed', String(r.key === rangeKey));
-      btn.disabled = entriesLoading;
+      // Step 3.2c: Daily caps the range at 3M, so the wider options are
+      // disabled while Daily is active rather than silently ignored.
+      btn.disabled = entriesLoading || (periodKey === 'day' && r.key !== DAILY_RANGE_KEY);
       btn.textContent = r.label;
       rangesDiv.appendChild(btn);
     }
@@ -447,7 +482,9 @@ export function createDetailView({ id, store, api, today } = {}) {
         }
       } else if (slot === 'weekly') {
         const { from, to } = resolveRange(rangeKey, day);
-        slotSection.appendChild(renderWeekly(weeklyModel({ trackable, entries: entriesForRange, from, to })));
+        slotSection.appendChild(
+          renderWeekly(trendModel({ trackable, entries: entriesForRange, from, to, period: periodKey }))
+        );
       } else {
         // bounds/overlay keep their existing placeholder — Steps 3.3-3.5.
         const placeholder = document.createElement('p');
@@ -700,6 +737,40 @@ export function createDetailView({ id, store, api, today } = {}) {
     render();
   }
 
+  // Step 3.2c. Changing granularity re-buckets data already in hand, so it
+  // must issue ZERO network requests — that is the load-once guarantee
+  // Steps 2.3/3.1/3.2 all assert. The single exception is the Daily cap:
+  // switching to Daily from a range wider than 3M genuinely changes the
+  // query window, so that one path reloads.
+  async function handlePeriodChange(key) {
+    if (entriesLoading) return;
+    if (key === periodKey) return;
+    if (!PERIODS.some((p) => p.key === key)) return;
+
+    periodKey = key;
+    writeStoredPeriod(key);
+    // A day editor opened from the heatmap is unrelated to the trend
+    // chart's bucketing, but leaving it open across a re-render that
+    // changes what is on screen below it is confusing.
+    selectedDay = null;
+    dayError = null;
+    dayDraft = '';
+
+    const needsRangeChange = key === 'day' && rangeKey !== DAILY_RANGE_KEY;
+    if (!needsRangeChange) {
+      render();
+      return;
+    }
+
+    rangeKey = DAILY_RANGE_KEY;
+    writeStoredRange(rangeKey);
+    render();
+    await loadEntriesForRange(rangeKey);
+    if (disposed) return;
+    clampMonthState();
+    render();
+  }
+
   function handleClick(event) {
     try {
       const target = event.target;
@@ -708,6 +779,12 @@ export function createDetailView({ id, store, api, today } = {}) {
       const rangeBtn = target.closest('button.detail-range[data-range]');
       if (rangeBtn && sectionEl.contains(rangeBtn)) {
         handleRangeChange(rangeBtn.dataset.range);
+        return;
+      }
+
+      const periodBtn = target.closest('button.trend-period[data-period]');
+      if (periodBtn && sectionEl.contains(periodBtn)) {
+        handlePeriodChange(periodBtn.dataset.period);
         return;
       }
 
@@ -767,6 +844,15 @@ export function createDetailView({ id, store, api, today } = {}) {
     container = el;
     disposed = false;
     rangeKey = readStoredRange();
+    periodKey = readStoredPeriod();
+    // A stored Daily period with a stored range wider than 3M is a legal
+    // combination on disk (the two keys are written independently) but not
+    // a legal one on screen, so reconcile before the first load rather than
+    // issuing a query for a window the UI will immediately contradict.
+    if (periodKey === 'day' && rangeKey !== DAILY_RANGE_KEY) {
+      rangeKey = DAILY_RANGE_KEY;
+      writeStoredRange(rangeKey);
+    }
 
     // Step 1: synchronous first paint from the store's already-hydrated
     // cache — must happen before any await.
@@ -833,6 +919,7 @@ export function createDetailView({ id, store, api, today } = {}) {
     dayInFlight = false;
     monthStr = null;
     dayFocusMode = null;
+    periodKey = 'week';
   }
 
   return { mount, unmount };

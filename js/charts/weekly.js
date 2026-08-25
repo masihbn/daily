@@ -9,7 +9,7 @@
 //
 // Allowed imports, and only these:
 import { rollup, fillSeries } from '../aggregate.js';
-import { isoWeeksInRange, isoWeekKey } from '../dates.js';
+import { isoWeeksInRange, isoWeekKey, monthsInRange, rangeDays } from '../dates.js';
 
 // §0(b): rollup(), fillSeries() and the ISO-week helpers in js/dates.js are
 // the SINGLE implementation of rollup/grouping math. This module imports
@@ -126,6 +126,110 @@ export function weekLabel(weekKey) {
   return `${day} ${MONTH_ABBR[month - 1]}`;
 }
 
+// --- Step 3.2c: granularity -------------------------------------------
+//
+// The user asked (2026-08-24) to choose Daily / Weekly / Monthly on this
+// chart. `rollup()` in aggregate.js already supported all three periods;
+// what this step adds is the key lists, the labels, and the per-period
+// target rules below.
+
+export const PERIODS = [
+  { key: 'day', label: 'Daily' },
+  { key: 'week', label: 'Weekly' },
+  { key: 'month', label: 'Monthly' },
+];
+
+const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
+
+// The complete, gap-free bucket-key list for a period. These keys must line
+// up exactly with what rollup(entries, period, agg) produces — aggregate.js
+// buckets 'day' by entry_date, 'week' by isoWeekKey and 'month' by
+// entry_date.slice(0,7). Verified at implementation time rather than
+// assumed. This list is what guarantees an empty period is rendered as an
+// explicit zero/gap instead of silently vanishing from the axis
+// (BUILD_PLAN Step 3.2: a skipped period makes a gap look like continuous
+// activity, which is actively misleading on a habit tracker).
+export function periodKeysFor(period, from, to) {
+  if (period === 'day') return rangeDays(from, to);
+  if (period === 'week') return isoWeeksInRange(from, to);
+  if (period === 'month') return monthsInRange(from, to);
+  throw new RangeError(`periodKeysFor: unknown period, got: ${JSON.stringify(period)}`);
+}
+
+// Axis label for one bucket key. Days and weeks both read 'd MMM' (a week
+// is labelled by its Monday — see weekLabel above for why bare 'W34' was
+// replaced). Months read 'Aug', or 'Aug 26' when the series spans more than
+// one calendar year: without the year an All-range monthly chart repeats
+// Jan..Dec with no way to tell which year is which.
+export function periodLabel(key, period, opts = {}) {
+  if (period === 'day') {
+    if (typeof key !== 'string' || !DATE_STR_RE.test(key)) {
+      throw new RangeError(`periodLabel: expected a 'YYYY-MM-DD' string for period 'day', got: ${JSON.stringify(key)}`);
+    }
+    return `${Number(key.slice(8, 10))} ${MONTH_ABBR[Number(key.slice(5, 7)) - 1]}`;
+  }
+  if (period === 'week') return weekLabel(key);
+  if (period === 'month') {
+    if (typeof key !== 'string' || !MONTH_KEY_RE.test(key)) {
+      throw new RangeError(`periodLabel: expected a 'YYYY-MM' string for period 'month', got: ${JSON.stringify(key)}`);
+    }
+    const monthNum = Number(key.slice(5, 7));
+    if (monthNum < 1 || monthNum > 12) {
+      throw new RangeError(`periodLabel: month out of range in ${JSON.stringify(key)}`);
+    }
+    const abbr = MONTH_ABBR[monthNum - 1];
+    return opts && opts.multiYear === true ? `${abbr} ${key.slice(2, 4)}` : abbr;
+  }
+  throw new RangeError(`periodLabel: unknown period, got: ${JSON.stringify(period)}`);
+}
+
+// --- chartTypeFor ------------------------------------------------------
+//
+// STEP 3.2B's WEIGHT BUG, PROPERLY FIXED. That step tried to stop Weight's
+// y-axis spanning 0-80 for a single reading of 80 by supplying
+// suggestedMin/suggestedMax. It did not work on the device, and the reason
+// was verified on a live chart rather than guessed: with identical options
+// (suggestedMin 72, suggestedMax 88) a BAR chart resolves to 0-90 while a
+// LINE chart resolves to 72-88. A bar is drawn from a zero baseline, so
+// Chart.js forces 0 into range no matter what is suggested.
+//
+// So the mark type is the fix, not the axis:
+//   'sum'/'count'     are amounts ACCUMULATED over the period -> bars
+//   'average'/'last'  are LEVELS sampled during it            -> line
+// which is also what BUILD_PLAN Step 3.2 asked for ("one bar/POINT per ISO
+// week", "Chart.js bar/LINE").
+//
+// The transferable lesson, recorded because it cost a shipped defect: a
+// unit test on chart CONFIG cannot catch the library overriding that config
+// at render time. axisBoundsFor() was correct and its unit test passed
+// while the phone showed 0-80. Only reading the RESOLVED scale off a live
+// chart catches this class of bug.
+export function chartTypeFor(aggregation) {
+  return aggregation === 'average' || aggregation === 'last' ? 'line' : 'bar';
+}
+
+// --- meaningText -------------------------------------------------------
+//
+// The one line on screen that says what the bars actually ARE. It matters
+// disproportionately because seriesAggregationFor() can override
+// `aggregation` (the 2026-08-24 "target defines the unit" decision), so the
+// bars are not always what the trackable's own config would suggest — and
+// because "Average per week" would be a lie in Daily view. Spelled out per
+// combination rather than derived: 'count' + 'day' would otherwise read
+// "Days logged per day".
+const MEANING = {
+  sum: { day: 'Total per day', week: 'Total per week', month: 'Total per month' },
+  count: { day: 'Logged', week: 'Days logged per week', month: 'Days logged per month' },
+  average: { day: 'Average per day', week: 'Average per week', month: 'Average per month' },
+  last: { day: 'Latest each day', week: 'Latest each week', month: 'Latest each month' },
+};
+
+export function meaningText(aggregation, period, unit) {
+  const row = MEANING[aggregation] || MEANING.sum;
+  const base = row[period] || row.week;
+  return typeof unit === 'string' && unit !== '' ? `${base} · ${unit}` : base;
+}
+
 // --- §2.4 targetFor ----------------------------------------------------
 
 // Returns null ("no target line") for any `target_type` other than
@@ -149,7 +253,28 @@ export function weekLabel(weekKey) {
 // would silently draw a target line at 0 (or 1) for a value that was never
 // meant to be numeric. '', null and undefined are rejected explicitly for
 // the same reason: Number('') === 0 and Number(null) === 0.
-export function targetFor(trackable) {
+// Step 3.2c: `period` decides whether — and at what value — the target line
+// is drawn. Recorded user decision, 2026-08-24:
+//
+//   weekly_count   ("3 times per week")  day: NO LINE | week: 3 | month: 12
+//   weekly_average ("1700 kcal average") every period: 1700, never scaled
+//
+// weekly_average is a RATE, so it answers the same question at any
+// granularity. weekly_count is a count tied to the week itself: on a daily
+// chart a line at 3 means nothing, so none is drawn rather than inventing
+// one. The monthly multiplier is a flat x4 ("four weeks in a month"),
+// chosen by the user over the arithmetically-truer 4.345 because it is how
+// people think about it — the consequence, accepted, is that a 31-day month
+// is marginally easier than hitting 3 every week. `label` carries the
+// COMPUTED number ('12 / month') so a scaled target is self-explaining on
+// screen rather than mysterious.
+//
+// `period` defaults to 'week' so every pre-3.2c caller keeps its exact
+// behaviour.
+const MONTHS_TO_WEEKS = 4;
+const PERIOD_WORD = { day: 'day', week: 'week', month: 'month' };
+
+export function targetFor(trackable, period = 'week') {
   if (!trackable || typeof trackable !== 'object') return null;
   const kind = trackable.target_type;
   if (kind !== 'weekly_count' && kind !== 'weekly_average') return null;
@@ -158,10 +283,44 @@ export function targetFor(trackable) {
   if (raw === null || raw === undefined || raw === '') return null;
   if (typeof raw !== 'number' && typeof raw !== 'string') return null;
 
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return null;
+  const baseValue = Number(raw);
+  if (!Number.isFinite(baseValue)) return null;
 
+  const per = PERIOD_WORD[period] ? period : 'week';
+
+  let value = baseValue;
+  if (kind === 'weekly_count') {
+    if (per === 'day') return null;
+    if (per === 'month') value = baseValue * MONTHS_TO_WEEKS;
+  }
+
+  // The returned shape is EXACTLY { value, kind } and must stay that way.
+  // Step 3.2's contract pinned it, and the existing unit tests deep-equal
+  // against it — an earlier draft of 3.2c added baseValue/scaled/label here
+  // and broke six of them. Presentation (the '12 / month' line label)
+  // belongs in the presentation layer, not smuggled into a model object
+  // whose shape is part of a tested contract. See targetLabel() below.
   return { value, kind };
+}
+
+// Display label for the target line, e.g. '12 / month'. Kept out of
+// targetFor()'s return value deliberately (see above). Carries the COMPUTED
+// number so a target scaled from weeks to months is self-explaining on
+// screen rather than mysterious — a silently rescaled target would be the
+// same class of quiet lie as plotting a sum against an average line.
+export function targetLabel(target, period = 'week') {
+  if (!target || typeof target !== 'object' || typeof target.value !== 'number' || !Number.isFinite(target.value)) {
+    return '';
+  }
+  const per = PERIOD_WORD[period] ? period : 'week';
+  return `${String(Number(target.value))} / ${PERIOD_WORD[per]}`;
+}
+
+// True when this period's target line is a scaled version of the stored
+// weekly figure (weekly_count on a monthly chart). Derived rather than
+// stored, for the same shape-stability reason.
+export function targetIsScaled(target, period) {
+  return !!(target && target.kind === 'weekly_count' && period === 'month');
 }
 
 // --- §2.5 weekVerdict ----------------------------------------------------
@@ -265,15 +424,17 @@ function directionOf(trackable) {
   return trackable && typeof trackable === 'object' && trackable.direction === 'break' ? 'break' : 'build';
 }
 
-function emptyModel(trackable) {
+function emptyModel(trackable, period) {
   return {
     isEmpty: true,
+    period,
+    multiYear: false,
     aggregation: seriesAggregationFor(trackable),
     weekKeys: [],
     labels: [],
     values: [],
     verdicts: [],
-    target: targetFor(trackable),
+    target: targetFor(trackable, period),
     unit: unitOf(trackable),
     identityColor: identityColorOf(trackable),
     direction: directionOf(trackable),
@@ -281,13 +442,27 @@ function emptyModel(trackable) {
   };
 }
 
-// --- §2.6 weeklyModel --------------------------------------------------
+// True when the bucket keys span more than one calendar year — drives
+// periodLabel's 'Aug' vs 'Aug 26' choice. Every key form ('YYYY-MM-DD',
+// 'YYYY-Www', 'YYYY-MM') starts with the four-digit year, so one slice
+// covers all three.
+function spansMultipleYears(keys) {
+  if (keys.length === 0) return false;
+  const first = keys[0].slice(0, 4);
+  return keys.some((k) => k.slice(0, 4) !== first);
+}
 
-// THE CORE PURE FUNCTION. Never throws except on a malformed `to` — a
-// null/garbage `trackable`, a non-array `entries`, entries with garbage
-// entry_dates or non-numeric values, and a garbage `from` (treated as null)
-// must all produce a well-formed model.
-export function weeklyModel({ trackable, entries, from, to } = {}) {
+// --- §2.6 trendModel ---------------------------------------------------
+
+// THE CORE PURE FUNCTION. Never throws except on a malformed `to` or an
+// unknown `period` — a null/garbage `trackable`, a non-array `entries`,
+// entries with garbage entry_dates or non-numeric values, and a garbage
+// `from` (treated as null) must all produce a well-formed model.
+//
+// Step 3.2c generalized this from weeks to any period. `weeklyModel` below
+// is kept as a thin wrapper so every pre-3.2c caller and test keeps
+// exercising the exact same behaviour under the same name.
+export function trendModel({ trackable, entries, from, to, period = 'week' } = {}) {
   // `to` must throw unconditionally for anything that isn't a real local
   // calendar date — including on an early-return path below (e.g. "no
   // entries at all"), so it is validated first, before any other logic.
@@ -295,6 +470,13 @@ export function weeklyModel({ trackable, entries, from, to } = {}) {
   // shape-only match like '2026-02-30' still throws, exactly as dates.js
   // would treat it.
   isoWeekKey(to);
+
+  // An unknown period is a programmer error, not bad user data — fail
+  // loudly rather than silently defaulting to weeks and drawing a chart
+  // that quietly answers a different question.
+  if (period !== 'day' && period !== 'week' && period !== 'month') {
+    throw new RangeError(`trendModel: unknown period, got: ${JSON.stringify(period)}`);
+  }
 
   const list = Array.isArray(entries) ? entries : [];
   const aggregation = seriesAggregationFor(trackable);
@@ -316,20 +498,20 @@ export function weeklyModel({ trackable, entries, from, to } = {}) {
     for (const e of dateValidEntries) {
       if (earliest === null || e.entry_date < earliest) earliest = e.entry_date;
     }
-    if (earliest === null) return emptyModel(trackable);
+    if (earliest === null) return emptyModel(trackable, period);
     lowerBound = earliest;
   }
 
   // 'YYYY-MM-DD' strings compare lexicographically in chronological order
   // (js/dates.js relies on the same fact) — both sides are confirmed real
   // dates by this point, so a plain string comparison is safe.
-  if (lowerBound > to) return emptyModel(trackable);
+  if (lowerBound > to) return emptyModel(trackable, period);
 
-  // §0(c): the complete, gap-free list of ISO week keys in range — this is
-  // what guarantees a skipped week never silently vanishes from the axis.
-  const keys = isoWeeksInRange(lowerBound, to);
+  // §0(c): the complete, gap-free list of bucket keys in range — this is
+  // what guarantees a skipped period never silently vanishes from the axis.
+  const keys = periodKeysFor(period, lowerBound, to);
 
-  const buckets = rollup(dateValidEntries, 'week', aggregation);
+  const buckets = rollup(dateValidEntries, period, aggregation);
   // Note on rollup()'s own contract: it throws on an unknown
   // period/aggregation, but seriesAggregationFor() can only ever return one
   // of the four legal aggregation values, so that throw is unreachable from
@@ -337,20 +519,25 @@ export function weeklyModel({ trackable, entries, from, to } = {}) {
   // mask a real regression.
   const filled = fillSeries(buckets, keys, fillValueFor(aggregation));
 
-  const target = targetFor(trackable);
+  const target = targetFor(trackable, period);
   const direction = directionOf(trackable);
+  const multiYear = spansMultipleYears(keys);
 
   const labels = [];
   const values = [];
   const verdicts = [];
   for (const point of filled) {
-    labels.push(weekLabel(point.key));
+    labels.push(periodLabel(point.key, period, { multiYear }));
     values.push(point.value);
+    // Verdicts compare against the SCALED target value (e.g. 12/month for a
+    // 3/week goal), which is what targetFor already returns for this period.
     verdicts.push(weekVerdict(point.value, target, direction));
   }
 
   return {
     isEmpty: false,
+    period,
+    multiYear,
     aggregation,
     weekKeys: keys,
     labels,
@@ -364,6 +551,14 @@ export function weeklyModel({ trackable, entries, from, to } = {}) {
   };
 }
 
+// Kept exported and behaviour-identical to its pre-3.2c self: 386 existing
+// unit tests call this name, and preserving it means none of them had to be
+// edited to accommodate the generalization — a test changed to fit a new
+// implementation has stopped testing anything.
+export function weeklyModel(args) {
+  return trendModel({ ...(args || {}), period: 'week' });
+}
+
 // =============================================================================
 // DOM — the only exports in this file that touch `document`/`window`.
 // =============================================================================
@@ -373,16 +568,8 @@ export function weeklyModel({ trackable, entries, from, to } = {}) {
 // directly, since §0(a) means those can differ. This is the one place on
 // screen that tells the user "these bars are averages", which matters most
 // exactly when aggregation and the bars have diverged.
-const AGGREGATION_PHRASE = {
-  sum: 'Total per week',
-  count: 'Days logged per week',
-  average: 'Average per week',
-  last: 'Latest each week',
-};
-
-function meaningText(model) {
-  const phrase = AGGREGATION_PHRASE[model.aggregation] || AGGREGATION_PHRASE.sum;
-  return model.unit ? `${phrase} · ${model.unit}` : phrase;
+function modelMeaningText(model) {
+  return meaningText(model.aggregation, model.period || 'week', model.unit);
 }
 
 // Reads a CSS custom property off :root at render time (so light/dark both
@@ -475,8 +662,30 @@ export function renderWeekly(model) {
 
   const meaning = document.createElement('p');
   meaning.className = 'weekly-meaning';
-  meaning.textContent = meaningText(model);
+  meaning.textContent = modelMeaningText(model);
   root.appendChild(meaning);
+
+  // Step 3.2c §3.1 — the granularity control lives ON the chart it governs.
+  // The 3M/6M/1Y/All range control deliberately stays global at the top of
+  // the detail screen because it also bounds the heatmap's navigable months
+  // and its 'before' cutoff; bucketing affects only this chart, so it sits
+  // here. Attaches NO listeners — detail.js owns the one delegated click
+  // listener, exactly as the heatmap's month nav does.
+  const periods = document.createElement('div');
+  periods.className = 'trend-periods';
+  periods.setAttribute('role', 'group');
+  periods.setAttribute('aria-label', 'Granularity');
+  const activePeriod = model.period || 'week';
+  for (const p of PERIODS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'trend-period';
+    btn.dataset.period = p.key;
+    btn.setAttribute('aria-pressed', String(p.key === activePeriod));
+    btn.textContent = p.label;
+    periods.appendChild(btn);
+  }
+  root.appendChild(periods);
 
   if (model.isEmpty) {
     const p = document.createElement('p');
@@ -517,6 +726,28 @@ export function renderWeekly(model) {
     },
   };
 
+  // For a line chart the per-point verdict colours ride on the points; the
+  // line itself stays one neutral colour, because a line whose segments
+  // change colour is unreadable.
+  const chartType = chartTypeFor(model.aggregation);
+  const dataset = {
+    data: model.values,
+  };
+  if (chartType === 'line') {
+    dataset.borderColor = model.identityColor || cssVar('--accent', '#3478f6');
+    dataset.pointBackgroundColor = backgroundColor;
+    dataset.pointBorderColor = backgroundColor;
+    // A single logged period must not vanish into an invisible line.
+    dataset.pointRadius = 4;
+    dataset.borderWidth = 2;
+    // A gap is a period with no data. Bridging it would draw a line
+    // implying readings that were never taken.
+    dataset.spanGaps = false;
+    dataset.tension = 0;
+  } else {
+    dataset.backgroundColor = backgroundColor;
+  }
+
   if (model.target !== null && annotationPluginAvailable()) {
     plugins.annotation = {
       annotations: {
@@ -529,7 +760,10 @@ export function renderWeekly(model) {
           borderDash: [6, 4],
           label: {
             display: true,
-            content: String(model.target.value),
+            // The COMPUTED number, e.g. '12 / month' for a 3/week goal.
+            // A silently rescaled target with no visible number is the same
+            // class of quiet lie as plotting a sum against an average line.
+            content: targetLabel(model.target, model.period || 'week'),
             position: 'end',
             backgroundColor: cssVar('--accent', '#3478f6'),
           },
@@ -567,15 +801,14 @@ export function renderWeekly(model) {
 
   try {
     chartInstance = new window.Chart(canvas, {
-      type: 'bar',
+      // Step 3.2c §0(c): bars for accumulated amounts, a line for sampled
+      // levels. This is what actually fixes Weight's 0-80 axis — a bar is
+      // drawn from a zero baseline, so Chart.js forces 0 into range no
+      // matter what suggestedMin says. See chartTypeFor().
+      type: chartType,
       data: {
         labels: model.labels,
-        datasets: [
-          {
-            data: model.values,
-            backgroundColor,
-          },
-        ],
+        datasets: [dataset],
       },
       options: {
         responsive: true,

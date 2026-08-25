@@ -24,6 +24,7 @@ import {
   isoWeeksInRange,
   rangeDays,
   monthGrid,
+  monthsInRange,
 } from '../../js/dates.js';
 
 // ===========================================================================
@@ -312,6 +313,105 @@ describe('isoWeeksInRange', () => {
     // no duplicates
     assert.equal(new Set(result).size, result.length);
   });
+});
+
+// ===========================================================================
+// CONTRACT-3.2c §2.1 / §6.1 — monthsInRange (C1, C2)
+// ===========================================================================
+
+describe('C1 — monthsInRange (contract §2.1 fixtures)', () => {
+  const fixtures = [
+    ['2026-08-01', '2026-08-31', ['2026-08']],
+    ['2026-08-15', '2026-10-02', ['2026-08', '2026-09', '2026-10']],
+    ['2025-11-30', '2026-02-01', ['2025-11', '2025-12', '2026-01', '2026-02']],
+    ['2026-08-10', '2026-08-10', ['2026-08']],
+  ];
+  for (const [from, to, expected] of fixtures) {
+    it(`monthsInRange('${from}', '${to}') === ${JSON.stringify(expected)}`, () => {
+      assert.deepEqual(monthsInRange(from, to), expected);
+    });
+  }
+
+  it('from === to gives exactly one month', () => {
+    assert.deepEqual(monthsInRange('2026-05-15', '2026-05-15'), ['2026-05']);
+  });
+
+  it('from > to throws RangeError', () => {
+    assert.throws(() => monthsInRange('2026-08-10', '2026-08-01'), RangeError);
+  });
+
+  it('a full calendar year returns 12 strictly ascending, gap-free, duplicate-free keys', () => {
+    const result = monthsInRange('2026-01-01', '2026-12-31');
+    const expected = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+    assert.deepEqual(result, expected);
+    const sorted = [...result].sort();
+    assert.deepEqual(result, sorted);
+    assert.equal(new Set(result).size, result.length);
+  });
+
+  it('ascending order, strictly increasing, no duplicates over an arbitrary multi-year span', () => {
+    const result = monthsInRange('2025-10-01', '2027-03-15');
+    const sorted = [...result].sort();
+    assert.deepEqual(result, sorted);
+    assert.equal(new Set(result).size, result.length);
+  });
+
+  describe('hostile inputs throw RangeError, same validation as isoWeeksInRange', () => {
+    const hostile = [null, undefined, {}, [], 42, 'not-a-date', '2026-13-01', '2026/08/01', '', new Date('nonsense')];
+    for (const bad of hostile) {
+      it(`monthsInRange(${String(bad)}, '2026-08-01') throws`, () => {
+        assert.throws(() => monthsInRange(bad, '2026-08-01'), RangeError);
+      });
+      it(`monthsInRange('2026-08-01', ${String(bad)}) throws`, () => {
+        assert.throws(() => monthsInRange('2026-08-01', bad), RangeError);
+      });
+    }
+  });
+});
+
+describe('C2 — the correspondence property: monthsInRange keys line up with rollup(..., "month", ...) bucketing', () => {
+  // rollup() (js/aggregate.js) buckets 'month' by entry_date.slice(0,7). This
+  // proves monthsInRange's keys are exactly the set of slice(0,7) values a
+  // real day-by-day walk of the range would produce — neither more (a
+  // phantom month) nor fewer (a silently omitted one).
+  const ranges = [
+    ['2026-08-01', '2026-08-31'],
+    ['2026-08-15', '2026-10-02'],
+    ['2025-11-30', '2026-02-01'],
+    ['2026-08-10', '2026-08-10'],
+    ['2026-01-01', '2026-12-31'],
+    ['2025-06-15', '2027-01-31'],
+  ];
+
+  function uniqueInOrder(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const x of arr) {
+      if (!seen.has(x)) {
+        seen.add(x);
+        out.push(x);
+      }
+    }
+    return out;
+  }
+
+  for (const [from, to] of ranges) {
+    describe(`range ${from}..${to}`, () => {
+      const months = monthsInRange(from, to);
+      const days = rangeDays(from, to);
+      const daySlices = uniqueInOrder(days.map((d) => d.slice(0, 7)));
+
+      it('every monthsInRange key matches entry_date.slice(0,7) for at least one real date in that month', () => {
+        for (const key of months) {
+          assert.ok(days.some((d) => d.slice(0, 7) === key), `no day in range maps to month key ${key}`);
+        }
+      });
+
+      it('rangeDays(from,to) mapped through slice(0,7) and de-duplicated equals monthsInRange(from,to) exactly', () => {
+        assert.deepEqual(daySlices, months);
+      });
+    });
+  }
 });
 
 // ===========================================================================

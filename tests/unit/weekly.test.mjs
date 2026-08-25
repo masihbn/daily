@@ -25,9 +25,17 @@ import {
   weekVerdict,
   weeklyModel,
   axisBoundsFor,
+  PERIODS,
+  periodKeysFor,
+  periodLabel,
+  targetLabel,
+  targetIsScaled,
+  trendModel,
+  chartTypeFor,
+  meaningText,
 } from '../../js/charts/weekly.js';
 import { rollup, fillSeries } from '../../js/aggregate.js';
-import { isoWeeksInRange, isoWeekKey, addDays, startOfIsoWeek, parseLocal } from '../../js/dates.js';
+import { isoWeeksInRange, isoWeekKey, addDays, startOfIsoWeek, parseLocal, rangeDays, monthsInRange } from '../../js/dates.js';
 
 // ===========================================================================
 // W1 — seriesAggregationFor (contract §2.1) — THE §0(a) DECISION IN CODE
@@ -992,5 +1000,755 @@ describe('B14 — weeklyModel.weekKeys still carries full ISO week keys after th
     // shortened axis labels.
     assert.notEqual(model.labels[0], model.weekKeys[0]);
     assert.equal(model.labels[0], weekLabel(model.weekKeys[0]));
+  });
+});
+
+// ===========================================================================
+// CONTRACT-3.2c — Selectable granularity (Daily / Weekly / Monthly)
+//
+// The correction on record: CONTRACT-3.2c §2.5 originally specified
+// targetFor(trackable, period) -> { value, kind, baseValue, scaled, label }.
+// That was wrong and has been corrected: targetFor keeps the EXACT
+// { value, kind } shape Step 3.2 pinned (386 existing tests above deep-equal
+// against it). The display string and the scaled flag are now separate pure
+// exports: targetLabel(target, period) and targetIsScaled(target, period).
+// ===========================================================================
+
+// ===========================================================================
+// C3 — targetFor by period (the user's decision), targetLabel, targetIsScaled
+// ===========================================================================
+
+describe('C3 — targetFor by period: the user\'s decision (§0(a))', () => {
+  it("weekly_count 3, period 'day' -> null (a count target means nothing on a daily chart)", () => {
+    assert.equal(targetFor({ target_type: 'weekly_count', target_value: 3 }, 'day'), null);
+  });
+
+  it("weekly_count 3, period 'week' -> {value:3, kind:'weekly_count'}", () => {
+    assert.deepEqual(targetFor({ target_type: 'weekly_count', target_value: 3 }, 'week'), {
+      value: 3,
+      kind: 'weekly_count',
+    });
+  });
+
+  it("weekly_count 3, period 'month' -> {value:12, kind:'weekly_count'} (scaled x4, not x4.345)", () => {
+    assert.deepEqual(targetFor({ target_type: 'weekly_count', target_value: 3 }, 'month'), {
+      value: 12,
+      kind: 'weekly_count',
+    });
+  });
+
+  it("weekly_average 1700 -> {value:1700, kind:'weekly_average'} identically in all three periods (a rate, never scaled)", () => {
+    const expected = { value: 1700, kind: 'weekly_average' };
+    assert.deepEqual(targetFor({ target_type: 'weekly_average', target_value: 1700 }, 'day'), expected);
+    assert.deepEqual(targetFor({ target_type: 'weekly_average', target_value: 1700 }, 'week'), expected);
+    assert.deepEqual(targetFor({ target_type: 'weekly_average', target_value: 1700 }, 'month'), expected);
+  });
+
+  describe('THE REGRESSION GUARD for the corrected §2.5: targetFor returns EXACTLY the keys {value, kind} — no baseValue/scaled/label', () => {
+    const cases = [
+      [{ target_type: 'weekly_count', target_value: 3 }, 'week'],
+      [{ target_type: 'weekly_count', target_value: 3 }, 'month'],
+      [{ target_type: 'weekly_average', target_value: 1700 }, 'day'],
+      [{ target_type: 'weekly_average', target_value: 1700 }, 'month'],
+    ];
+    for (const [trackable, period] of cases) {
+      it(`targetFor(${JSON.stringify(trackable)}, '${period}') has exactly the keys ['kind','value']`, () => {
+        const result = targetFor(trackable, period);
+        assert.ok(result !== null, 'expected a non-null target for this fixture');
+        assert.deepEqual(Object.keys(result).sort(), ['kind', 'value']);
+      });
+    }
+  });
+
+  describe('targetLabel(target, period)', () => {
+    it("targetLabel({value:12,kind:'weekly_count'}, 'month') === '12 / month'", () => {
+      assert.equal(targetLabel({ value: 12, kind: 'weekly_count' }, 'month'), '12 / month');
+    });
+    it("targetLabel({value:1700,kind:'weekly_average'}, 'day') === '1700 / day'", () => {
+      assert.equal(targetLabel({ value: 1700, kind: 'weekly_average' }, 'day'), '1700 / day');
+    });
+    it("targetLabel({value:3,kind:'weekly_count'}, 'week') === '3 / week'", () => {
+      assert.equal(targetLabel({ value: 3, kind: 'weekly_count' }, 'week'), '3 / week');
+    });
+    it("period defaults to 'week' when omitted", () => {
+      assert.equal(targetLabel({ value: 3, kind: 'weekly_count' }), '3 / week');
+    });
+    it("numbers format with String(Number(...)): 12 renders as '12', not '12.0'", () => {
+      const label = targetLabel({ value: 12, kind: 'weekly_count' }, 'month');
+      assert.ok(!label.includes('12.0'), `expected no '12.0' in '${label}'`);
+      assert.equal(label, '12 / month');
+    });
+    it("returns '' for a null target", () => {
+      assert.equal(targetLabel(null, 'week'), '');
+      assert.equal(targetLabel(null, 'month'), '');
+    });
+    it("returns '' for an undefined target", () => {
+      assert.equal(targetLabel(undefined, 'week'), '');
+    });
+    it("returns '' for an invalid target (non-numeric/missing value)", () => {
+      assert.equal(targetLabel({ kind: 'weekly_count' }, 'week'), '');
+      assert.equal(targetLabel({ value: NaN, kind: 'weekly_count' }, 'week'), '');
+      assert.equal(targetLabel({ value: 'x', kind: 'weekly_count' }, 'week'), '');
+    });
+    it('never throws for a hostile spread of inputs', () => {
+      const targets = [null, undefined, {}, { value: 3 }, { value: 3, kind: 'weekly_count' }, 'x', 42, []];
+      const periods = ['day', 'week', 'month', undefined, 'bogus'];
+      for (const t of targets) {
+        for (const p of periods) {
+          let result;
+          assert.doesNotThrow(() => {
+            result = targetLabel(t, p);
+          }, `threw for target=${JSON.stringify(t)} period=${String(p)}`);
+          assert.equal(typeof result, 'string', `non-string result for target=${JSON.stringify(t)} period=${String(p)}`);
+        }
+      }
+    });
+  });
+
+  describe('targetIsScaled(target, period)', () => {
+    it("true only for a weekly_count target on 'month'", () => {
+      assert.equal(targetIsScaled({ value: 12, kind: 'weekly_count' }, 'month'), true);
+    });
+    it("false for weekly_count on 'week'", () => {
+      assert.equal(targetIsScaled({ value: 3, kind: 'weekly_count' }, 'week'), false);
+    });
+    it("false for weekly_count on 'day'", () => {
+      assert.equal(targetIsScaled({ value: 3, kind: 'weekly_count' }, 'day'), false);
+    });
+    it('period omitted -> false, even for a weekly_count target (no period named means no scaling claimed; only weekly_count + explicit "month" is true)', () => {
+      assert.equal(targetIsScaled({ value: 12, kind: 'weekly_count' }), false);
+      assert.equal(targetIsScaled({ value: 3, kind: 'weekly_count' }), false);
+    });
+    it("false for weekly_average on every period, including 'month'", () => {
+      assert.equal(targetIsScaled({ value: 1700, kind: 'weekly_average' }, 'day'), false);
+      assert.equal(targetIsScaled({ value: 1700, kind: 'weekly_average' }, 'week'), false);
+      assert.equal(targetIsScaled({ value: 1700, kind: 'weekly_average' }, 'month'), false);
+    });
+    it('false for a null target', () => {
+      assert.equal(targetIsScaled(null, 'month'), false);
+    });
+    it('never throws for a hostile spread of explicit (target, period) pairs', () => {
+      const targets = [null, undefined, {}, { value: 3 }, { value: 3, kind: 'weekly_count' }, { value: 3, kind: 'weekly_average' }, 'x', 42];
+      const periods = ['day', 'week', 'month', 'bogus'];
+      for (const t of targets) {
+        for (const p of periods) {
+          let result;
+          assert.doesNotThrow(() => {
+            result = targetIsScaled(t, p);
+          }, `threw for target=${JSON.stringify(t)} period=${p}`);
+          assert.equal(typeof result, 'boolean', `non-boolean result for target=${JSON.stringify(t)} period=${p}`);
+        }
+      }
+    });
+  });
+});
+
+// ===========================================================================
+// C4 — targetFor back-compat: no period argument === period='week'
+// ===========================================================================
+
+describe("C4 — targetFor(trackable) with no period argument behaves exactly as targetFor(trackable, 'week')", () => {
+  const fixtures = [
+    { target_type: 'weekly_average', target_value: '1700' },
+    { target_type: 'weekly_count', target_value: 3 },
+    { target_type: 'weekly_count', target_value: '3' },
+    { target_type: 'none', target_value: '1700' },
+    { target_type: 'weekly_count', target_value: null },
+    { target_type: 'weekly_count', target_value: 'abc' },
+    { target_type: 'specific_days', target_value: 3 },
+    {},
+  ];
+  for (const t of fixtures) {
+    it(`targetFor(${JSON.stringify(t)}) deep-equals targetFor(${JSON.stringify(t)}, 'week')`, () => {
+      assert.deepEqual(targetFor(t), targetFor(t, 'week'));
+    });
+  }
+
+  it('targetFor(null) === targetFor(null, "week") === null', () => {
+    assert.equal(targetFor(null), null);
+    assert.equal(targetFor(null, 'week'), null);
+  });
+
+  it('the high-value case still holds with no period arg: numeric 1700 and string "1700" agree', () => {
+    const fromNumber = targetFor({ target_type: 'weekly_average', target_value: 1700 });
+    const fromString = targetFor({ target_type: 'weekly_average', target_value: '1700' });
+    assert.deepEqual(fromNumber, fromString);
+    assert.deepEqual(fromNumber, { value: 1700, kind: 'weekly_average' });
+  });
+});
+
+// ===========================================================================
+// C5 — chartTypeFor (§2.7 / §0(c), the Weight-regression fix's other half)
+// ===========================================================================
+
+describe('C5 — chartTypeFor: sum/count are bars (amounts), average/last are lines (levels)', () => {
+  const fixtures = [
+    ['sum', 'bar'],
+    ['count', 'bar'],
+    ['average', 'line'],
+    ['last', 'line'],
+    ['bogus', 'bar'],
+    [undefined, 'bar'],
+    [null, 'bar'],
+    ['', 'bar'],
+    [42, 'bar'],
+  ];
+  for (const [agg, expected] of fixtures) {
+    it(`chartTypeFor(${JSON.stringify(agg)}) === '${expected}'`, () => {
+      assert.equal(chartTypeFor(agg), expected);
+    });
+  }
+
+  it('never throws for a hostile spread of inputs, and always returns "bar" or "line"', () => {
+    const hostile = [null, undefined, '', 0, {}, [], 'weird', 42, true, NaN];
+    for (const x of hostile) {
+      let result;
+      assert.doesNotThrow(() => {
+        result = chartTypeFor(x);
+      });
+      assert.ok(result === 'bar' || result === 'line', `bad result for ${String(x)}: ${result}`);
+    }
+  });
+});
+
+// ===========================================================================
+// C6 — periodKeysFor: gap-free keys per period, cross-checked against the
+// REAL rangeDays / isoWeeksInRange / monthsInRange
+// ===========================================================================
+
+describe('C6 — periodKeysFor', () => {
+  const from = '2026-01-15';
+  const to = '2026-04-10';
+
+  it("'day' matches the real rangeDays exactly", () => {
+    assert.deepEqual(periodKeysFor('day', from, to), rangeDays(from, to));
+  });
+
+  it("'week' matches the real isoWeeksInRange exactly", () => {
+    assert.deepEqual(periodKeysFor('week', from, to), isoWeeksInRange(from, to));
+  });
+
+  it("'month' matches the real monthsInRange exactly", () => {
+    assert.deepEqual(periodKeysFor('month', from, to), monthsInRange(from, to));
+  });
+
+  it('a single-day range gives exactly one key at every period', () => {
+    assert.deepEqual(periodKeysFor('day', '2026-08-10', '2026-08-10'), ['2026-08-10']);
+    assert.deepEqual(periodKeysFor('week', '2026-08-10', '2026-08-10'), isoWeeksInRange('2026-08-10', '2026-08-10'));
+    assert.deepEqual(periodKeysFor('month', '2026-08-10', '2026-08-10'), ['2026-08']);
+  });
+
+  it('keys are gap-free, strictly ascending and duplicate-free for all three periods across a wide span', () => {
+    const wideFrom = '2025-06-01';
+    const wideTo = '2027-01-31';
+    for (const period of ['day', 'week', 'month']) {
+      const keys = periodKeysFor(period, wideFrom, wideTo);
+      const sorted = [...keys].sort();
+      assert.deepEqual(keys, sorted, `${period} not ascending`);
+      assert.equal(new Set(keys).size, keys.length, `${period} has duplicates`);
+      assert.ok(keys.length > 0, `${period} produced no keys`);
+    }
+  });
+
+  describe('unknown period throws RangeError', () => {
+    for (const bad of ['year', 'bogus', '', null, undefined, 42, 'Day']) {
+      it(`periodKeysFor(${JSON.stringify(bad)}, from, to) throws`, () => {
+        assert.throws(() => periodKeysFor(bad, from, to), RangeError);
+      });
+    }
+  });
+
+  it('from > to throws RangeError at every period (delegated from the underlying date functions)', () => {
+    for (const period of ['day', 'week', 'month']) {
+      assert.throws(() => periodKeysFor(period, '2026-08-10', '2026-08-01'), RangeError, period);
+    }
+  });
+});
+
+// ===========================================================================
+// C7 — periodLabel (§2.4)
+// ===========================================================================
+
+describe('C7 — periodLabel', () => {
+  it("'day': '2026-08-17' -> '17 Aug'", () => {
+    assert.equal(periodLabel('2026-08-17', 'day'), '17 Aug');
+  });
+
+  it("'day': no leading zero on a single-digit day", () => {
+    assert.equal(periodLabel('2026-08-07', 'day'), '7 Aug');
+  });
+
+  it("'week': unchanged from Step 3.2b — matches weekLabel exactly for the same key", () => {
+    assert.equal(periodLabel('2026-W34', 'week'), weekLabel('2026-W34'));
+    assert.equal(periodLabel('2026-W34', 'week'), '17 Aug');
+    assert.equal(periodLabel('2026-W01', 'week'), weekLabel('2026-W01'));
+  });
+
+  it("'month': '2026-08' -> 'Aug' with no multiYear option", () => {
+    assert.equal(periodLabel('2026-08', 'month'), 'Aug');
+  });
+
+  it("'month': '2026-08' -> 'Aug 26' when opts.multiYear === true", () => {
+    assert.equal(periodLabel('2026-08', 'month', { multiYear: true }), 'Aug 26');
+  });
+
+  it("'month': multiYear:false or an empty opts object behaves the same as omitting opts (no year suffix)", () => {
+    assert.equal(periodLabel('2026-08', 'month', { multiYear: false }), 'Aug');
+    assert.equal(periodLabel('2026-08', 'month', {}), 'Aug');
+  });
+
+  it("'month': all twelve hardcoded English abbreviations, not Intl-derived", () => {
+    const expected = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let m = 1; m <= 12; m++) {
+      const key = `2026-${String(m).padStart(2, '0')}`;
+      assert.equal(periodLabel(key, 'month'), expected[m - 1], `month ${m}`);
+    }
+  });
+
+  it("'month' with multiYear:true across a different year still appends the correct 2-digit year", () => {
+    assert.equal(periodLabel('2025-12', 'month', { multiYear: true }), 'Dec 25');
+    assert.equal(periodLabel('2027-01', 'month', { multiYear: true }), 'Jan 27');
+  });
+
+  describe('throws RangeError on a key that does not match the shape for its period', () => {
+    const badCombos = [
+      ['2026-08', 'day'],
+      ['2026-08-17', 'month'],
+      ['2026-W34', 'day'],
+      ['2026-08-17', 'week'],
+      ['2026-08', 'week'],
+      [null, 'day'],
+      [undefined, 'week'],
+      ['garbage', 'month'],
+      ['', 'day'],
+    ];
+    for (const [key, period] of badCombos) {
+      it(`periodLabel(${JSON.stringify(key)}, '${period}') throws`, () => {
+        assert.throws(() => periodLabel(key, period), RangeError);
+      });
+    }
+  });
+
+  it('throws RangeError on an unknown period', () => {
+    assert.throws(() => periodLabel('2026-08-17', 'year'), RangeError);
+    assert.throws(() => periodLabel('2026-08-17', 'bogus'), RangeError);
+  });
+});
+
+// ===========================================================================
+// C7b — trendModel's DERIVATION of `multiYear` (§2.6). C7 above tests
+// periodLabel given an explicit opts.multiYear; nothing tested how
+// trendModel computes that flag from a real key list. Contract rule: true
+// when the series' bucket keys span more than one calendar year.
+// ===========================================================================
+
+describe('C7b — trendModel derives model.multiYear from its own bucket keys', () => {
+  const trackable = { aggregation: 'sum', target_type: 'none' };
+
+  describe('a monthly series wholly inside one calendar year', () => {
+    const from = '2026-03-01';
+    const to = '2026-09-15';
+    const entries = [
+      { entry_date: '2026-03-05', value: 1 },
+      { entry_date: '2026-09-10', value: 1 },
+    ];
+    const model = trendModel({ trackable, entries, from, to, period: 'month' });
+
+    it('multiYear === false', () => {
+      assert.equal(model.multiYear, false);
+    });
+
+    it('labels are bare (no year suffix) — match periodLabel with no opts', () => {
+      assert.ok(model.weekKeys.length > 1, 'expected more than one bucket for this sanity check to be non-vacuous');
+      assert.deepEqual(model.labels, model.weekKeys.map((k) => periodLabel(k, 'month')));
+    });
+  });
+
+  describe('a monthly series crossing a year boundary (2025-11 .. 2026-02)', () => {
+    const from = '2025-11-01';
+    const to = '2026-02-15';
+    const entries = [
+      { entry_date: '2025-11-05', value: 1 },
+      { entry_date: '2026-02-01', value: 1 },
+    ];
+    const model = trendModel({ trackable, entries, from, to, period: 'month' });
+
+    it('multiYear === true', () => {
+      assert.equal(model.multiYear, true);
+    });
+
+    it("labels carry the 2-digit year suffix — match periodLabel(key, 'month', {multiYear:true})", () => {
+      assert.ok(model.weekKeys.length > 1, 'expected more than one bucket for this sanity check to be non-vacuous');
+      assert.deepEqual(model.labels, model.weekKeys.map((k) => periodLabel(k, 'month', { multiYear: true })));
+    });
+  });
+
+  describe("multiYear is still correctly derived at period 'day' and 'week', even though their labels don't use it", () => {
+    const withinYear = { from: '2026-03-01', to: '2026-09-15', entries: [{ entry_date: '2026-03-05', value: 1 }, { entry_date: '2026-09-10', value: 1 }] };
+    const crossingYear = { from: '2025-11-01', to: '2026-02-15', entries: [{ entry_date: '2025-11-05', value: 1 }, { entry_date: '2026-02-01', value: 1 }] };
+
+    for (const period of ['day', 'week']) {
+      it(`period '${period}': within-year range -> multiYear === false`, () => {
+        const model = trendModel({ trackable, entries: withinYear.entries, from: withinYear.from, to: withinYear.to, period });
+        assert.equal(model.multiYear, false);
+      });
+      it(`period '${period}': year-crossing range -> multiYear === true`, () => {
+        const model = trendModel({ trackable, entries: crossingYear.entries, from: crossingYear.from, to: crossingYear.to, period });
+        assert.equal(model.multiYear, true);
+      });
+    }
+  });
+
+  it('a single-bucket series -> multiYear === false, at every period', () => {
+    for (const period of ['day', 'week', 'month']) {
+      const model = trendModel({
+        trackable,
+        entries: [{ entry_date: '2026-05-15', value: 1 }],
+        from: '2026-05-15',
+        to: '2026-05-15',
+        period,
+      });
+      assert.equal(model.weekKeys.length, 1, `expected exactly one bucket for period ${period}`);
+      assert.equal(model.multiYear, false, `period ${period}`);
+    }
+  });
+
+  it('the empty model (isEmpty: true) -> multiYear === false', () => {
+    const model = trendModel({ trackable, entries: [], from: null, to: '2026-03-15', period: 'month' });
+    assert.equal(model.isEmpty, true);
+    assert.deepEqual(model.weekKeys, []);
+    assert.equal(model.multiYear, false);
+  });
+
+  describe('THE PROPERTY: multiYear === (the set of leading 4-char years across model.weekKeys has size > 1), at every period', () => {
+    // Several ranges, deliberately mixing within-year and year-crossing
+    // spans, each carrying real entries at both ends so `from` (explicit,
+    // non-null) drives a genuinely populated key list regardless of any
+    // isEmpty nuance — this test is about the multiYear DERIVATION, not
+    // about re-proving weekKeys correctness (that's C6/C9/C10's job).
+    const ranges = [
+      { from: '2026-01-05', to: '2026-01-25' }, // single year, short
+      { from: '2026-01-01', to: '2026-12-31' }, // single year, full year span
+      { from: '2025-11-30', to: '2026-02-01' }, // crosses a year boundary
+      { from: '2024-06-15', to: '2027-01-10' }, // crosses TWO year boundaries
+    ];
+
+    for (const { from, to } of ranges) {
+      for (const period of ['day', 'week', 'month']) {
+        it(`range ${from}..${to}, period '${period}'`, () => {
+          const entries = [
+            { entry_date: from, value: 1 },
+            { entry_date: to, value: 1 },
+          ];
+          const model = trendModel({ trackable, entries, from, to, period });
+          assert.ok(model.weekKeys.length > 0, `expected a non-empty key list for ${from}..${to} at ${period}`);
+          const yearCount = new Set(model.weekKeys.map((k) => k.slice(0, 4))).size;
+          assert.equal(model.multiYear, yearCount > 1, `range ${from}..${to} period ${period}: weekKeys=${JSON.stringify(model.weekKeys)}`);
+        });
+      }
+    }
+  });
+});
+
+// ===========================================================================
+// C8 — meaningText: all twelve combinations verbatim, plus unit appending
+// ===========================================================================
+
+describe('C8 — meaningText: the .weekly-meaning line stays truthful across periods', () => {
+  const table = [
+    ['sum', 'day', 'Total per day'],
+    ['sum', 'week', 'Total per week'],
+    ['sum', 'month', 'Total per month'],
+    ['count', 'day', 'Logged'],
+    ['count', 'week', 'Days logged per week'],
+    ['count', 'month', 'Days logged per month'],
+    ['average', 'day', 'Average per day'],
+    ['average', 'week', 'Average per week'],
+    ['average', 'month', 'Average per month'],
+    ['last', 'day', 'Latest each day'],
+    ['last', 'week', 'Latest each week'],
+    ['last', 'month', 'Latest each month'],
+  ];
+  for (const [agg, period, expected] of table) {
+    it(`meaningText('${agg}', '${period}') === '${expected}'`, () => {
+      assert.equal(meaningText(agg, period), expected);
+    });
+  }
+
+  it('all twelve fixtures above are genuinely distinct strings (the table is not accidentally collapsed)', () => {
+    const values = table.map(([agg, period]) => meaningText(agg, period));
+    assert.equal(new Set(values).size, 12, `expected 12 distinct strings, got: ${JSON.stringify(values)}`);
+  });
+
+  it('appends " · " + unit when unit is a non-empty string, for every aggregation/period', () => {
+    for (const [agg, period, base] of table) {
+      assert.equal(meaningText(agg, period, 'kcal'), `${base} · kcal`, `${agg}/${period}`);
+    }
+  });
+
+  it('does not append a unit when unit is empty/absent/null/undefined', () => {
+    assert.equal(meaningText('sum', 'week', ''), 'Total per week');
+    assert.equal(meaningText('sum', 'week'), 'Total per week');
+    assert.equal(meaningText('sum', 'week', null), 'Total per week');
+    assert.equal(meaningText('sum', 'week', undefined), 'Total per week');
+  });
+});
+
+// ===========================================================================
+// C9 — trendModel per period: delegation to the REAL rollup() (§0(b) guard,
+// extended to all three periods)
+// ===========================================================================
+
+describe('C9 — trendModel delegates to the real rollup() at every period, not a reimplementation', () => {
+  const trackable = {
+    value_shape: 'numeric',
+    aggregation: 'sum',
+    direction: 'break',
+    target_type: 'weekly_average',
+    target_value: '1700',
+    unit: 'kcal',
+  };
+  const entries = [
+    { entry_date: '2026-06-02', value: 500 },
+    { entry_date: '2026-06-15', value: 700 },
+    { entry_date: '2026-07-04', value: 300 },
+    { entry_date: '2026-07-20', value: 900 },
+    { entry_date: '2026-08-05', value: 1200 },
+    { entry_date: '2026-08-05', value: 100 }, // second entry, same date
+    { entry_date: '2026-08-22', value: 400 },
+  ];
+  const to = '2026-08-23';
+
+  it('sanity: entries genuinely span at least three real calendar months', () => {
+    const months = new Set(entries.map((e) => e.entry_date.slice(0, 7)));
+    assert.ok(months.size >= 3, `expected >= 3 months, got ${[...months].join(', ')}`);
+  });
+
+  for (const period of ['day', 'week', 'month']) {
+    it(`period '${period}': every real rollup() bucket value is present at the matching model.weekKeys entry`, () => {
+      const model = trendModel({ trackable, entries, from: null, to, period });
+      const agg = seriesAggregationFor(trackable);
+      const buckets = rollup(entries, period, agg);
+      assert.ok(buckets.length > 0, `expected at least one bucket for period ${period}`);
+      for (const bucket of buckets) {
+        const idx = model.weekKeys.indexOf(bucket.key);
+        assert.ok(idx !== -1, `[${period}] bucket key ${bucket.key} missing from model.weekKeys`);
+        assert.equal(model.values[idx], bucket.value, `[${period}] mismatch at key ${bucket.key}`);
+      }
+    });
+  }
+
+  it('weeklyModel(args) still equals trendModel({...args, period:"week"}) — the preserved thin wrapper', () => {
+    const wk = weeklyModel({ trackable, entries, from: null, to });
+    const trend = trendModel({ trackable, entries, from: null, to, period: 'week' });
+    assert.deepEqual(wk, trend);
+  });
+});
+
+// ===========================================================================
+// C10 — empty buckets are never omitted, at any period
+// ===========================================================================
+
+describe('C10 — empty buckets are never omitted at any period', () => {
+  const firstDate = '2026-01-05';
+  const to = '2026-04-20'; // wide enough to guarantee real gaps at every period
+
+  function bucketKeyForPeriod(date, period) {
+    if (period === 'day') return date;
+    if (period === 'week') return isoWeekKey(date);
+    return date.slice(0, 7);
+  }
+
+  describe('sum/count trackables: gap buckets read an explicit 0', () => {
+    for (const aggregation of ['sum', 'count']) {
+      const trackable = { aggregation, target_type: 'none' };
+      const entries = [
+        { entry_date: firstDate, value: 10 },
+        { entry_date: to, value: 20 },
+      ];
+      for (const period of ['day', 'week', 'month']) {
+        it(`aggregation '${aggregation}', period '${period}'`, () => {
+          const model = trendModel({ trackable, entries, from: null, to, period });
+          const expectedKeys = periodKeysFor(period, firstDate, to);
+          assert.equal(model.labels.length, expectedKeys.length);
+          assert.deepEqual(model.weekKeys, expectedKeys);
+
+          const firstKey = bucketKeyForPeriod(firstDate, period);
+          const lastKey = bucketKeyForPeriod(to, period);
+          let gapCount = 0;
+          for (let i = 0; i < model.weekKeys.length; i++) {
+            const key = model.weekKeys[i];
+            if (key === firstKey || key === lastKey) continue;
+            gapCount += 1;
+            assert.equal(model.values[i], 0, `gap bucket ${key} was not 0`);
+          }
+          assert.ok(gapCount >= 1, `expected at least one genuine gap bucket for period ${period}`);
+        });
+      }
+    }
+  });
+
+  describe('average/last trackables: gap buckets read an explicit null, never 0 (the honesty rule)', () => {
+    for (const aggregation of ['average', 'last']) {
+      const trackable = { aggregation, target_type: 'none' };
+      const entries = [
+        { entry_date: firstDate, value: 10 },
+        { entry_date: to, value: 20 },
+      ];
+      for (const period of ['day', 'week', 'month']) {
+        it(`aggregation '${aggregation}', period '${period}'`, () => {
+          const model = trendModel({ trackable, entries, from: null, to, period });
+          const expectedKeys = periodKeysFor(period, firstDate, to);
+          assert.equal(model.labels.length, expectedKeys.length);
+          assert.deepEqual(model.weekKeys, expectedKeys);
+
+          const firstKey = bucketKeyForPeriod(firstDate, period);
+          const lastKey = bucketKeyForPeriod(to, period);
+          let gapCount = 0;
+          for (let i = 0; i < model.weekKeys.length; i++) {
+            const key = model.weekKeys[i];
+            if (key === firstKey || key === lastKey) continue;
+            gapCount += 1;
+            assert.equal(model.values[i], null, `gap bucket ${key} was not null`);
+            assert.notEqual(model.values[i], 0);
+          }
+          assert.ok(gapCount >= 1, `expected at least one genuine gap bucket for period ${period}`);
+        });
+      }
+    }
+  });
+});
+
+// ===========================================================================
+// C11 — totality: trendModel never throws across a hostile cross-product, at
+// any period (malformed `to` and an unknown `period` are the only documented
+// throws)
+// ===========================================================================
+
+describe('C11 — trendModel totality across a hostile cross-product, for all three periods', () => {
+  function assertWellFormedModel(model, ctx) {
+    assert.equal(typeof model.isEmpty, 'boolean', ctx);
+    assert.ok(['sum', 'count', 'average', 'last'].includes(model.aggregation), `${ctx}: bad aggregation ${model.aggregation}`);
+    assert.ok(Array.isArray(model.weekKeys), ctx);
+    assert.ok(Array.isArray(model.labels), ctx);
+    assert.ok(Array.isArray(model.values), ctx);
+    assert.ok(Array.isArray(model.verdicts), ctx);
+    const n = model.weekKeys.length;
+    assert.equal(model.labels.length, n, `${ctx}: labels length`);
+    assert.equal(model.values.length, n, `${ctx}: values length`);
+    assert.equal(model.verdicts.length, n, `${ctx}: verdicts length`);
+    assert.equal(model.weekCount, n, `${ctx}: weekCount`);
+    for (const v of model.values) {
+      assert.ok(v === null || (typeof v === 'number' && !Number.isNaN(v)), `${ctx}: bad value ${JSON.stringify(v)}`);
+    }
+    for (const vd of model.verdicts) {
+      assert.ok(['good', 'bad', 'none'].includes(vd), `${ctx}: bad verdict ${vd}`);
+    }
+    for (const l of model.labels) {
+      assert.equal(typeof l, 'string', ctx);
+    }
+    assert.ok(
+      model.target === null || (typeof model.target === 'object' && typeof model.target.value === 'number'),
+      `${ctx}: bad target ${JSON.stringify(model.target)}`
+    );
+    assert.ok(model.unit === null || typeof model.unit === 'string', ctx);
+    assert.ok(model.identityColor === null || typeof model.identityColor === 'string', ctx);
+    assert.equal(typeof model.direction, 'string', ctx);
+    assert.equal(typeof model.period, 'string', `${ctx}: missing period`);
+    assert.equal(typeof model.multiYear, 'boolean', `${ctx}: bad multiYear`);
+    if (model.isEmpty) {
+      assert.equal(n, 0, `${ctx}: isEmpty but weekCount !== 0`);
+    }
+  }
+
+  const trackables = [
+    null,
+    {},
+    { value_shape: 'boolean', aggregation: 'count', direction: 'build', target_type: 'weekly_count', target_value: 3 },
+    { value_shape: 'numeric', aggregation: 'sum', direction: 'break', target_type: 'weekly_average', target_value: 1700, unit: 'kcal' },
+    { aggregation: 'bogus' },
+  ];
+  const entriesOptions = [
+    [],
+    null,
+    'x',
+    [null],
+    [{}],
+    [{ entry_date: 'oops', value: 1 }],
+    [{ entry_date: '2026-08-17', value: 'x' }],
+  ];
+  const froms = [null, '2026-08-01', 'nope'];
+  const to = '2026-08-23';
+
+  let count = 0;
+  for (const trackable of trackables) {
+    for (const entries of entriesOptions) {
+      for (const from of froms) {
+        for (const period of ['day', 'week', 'month']) {
+          count += 1;
+          const ctx = `combo #${count}: trackable=${JSON.stringify(trackable)} entries=${JSON.stringify(entries)} from=${JSON.stringify(from)} period=${period}`;
+          it(ctx, () => {
+            let model;
+            assert.doesNotThrow(() => {
+              model = trendModel({ trackable, entries, from, to, period });
+            }, ctx);
+            assertWellFormedModel(model, ctx);
+          });
+        }
+      }
+    }
+  }
+
+  it(`generated ${count} combinations (must be at least 60, per this contract's cross-product size)`, () => {
+    assert.ok(count >= 60, `only generated ${count} combinations`);
+  });
+
+  describe('a malformed `to` always throws RangeError, regardless of period', () => {
+    const badTodays = [null, undefined, '', 'bad', 20260823, '2026-8-3', '2026-13-01', {}, []];
+    for (const badTo of badTodays) {
+      for (const period of ['day', 'week', 'month']) {
+        it(`to=${JSON.stringify(badTo)}, period='${period}' throws`, () => {
+          assert.throws(
+            () => trendModel({ trackable: {}, entries: [], from: null, to: badTo, period }),
+            RangeError
+          );
+        });
+      }
+    }
+  });
+
+  describe('an unknown period always throws RangeError (undefined is NOT unknown — it defaults to "week")', () => {
+    const badPeriods = ['year', 'quarter', '', null, 42, 'DAY', 'bogus'];
+    for (const badPeriod of badPeriods) {
+      it(`period=${JSON.stringify(badPeriod)} throws`, () => {
+        assert.throws(
+          () => trendModel({ trackable: {}, entries: [], from: null, to: '2026-08-23', period: badPeriod }),
+          RangeError
+        );
+      });
+    }
+  });
+
+  it('period omitted entirely defaults to "week" and does not throw', () => {
+    let model;
+    assert.doesNotThrow(() => {
+      model = trendModel({ trackable: {}, entries: [], from: null, to: '2026-08-23' });
+    });
+    assert.equal(model.period, 'week');
+  });
+});
+
+// ===========================================================================
+// PERIODS — sanity on the exported constant (§2.2), not one of the C1-C18
+// numbered cases but load-bearing for the period-control UI
+// ===========================================================================
+
+describe('PERIODS (§2.2)', () => {
+  it('is exactly the three periods, in day/week/month order, with the documented labels', () => {
+    assert.deepEqual(PERIODS, [
+      { key: 'day', label: 'Daily' },
+      { key: 'week', label: 'Weekly' },
+      { key: 'month', label: 'Monthly' },
+    ]);
   });
 });

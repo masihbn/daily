@@ -1174,3 +1174,38 @@ button.hm-cell {
   color: var(--fg-muted);
   font-size: 13px;
 }
+
+/* Trend granularity control (Step 3.2c) ---------------------------------
+   Sits ON the trend chart, unlike .detail-ranges which stays global at the
+   top of the screen: the range also bounds the heatmap's navigable months,
+   whereas bucketing affects only this one chart. Same visual idiom as
+   .detail-range so the two read as controls of the same family. */
+
+.trend-periods {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.trend-period {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 13px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trend-period[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.trend-period:disabled {
+  opacity: 0.4;
+}

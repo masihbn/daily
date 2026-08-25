@@ -82,6 +82,51 @@ const T_CALORIES = {
   archived: false,
 };
 
+// CONTRACT-3.2c fixture: aggregation:'last' (a LEVEL, not an amount) with a
+// single value of 80 and no target — the exact device-reported "Weight axis
+// shows 0-80" regression (§0(c)/C12). target_type:'none' so no annotation
+// competes with the axis-bounds assertion.
+const T_WEIGHT = {
+  id: 501,
+  name: 'Weight',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'last',
+  direction: 'break',
+  unit: 'kg',
+  bounds_enabled: false,
+  bounds_mode: 'auto',
+  bound_lower: null,
+  bound_upper: null,
+  target_type: 'none',
+  target_value: null,
+  color: '#5856d6',
+  sort_order: 1,
+  archived: false,
+};
+
+// CONTRACT-3.2c fixture: aggregation:'count' (an AMOUNT ACCUMULATED) with a
+// genuine weekly_count target of 3 — used for C13 (bar type) and C16 (the
+// scaled-target label, 3 -> 12 in Monthly view).
+const T_WORKOUT = {
+  id: 602,
+  name: 'Workout',
+  value_shape: 'boolean',
+  relog_semantic: 'state',
+  aggregation: 'count',
+  direction: 'build',
+  unit: null,
+  bounds_enabled: false,
+  bounds_mode: 'auto',
+  bound_lower: null,
+  bound_upper: null,
+  target_type: 'weekly_count',
+  target_value: 3,
+  color: '#ff9500',
+  sort_order: 2,
+  archived: false,
+};
+
 // Compute "today" the same way the app must (local calendar components, NOT
 // toISOString, which reads UTC and is wrong for part of every day) — same
 // mechanics as tests/e2e/home.test.mjs, detail.test.mjs and heatmap.test.mjs.
@@ -510,5 +555,317 @@ test('B18 — D3 end to end: the live chart\'s resolved y-axis max is strictly g
 
   expect(resolvedMax).toBeGreaterThan(1700);
 
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-3.2c — Selectable granularity (Daily / Weekly / Monthly)
+// ===========================================================================
+
+// ===========================================================================
+// C12 — THE WEIGHT REGRESSION, and the most important case in this step.
+//
+// A unit test on chart CONFIG (axisBoundsFor) already passed while the
+// device showed a 0-80 axis, because a bar chart forces 0 into its scale
+// regardless of suggestedMin — only the library's RESOLVED scale at render
+// time exposes that override. This reads Chart.getChart(canvas).scales.y,
+// NOT axisBoundsFor's return value and NOT chart.options.
+// ===========================================================================
+
+test('C12 — THE WEIGHT REGRESSION: for a single-value "last" fixture, the RESOLVED y-axis min is strictly above 0, and the live chart type is "line"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_WEIGHT]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+
+  const result = await page.evaluate(() => {
+    const canvas = document.querySelector('.weekly-canvas');
+    const chart = window.Chart.getChart(canvas);
+    return {
+      type: chart.config.type,
+      min: chart.scales.y.min,
+      max: chart.scales.y.max,
+    };
+  });
+
+  // THE assertion: the RESOLVED scale, read off the live chart instance —
+  // not axisBoundsFor's config, which was already correct and already
+  // passing while the device showed 0-80.
+  expect(result.type).toBe('line');
+  expect(result.min).toBeGreaterThan(0);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C13 — a genuine sum/count fixture still renders a bar chart
+// ===========================================================================
+
+test('C13 — a count-aggregation fixture renders config.type === "bar"', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_WORKOUT]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 602, entry_date: PAST_DATE, value: 1, note: null }],
+  });
+
+  await page.goto('/index.html#/t/602');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+
+  const type = await page.evaluate(() => {
+    const canvas = document.querySelector('.weekly-canvas');
+    const chart = window.Chart.getChart(canvas);
+    return chart.config.type;
+  });
+
+  expect(type).toBe('bar');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C14 — switching period issues ZERO requests when the range does not change
+//
+// RACE-RULE CARE: asserting the request count did NOT change is vacuous
+// unless something first proves the re-render actually happened. This polls
+// the live chart's own data.labels until they genuinely differ from the
+// pre-click snapshot, before checking the request count.
+// ===========================================================================
+
+test('C14 — switching period issues ZERO new entries requests when the range is unchanged, and the chart genuinely re-renders', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  const { getRequests } = await routeEntries(page, {
+    getFixture: [
+      { id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null },
+      { id: 2, trackable_id: 366, entry_date: addDays(PAST_DATE, 3), value: 700, note: null },
+    ],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+  await expect.poll(() => getRequests.length).toBe(1);
+  const countBefore = getRequests.length;
+
+  const labelsBefore = await page.evaluate(() => {
+    const canvas = document.querySelector('.weekly-canvas');
+    return window.Chart.getChart(canvas).data.labels.slice();
+  });
+
+  await page.locator('.trend-period[data-period="month"]').click();
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+
+  // Proof the re-render actually happened: the chart's OWN data, not a DOM
+  // attribute flip (an optimistic aria-pressed toggle is not evidence the
+  // chart rebuilt).
+  await expect
+    .poll(async () => {
+      const labelsNow = await page.evaluate(() => {
+        const canvas = document.querySelector('.weekly-canvas');
+        const chart = window.Chart.getChart(canvas);
+        return chart ? chart.data.labels.slice() : null;
+      });
+      return JSON.stringify(labelsNow) !== JSON.stringify(labelsBefore);
+    })
+    .toBe(true);
+
+  // Only now, with genuine proof of re-render in hand, is "the count did not
+  // change" a meaningful assertion rather than a vacuous one.
+  expect(getRequests.length).toBe(countBefore);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C15 — the Daily cap (§0(b))
+// ===========================================================================
+
+test('C15 — the Daily cap: clicking Daily disables 6M/1Y/All and forces the range to 3m; leaving Daily re-enables them and range stays at 3m', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  const { getRequests } = await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  // Start from 1Y so the Daily click below has to actively switch range.
+  await page.locator('.detail-range[data-range="1y"]').click();
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '1y');
+  await expect.poll(() => getRequests.length).toBeGreaterThanOrEqual(1);
+
+  const countBeforeDaily = getRequests.length;
+  await page.locator('.trend-period[data-period="day"]').click();
+
+  // Range-window change (1y -> 3m) genuinely changes the query window, so
+  // per contract §4.3 this is the one case allowed to reload — wait for the
+  // real network-level proof, not just the click resolving or an attribute
+  // flipping optimistically.
+  await expect.poll(() => getRequests.length).toBe(countBeforeDaily + 1);
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await expect(page.locator('.trend-period[data-period="day"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '3m');
+
+  await expect(page.locator('.detail-range[data-range="6m"]')).toBeDisabled();
+  await expect(page.locator('.detail-range[data-range="1y"]')).toBeDisabled();
+  await expect(page.locator('.detail-range[data-range="all"]')).toBeDisabled();
+  await expect(page.locator('.detail-range[data-range="3m"]')).toBeEnabled();
+
+  // Leaving Daily (back to Weekly) re-enables the range buttons. No auto-
+  // restore: range stays at 3m (predictable beats clever).
+  await page.locator('.trend-period[data-period="week"]').click();
+  await expect(page.locator('.trend-period[data-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.detail-range[data-range="6m"]')).toBeEnabled();
+  await expect(page.locator('.detail-range[data-range="1y"]')).toBeEnabled();
+  await expect(page.locator('.detail-range[data-range="all"]')).toBeEnabled();
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '3m');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C16 — the scaled target is labelled (§0(a) on screen)
+// ===========================================================================
+
+test('C16 — a weekly_count target of 3 renders a scaled annotation at 12 in Monthly view, labelled with "12"; no annotation at all in Daily view', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_WORKOUT]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 602, entry_date: PAST_DATE, value: 1, note: null }],
+  });
+
+  await page.goto('/index.html#/t/602');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+
+  await page.locator('.trend-period[data-period="month"]').click();
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+
+  function readAnnotation() {
+    return page.evaluate(() => {
+      const canvas = document.querySelector('.weekly-canvas');
+      const chart = window.Chart.getChart(canvas);
+      if (!chart) return { hasChart: false, foundAt12: false, labelHas12: false, keyCount: 0 };
+      const annotationOpt = chart.options && chart.options.plugins && chart.options.plugins.annotation;
+      const annotations = annotationOpt ? annotationOpt.annotations : null;
+      let foundAt12 = false;
+      let labelHas12 = false;
+      const keys = annotations && typeof annotations === 'object' ? Object.keys(annotations) : [];
+      for (const key of keys) {
+        const a = annotations[key];
+        if (a && (a.yMin === 12 || a.yMax === 12 || a.value === 12)) {
+          foundAt12 = true;
+          const content = a.label && a.label.content;
+          if (typeof content === 'string' && content.includes('12')) labelHas12 = true;
+          if (Array.isArray(content) && content.some((c) => String(c).includes('12'))) labelHas12 = true;
+        }
+      }
+      return { hasChart: true, foundAt12, labelHas12, keyCount: keys.length };
+    });
+  }
+
+  // Proof the Monthly re-render actually landed before asserting on its
+  // content: poll until the scaled annotation genuinely appears.
+  await expect.poll(async () => (await readAnnotation()).foundAt12).toBe(true);
+
+  const monthResult = await readAnnotation();
+  expect(monthResult.foundAt12).toBe(true);
+  expect(monthResult.labelHas12).toBe(true);
+
+  // Now switch to Daily: weekly_count has NO line on a daily chart at all.
+  await page.locator('.trend-period[data-period="day"]').click();
+  await expect(page.locator('.trend-period[data-period="day"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await expect.poll(async () => (await readAnnotation()).keyCount).toBe(0);
+  const dayResult = await readAnnotation();
+  expect(dayResult.hasChart).toBe(true);
+  expect(dayResult.keyCount).toBe(0);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C17 — period choice persists across navigation (away and back)
+// ===========================================================================
+
+test('C17 — the chosen period persists across navigating away (Home) and back', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await page.locator('.trend-period[data-period="month"]').click();
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.home')).toBeVisible();
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.trend-period[data-period="day"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.trend-period[data-period="week"]')).toHaveAttribute('aria-pressed', 'false');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// C18 — layout and network hygiene
+// ===========================================================================
+
+test('C18 — no uncaught page errors, no horizontal scroll at 390px, .trend-period buttons >= 44px, and still exactly one entries GET on initial load', async ({
+  page,
+}) => {
+  const pageErrors = [];
+  page.on('pageerror', (err) => pageErrors.push(err));
+
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_CALORIES]);
+  const { getRequests } = await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.weekly-canvas')).toHaveCount(1);
+
+  await expect.poll(() => getRequests.length).toBe(1);
+  expect(getRequests.length).toBe(1);
+
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(scrollWidth).toBeLessThanOrEqual(390);
+
+  const buttons = page.locator('.trend-period');
+  const count = await buttons.count();
+  expect(count).toBeGreaterThanOrEqual(3);
+  for (let i = 0; i < count; i++) {
+    const box = await buttons.nth(i).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+  }
+
+  expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
 });
