@@ -83,6 +83,31 @@ header h1 {
   font-weight: 600;
 }
 
+/* Step D.6 — global "unsent writes" indicator. Sits under the title in the
+   shell so it is visible from every route, including the detail screens
+   where an offline log is most likely to be made.
+   `[hidden]` needs the explicit display:none because the rule below would
+   otherwise win on specificity. */
+.outbox-status {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  /* Amber, not red: nothing is lost — the write is queued and persisted, it
+     just has not reached the server yet. Red would read as an error and
+     invite the user to re-log a value that is already safely captured. */
+  color: #b26a00;
+}
+
+.outbox-status[hidden] {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .outbox-status {
+    color: #ffb340;
+  }
+}
+
 #app {
   flex: 1;
   padding: 16px;

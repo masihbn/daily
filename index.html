@@ -26,6 +26,12 @@
 <body>
 <header>
   <h1>Daily</h1>
+  <!-- Step D.6: global unsent-writes indicator. Lives in the shell, not in a
+       view, because the whole point is that it is visible from every route —
+       the per-row pending state on Home only helps if you are on Home. Empty
+       and hidden until js/outbox-sync.js finds queued writes.
+       role="status" so VoiceOver announces it without stealing focus. -->
+  <p id="outbox-status" class="outbox-status" role="status" aria-live="polite" data-count="0" hidden></p>
 </header>
 <div id="app"></div>
 <nav id="nav">

@@ -7,6 +7,8 @@ import { parseHash } from './router.js';
 import { createHomeView } from './views/home.js';
 import { createTrackableView } from './views/trackable.js';
 import { createDetailView } from './views/detail.js';
+import { createOutboxSync, renderOutboxStatus } from './outbox-sync.js';
+import { getStore } from './store.js';
 
 const VIEW_TITLES = {
   detail: 'Trackable',
@@ -118,6 +120,34 @@ async function render() {
   }
 }
 
+// Step D.6. Started once, at boot, for every route — not from a view.
+// Before this, store.flushOutbox() was called only by the Home view's
+// mount(), so a write queued offline from the calendar day-editor was
+// never retried unless the user happened to navigate to Home. A standalone
+// PWA relaunches at its last hash, which is routinely a detail route, so
+// that write could sit in localStorage indefinitely while the UI displayed
+// it as saved.
+let outboxSync = null;
+
+function startOutboxSync() {
+  outboxSync = createOutboxSync({
+    store: getStore(),
+    target: window,
+    doc: document,
+    onChange: (count) => {
+      renderOutboxStatus(document.getElementById('outbox-status'), count);
+    },
+  });
+  outboxSync.start();
+  return outboxSync;
+}
+
+// Exported for the e2e tests, which need to observe a flush without waiting
+// on a real network event. Not part of the app's own control flow.
+export function getOutboxSync() {
+  return outboxSync;
+}
+
 function bootstrap() {
   // render() is async now (it awaits the home view's mount()); the
   // listener does not need to await it — a stray unhandled rejection can't
@@ -125,6 +155,8 @@ function bootstrap() {
   // escape (see js/views/home.js).
   window.addEventListener('hashchange', render);
   render();
+
+  startOutboxSync();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

@@ -1,4 +1,4 @@
-const CACHE = 'daily-v24';
+const CACHE = 'daily-v25';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -11,6 +11,7 @@ const ASSETS = [
   './js/config.js',
   './js/api.js',
   './js/store.js',
+  './js/outbox-sync.js',
   './js/dates.js',
   './js/aggregate.js',
   './js/icons.js',
@@ -43,7 +44,17 @@ self.addEventListener('install', (event) => {
         CDN_ASSETS.map(async (url) => {
           try {
             const res = await fetch(url, { mode: 'cors' });
-            await cache.put(url, res);
+            // Step D.6 — carried over from Step 0.3, where it was found on
+            // review and deliberately deferred. WITHOUT this check, a 404 or
+            // 5xx from jsDelivr gets cached as though it were the real
+            // script, and is then served from cache forever after. The
+            // result is a chart library that is permanently broken with no
+            // network error to point at, on an installed phone, fixable only
+            // by a CACHE bump. Leaving the URL uncached is strictly better:
+            // the fetch handler already falls back to the network.
+            if (res.ok) {
+              await cache.put(url, res);
+            }
           } catch {
             // One CDN hiccup should not break the entire install.
           }

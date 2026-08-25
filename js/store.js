@@ -138,8 +138,31 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     safeSetItem(storage, CACHE_KEY, JSON.stringify({ v: 1, trackables, entries }));
   }
 
+  // Step D.6: subscribers are notified whenever the outbox changes, so the
+  // global "unsent" indicator can update the instant a write is queued
+  // rather than waiting for the next sync event. Hooked here because
+  // persistOutbox() is the single choke point every outbox mutation already
+  // goes through — the Step 1.1 bug (a dequeue that updated memory but not
+  // storage) is exactly why that invariant exists, and reusing it means a
+  // future mutation cannot forget to notify.
+  const outboxListeners = new Set();
+
+  function onOutboxChange(fn) {
+    if (typeof fn !== 'function') throw new TypeError('onOutboxChange requires a function');
+    outboxListeners.add(fn);
+    return () => outboxListeners.delete(fn);
+  }
+
   function persistOutbox() {
     safeSetItem(storage, OUTBOX_KEY, JSON.stringify({ v: 1, ops: outbox }));
+    for (const fn of outboxListeners) {
+      try {
+        fn(outbox.length);
+      } catch {
+        // A broken indicator must never break a write. Persisting the
+        // outbox is the part that protects data; notifying is cosmetic.
+      }
+    }
   }
 
   function hydrate() {
@@ -386,7 +409,33 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     }
   }
 
+  // Step D.6: flushOutbox() is now triggered from several places — app
+  // start, the `online` event, returning to the foreground, and the Home
+  // view's mount. Two of those can easily fire together (unlocking the
+  // phone in a tunnel that just came back fires `visibilitychange` and
+  // `online` within milliseconds of each other).
+  //
+  // runFlush() below takes a SNAPSHOT of the outbox and dequeues as it
+  // goes, so two concurrent runs would each snapshot the same ops and send
+  // them twice. Upserts and deletes are idempotent, so the damage is
+  // bounded — but it doubles the writes at exactly the moment the network
+  // is worst, and it makes the {sent, failed} counts lie.
+  //
+  // Serializing here rather than at each call site means no future caller
+  // has to know about this.
+  let flushInFlight = null;
+
   async function flushOutbox() {
+    if (flushInFlight) return flushInFlight;
+    flushInFlight = runFlush();
+    try {
+      return await flushInFlight;
+    } finally {
+      flushInFlight = null;
+    }
+  }
+
+  async function runFlush() {
     if (outbox.length === 0) {
       return { sent: 0, failed: 0, remaining: 0 };
     }
@@ -450,6 +499,7 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     getEntries,
     getEntry,
     getOutbox,
+    onOutboxChange,
     loadTrackables,
     loadEntries,
     saveEntry,

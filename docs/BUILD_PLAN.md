@@ -3789,7 +3789,8 @@ _(To be filled in by the executing session.)_
 
 ## Step D.6 — Outbox durability (pulled forward from Step 5.1)
 
-**Status:** TODO
+**Status:** DONE (2026-08-25) — suite-verified at 3531. **Not device-verified;**
+the offline-then-relaunch path needs the phone.
 
 **Goal.** A log the user makes offline cannot sit in the queue unnoticed,
 and the user can see when something has not reached the server.
@@ -3828,7 +3829,115 @@ and the user can see when something has not reached the server.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **3531 green** — 3353 unit, 47 integration, 131
+e2e (up from 3496). New: `js/outbox-sync.js`, 30 unit cases across two
+files, 5 e2e cases. `sw.js` `CACHE` `daily-v24` → `daily-v25`, with
+`./js/outbox-sync.js` added to `ASSETS`.
+
+*The failure sequence this step removes*, stated concretely because it is
+the reason the step was pulled forward out of 5.1:
+
+1. Log a value from the calendar day-editor on a detail screen, in a tunnel.
+   The write is queued and persisted to `localStorage`.
+2. iOS evicts the backgrounded PWA from memory, which it does freely.
+3. The user reopens the app. **A standalone PWA relaunches at its last
+   hash** — routinely a detail route, not Home.
+4. Nothing calls `flushOutbox()`, because its only caller was
+   `js/views/home.js` on mount. The entry sits in storage indefinitely
+   **while the UI shows it as a normal saved value.**
+
+*Design decisions worth not re-litigating:*
+
+- **Four triggers, not one** — `online`, `visibilitychange`, `pageshow`,
+  `focus`. They overlap heavily and often fire together. That is
+  intentional: a missed flush costs the user data, a redundant one costs
+  nothing (a flush with an empty outbox issues no request, asserted).
+  `online` alone is not enough — iOS Safari is unreliable about firing it.
+- **Deliberately NOT gated on `navigator.onLine`**, and a test reads the
+  source to assert the property is never referenced. That flag reports
+  `true` for a captive portal and for connected-but-dead wifi, and `false`
+  in cases where a request would succeed. Attempting the flush and letting
+  it fail is strictly more accurate — a failed attempt leaves the op
+  queued, which is where it already was.
+- **`visibilitychange` flushes only when becoming visible.** Flushing as
+  the app backgrounds is worse than useless: iOS may suspend the process
+  mid-request, and it would double every foreground flush.
+- **`flushOutbox()` now serializes concurrent calls** (`flushInFlight`).
+  This became necessary *because* of this step: with five call sites, two
+  routinely fire within milliseconds (unlocking a phone in a tunnel that
+  just regained signal fires `visibilitychange` and `online` together),
+  and `runFlush()` snapshots the outbox, so overlapping runs would each
+  send the same ops.
+- **The indicator lives in the shell (`index.html`), not in a view**, and
+  updates via a new `store.onOutboxChange()` subscription hooked into
+  `persistOutbox()` — the single choke point every outbox mutation already
+  passes through. Without the subscription, logging offline shows no sign
+  anything is pending until the next sync event, which may be hours away.
+- **Wording is "N logs not yet saved", never "syncing…"** (asserted).
+  "Syncing" implies progress while the phone has no signal. Amber, not
+  red: nothing is lost, and red would invite the user to re-log a value
+  that is already safely captured.
+
+*Verified by unit tests (`tests/unit/outbox-sync.test.mjs`, 20 cases):*
+start flushes immediately regardless of route; exactly one listener per
+event and `start()` is idempotent; each of the four events triggers a
+flush; `visibilitychange` does **not** flush when hiding; `stop()` removes
+every listener *and* the store subscription, with a follow-up case proving
+a later event then does nothing. Robustness: a rejecting `flushOutbox`, a
+throwing `onChange`, a throwing `getOutbox`, and a missing event target
+are each survived — a sync loop that dies on an unexpected throw is
+exactly what goes unnoticed for three months. `renderOutboxStatus`
+covers singular/plural, junk counts rendering as hidden rather than
+`NaN`, and a null element.
+
+*Verified by unit tests (`tests/unit/store-flush-serialization.test.mjs`,
+10 cases):* overlapping flushes send the queued op **exactly once** and
+both callers see the same result; a settled run un-latches, **including
+when it threw** (a latched rejected promise would wedge syncing
+permanently — a silent forever-failure, the exact class this step
+removes); an empty-outbox flush issues no request; `onOutboxChange` fires
+on queue *and* on drain (so the indicator clears itself), unsubscribes
+properly, survives a throwing subscriber without losing the write, and
+rejects a non-function.
+
+*Verified by e2e (`tests/e2e/outbox.test.mjs`, 5 cases):* the indicator is
+present-but-hidden at rest; **a write queued offline is flushed when the
+app boots straight to `#/t/366`** — the exact bug — with the queue drained
+from `localStorage`, not just from memory; a 503 keeps the count visible
+at "2 logs not yet saved", and a real `online` event then drains it to
+hidden with both upserts sent; `role="status"`/`aria-live="polite"` are
+present and no horizontal scroll appears at 390px; and the indicator shows
+on a non-Home route.
+
+*Both fixes were verified to actually catch their bug, not merely to
+pass.* The serialization guard was temporarily removed → the overlap test
+failed with "the queued op must be sent exactly once, not twice". The
+`startOutboxSync()` call was commented out → **4 of the 5 e2e cases
+failed**, including the detail-route case. Both were then restored and
+re-run green.
+
+*One test of mine was wrong and was fixed rather than the code:* the
+serialization test originally compared the two returned promises with
+`strictEqual`. `flushOutbox` is an `async function`, so it always returns
+a fresh promise even when handing back the in-flight run — promise
+identity was never the contract. Rewritten to assert the property that
+actually protects the user (the op reaches the network once) plus a
+companion case pinning the non-overlapping situation, so the first test
+cannot start passing for the wrong reason.
+
+*Also fixed here, carried since Step 0.3:* `sw.js`'s install handler
+called `cache.put(url, res)` on the CDN scripts **without checking
+`res.ok`**, so a 404 or 5xx from jsDelivr would have been cached as though
+it were Chart.js and served from cache thereafter — a permanently broken
+chart library on an installed phone, with no network error to point at,
+fixable only by a `CACHE` bump. Now guarded; a failed fetch simply leaves
+the URL uncached and the `fetch` handler falls back to the network.
+
+**Not verifiable from this machine, and worth a device check at the Phase D
+gate:** that the indicator is legible against the header in both light and
+dark on the real screen, and the genuine article — log something in
+Airplane Mode from a detail screen, force-quit the app, reopen it, and
+confirm the count appears and then clears once the network returns.
 
 ---
 
