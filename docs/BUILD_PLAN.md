@@ -2796,7 +2796,10 @@ readable. Deployed for the user to check.
 
 ## Step 3.3 — Two-bars threshold chart
 
-**Status:** DONE (2026-08-24) — suite-verified, **awaiting device check.**
+**Status:** DONE (2026-08-24) — suite-verified; **device-verified
+2026-08-25** at Step D.0, including the zone shading reading correctly at
+a glance in both light and dark. The **auto-bounds** path remains
+unexercised (needs 12+ readings) and is checked at the Phase D gate.
 
 **Goal.** Chart type 3 of 4 — the mechanic that motivated the whole
 reframing. A numeric metric over time with upper/lower bound lines and
@@ -2974,7 +2977,11 @@ exercises the auto path**, which needs `bounds_enabled` on a numeric with
 
 ## Step 3.3b — Granularity on the Range chart
 
-**Status:** DONE (2026-08-25) — suite-verified, **awaiting device check.**
+**Status:** DONE (2026-08-25) — suite-verified; **device-verified
+2026-08-25** at Step D.0. The three things this step could not assert
+(Weekly/Monthly smoothing reading as informative, a broken line at
+Monthly reading as missing data, and the second control not crowding
+390px) were all confirmed good on the phone.
 
 User request, after seeing Step 3.3 on their phone: choose whether each dot
 is a daily value, a weekly average or a monthly average — with a control
@@ -3120,6 +3127,553 @@ verification here.
 Weekly/Monthly reads as informative rather than as "the chart stopped
 working", whether a broken line at Monthly reads as missing data, and
 whether the second control under the chart crowds the screen at 390px.
+
+---
+
+# PHASE D — Daily-use readiness (inserted 2026-08-25)
+
+**Why this phase exists.** The user decided on 2026-08-25 to **park
+feature work at Step 3.3b** and start using the app for real for roughly
+three months, importing historical data from CSV first. Phase D is the
+set of things that must be true before three months of irreplaceable
+personal data lands in a database that currently has no backups, no
+export, no auth, and a test suite that writes to it.
+
+**Phase D comes before Step 3.4.** When feature work resumes, resume at
+3.4 — nothing in Phase D changes what 3.4/3.5/4.x/5.x need to do.
+
+### The refactor question, answered up front
+
+The user's stated fear was that using the app now would force "a crazier
+refactoring of the whole database" later. It will not, and this was
+checked step by step: **of every remaining step in this plan (3.4, 3.5,
+4.1, 4.2, 5.1, 5.2), none requires a schema change.** Only the RLS work
+touches the schema and it is purely additive (add nullable `user_id` →
+backfill → set not null → swap policies), which costs the same with
+three months of data as with none.
+
+**Three things, however, are genuinely locked in by the data itself** and
+are the entire reason D.1 exists as a decision step:
+
+1. **One row per `(trackable_id, entry_date)`.** There is no time-of-day
+   column and a unique constraint enforces one row per day. Three months
+   of daily totals cannot later be decomposed into individual events
+   (each meal, each cigarette, each set). Changing to an event model
+   means a new table and history that starts empty.
+2. **`value_shape` per trackable.** Converting a boolean history to
+   numeric is lossy: a stored `1` means "done", not "1 of something".
+3. **Absence vs. zero for boolean trackables.** Clearing a boolean day is
+   a `DELETE` (see the comment at `js/aggregate.js:187`), so "confirmed I
+   didn't" and "forgot to log" are the same thing — no row. Not
+   reconstructible after the fact.
+
+Everything else on the risk list is operational, not structural.
+
+### Decisions taken by the user, 2026-08-25
+
+Recorded so no later step re-litigates them:
+
+- **Backups → a separate PRIVATE GitHub repo on a schedule.** Explicitly
+  not this repo: `masihbn/daily` is public (free Pages requires it) and
+  the data is weight / calories / smoking.
+- **Tests → a second Supabase project.** Not a pretest backup, not
+  skipping the tier.
+- **Smoking → numeric count per day**, not boolean.
+- **RLS hardening → do it now**, in this phase, rather than leaving it at
+  Step 5.3.
+- **CSV import is NOT an app feature.** The user hands over CSV files;
+  the orchestrator writes a transform and pushes the rows to Supabase
+  directly. This was stated twice and is not to be re-scoped into a
+  settings-screen importer. A later step may add an in-app importer if
+  the user asks for one; nothing here assumes it.
+
+---
+
+## Step D.0 — Device-verify what already shipped, and clear trial data
+
+**Status:** DONE (2026-08-25) — device-verified by the user; trial data
+cleared with explicit authorization.
+
+**Goal.** The app is confirmed usable on the actual phone, and the
+database contains only trackables the user intends to keep.
+
+**Preconditions.** 3.3b.
+
+**Deliverables.** A device-check verdict recorded here and in
+`PROJECT_NOTES.md`; a `supabase/migrations/`-free data cleanup executed
+via SQL (data deletion, not schema change — no migration file).
+
+**Implementation notes.**
+- **Steps 3.3 and 3.3b are both marked "awaiting device check."** Starting
+  three months of daily logging on charts nobody has looked at on a phone
+  is exactly the mistake the phase gates exist to prevent. Run the Phase 3
+  gate checklist for what is built (3.1, 3.2, 3.2b, 3.2c, 3.3, 3.3b) even
+  though 3.4/3.5 are unbuilt. Legibility at 390px is the bar, per the gate.
+- Live data as of 2026-08-25, verified by direct SQL — **6 trackables,
+  27 entries**:
+
+  | id | name | keep? |
+  |---|---|---|
+  | 365 | Workout | keep |
+  | 366 | Calories | keep (see D.1 — its aggregation looks wrong) |
+  | 367 | Weight | keep |
+  | 468 | Smoking | keep, but convert to numeric in D.1 |
+  | 694 | Test random | **delete** — build-phase scratch |
+  | 695 | Numerx | **delete** — build-phase scratch, already archived |
+
+- All 27 entries are build-phase trial data (every `value` is `1` for the
+  boolean trackables; Calories/Weight have 6 and 2 rows). **Recommend
+  deleting all of them** so the charts start clean and no trend line is
+  shaped by taps that were testing a button. Confirm with the user first —
+  deleting entries is not reversible and there is no backup yet, which is
+  precisely why D.3 exists.
+- **Order matters: do this before D.3, or the first backup preserves the
+  scratch data forever.**
+- Deleting a trackable cascades to its entries (`on delete cascade`). That
+  is intended here. Note that the app itself has **no** delete-trackable
+  path — `js/api.js` archives only, and its single-DELETE structural guard
+  must not be weakened to add one.
+
+**Test Subjects.**
+
+*Device check (user's iPhone, 2026-08-25).* The five things the suite
+cannot assert were put to the user directly and all passed:
+
+1. **Zone shading on the two-bars chart reads as "where in the band am
+   I" at a glance** — the entire point of Step 3.3, and the one thing no
+   assertion can cover. This clears 3.3's largest open question.
+2. Low-alpha zone tints are visible in **both** light and dark mode.
+3. A broken line at Monthly granularity (very sparse data) reads as
+   **missing data**, not as a rendering fault.
+4. The two stacked granularity controls (3.2c's and 3.3b's) **do not
+   crowd** the screen at 390px.
+5. Weekly/Monthly smoothing reads as **informative**, not as "the chart
+   stopped working".
+
+**Steps 3.3 and 3.3b are therefore now device-verified**, and their
+status lines were updated from "awaiting device check" accordingly.
+
+*Still unexercised, and deliberately deferred to the Phase D gate:* the
+**auto-bounds** path. It needs a numeric trackable with `bounds_enabled`
+and 12+ readings, which did not exist — only `Calories`' manual
+1700–2100 path has ever run. The CSV import (D.5) is what will finally
+supply enough readings, so this check moves to the gate rather than being
+recorded as passed here.
+
+*Data cleanup (direct SQL, after explicit user authorization).* The user
+was shown every row and the exact statements before anything ran. The
+evidence that all 27 entries were build-phase trial data, not real logs:
+every boolean value was `1`; `Calories` held six round numbers (1650,
+1650, 1700, 1800, 1900, 3500) all created 2026-08-23→25 including one
+backdated to 2026-07-11; `Weight` held 75 then 80, a 5 kg jump in seven
+days. The user was asked specifically about the two `Weight` rows, as the
+only ones that could plausibly have been genuine, and confirmed they were
+not.
+
+Executed as a single transaction:
+
+```sql
+delete from public.trackables where id in (694, 695);  -- scratch: "Test random", "Numerx"
+delete from public.entries where trackable_id in (365, 366, 367, 468);
+```
+
+*Post-run verification (direct SQL):* `trackables` **4** — exactly
+`Workout, Calories, Weight, Smoking`; `entries` **0**; **0 orphaned
+entries**; `app_settings` singleton intact; `counter` intact (the
+keepalive depends on it). The `Numerx` entry was removed by cascade, not
+by the second statement, confirming the FK cascade behaves as
+`DATA_MODEL.md` describes.
+
+*Note on ordering:* this ran **before** D.3, deliberately — a backup
+taken first would have preserved the scratch data in every future dump.
+
+---
+
+## Step D.1 — Lock the irreversible modelling decisions
+
+**Status:** TODO
+
+**Goal.** Every choice that becomes expensive once data accumulates is
+made deliberately and written down, before any data accumulates.
+
+**Preconditions.** D.0.
+
+**Deliverables.** `supabase/migrations/0006_smoking_numeric.sql` (or
+folded into D.2's migration); decisions recorded in this step and in
+`docs/DATA_MODEL.md`.
+
+**Implementation notes.**
+
+Three decisions, in order of how expensive they are to change later.
+
+1. **Smoking: boolean → numeric count per day.** Decided by the user.
+   - `value_shape` `'boolean'` → `'numeric'`, `unit` → `'cigarettes'`,
+     `aggregation` `'count'` → `'sum'`. `direction` stays `'break'`.
+   - **The 6 existing Smoking entries are all `value = 1`** and are trial
+     data, not real counts. Do **not** silently reinterpret them as "1
+     cigarette" — that fabricates a reading. Delete them with the rest of
+     the trial data in D.0.
+   - Consider whether `bounds_enabled` should be on for it — a count that
+     oscillates is exactly what the two-bars chart (3.3) is for.
+2. **One row per trackable per day — confirm it holds for everything the
+   user will actually log.** Ask explicitly, naming the cases: multiple
+   workouts in a day, meal-by-meal calories, cigarettes logged as they
+   happen rather than totalled at night. If any of those matter, the model
+   has to change **before** import, not after. If they do not, record that
+   they were considered and rejected so a future session does not reopen it.
+3. **Absence vs. zero for the remaining boolean trackable (`Workout`).**
+   Absence currently means "not done" and drives the calendar. That is the
+   right default for a `build` habit. Record it.
+
+Two smaller things to settle in the same pass:
+
+- **`Calories` is `aggregation='sum'` with `target_type='weekly_average'`
+  and `target_value=1700`.** A weekly *sum* of daily calories against an
+  *average* target is very likely wrong — a week of 1700-kcal days sums to
+  11900 against a target line at 1700. Check what the user actually wants
+  (almost certainly `aggregation='average'`) and fix it now; a mis-set
+  aggregation is invisible until the chart has enough data to look absurd.
+- **`Weight` uses `aggregation='last'`, `direction='break'`, no bounds.**
+  Confirm bounds should stay off — `APP_CONCEPT.md`'s bounded-metric case
+  was written with weight in mind, and the auto-derived 10th/90th
+  percentile needs `app_settings.rolling_window_days` of history to be
+  meaningful, which the import may now supply.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.2 — Migration `0006`: entry provenance
+
+**Status:** TODO
+
+**Goal.** Every entry row records where it came from, so the CSV import
+is reversible in one statement.
+
+**Preconditions.** D.1 (so any `value_shape` change ships in the same
+migration batch).
+
+**Deliverables.** `supabase/migrations/0006_*.sql`, applied via the
+Supabase MCP `apply_migration` tool; `docs/DATA_MODEL.md` updated.
+
+**Implementation notes.**
+- Add **`entries.source text`**, nullable, with a column comment. **Null
+  means "logged in the app"** — do not add a default like `'app'`, or the
+  27 existing rows and every future app write need a value that means
+  nothing to the client, and `js/api.js`'s `assertValidEntry()` allow-list
+  would have to grow to permit it.
+- Import batches set it to a batch id, e.g. `'import:calories-2026-08-25'`.
+  Undo is then exactly `delete from entries where source = '<batch>'`,
+  which cannot touch a row the user typed by hand.
+- **`assertValidEntry()` in `js/api.js` rejects any key outside
+  `trackable_id`/`entry_date`/`value`/`note`.** Leave that as-is — the app
+  must never write `source`, and the import does not go through `api.js`.
+  Add a comment there recording *why* `source` is deliberately excluded,
+  so a later session does not "fix" the omission.
+- Load the `supabase-postgres-best-practices` skill first — this is a
+  schema change, which is its trigger.
+- Run `mcp__supabase__get_advisors` after applying. Baseline as of
+  2026-08-25 is **clean** (`security` lints: empty), so anything it
+  reports is new and caused by this migration.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.3 — Backups and a verified restore
+
+**Status:** TODO
+
+**Goal.** There is more than one copy of the data, it is created without
+the user remembering to do anything, and the restore path has actually
+been run.
+
+**Preconditions.** D.0 (do not immortalise the scratch data), D.2 (so
+`source` is in the dump format from the first backup onward).
+
+**Deliverables.** `scripts/backup.mjs`; `scripts/restore.mjs`; a workflow
+in a **separate private repo**; a recorded successful restore.
+
+**Implementation notes.**
+- **This is the highest-severity item in the phase.** The Supabase free
+  tier gives no restore button, and CSV export (Step 4.2) is still TODO —
+  so today there is exactly one copy of the data and no supported way to
+  get it out of the app.
+- **The backup must not land in `masihbn/daily`.** That repo is public
+  because free GitHub Pages requires it, and the payload is weight,
+  calorie and smoking history. Create a private repo (e.g.
+  `masihbn/daily-backups`) and have its scheduled workflow pull from
+  Supabase and commit. Never add the dump path to the public repo, and do
+  not rely on `.gitignore` to hold that line.
+- Dump `trackables`, `entries` and `app_settings` in full, to a
+  timestamped JSON file, one commit per run. At this scale (a few thousand
+  rows after three months) a full dump every day is trivially small and
+  far simpler to reason about than an incremental scheme.
+- **Credentials:** the workflow can use the anon key today, but D.7
+  tightens RLS and the anon key will stop being able to read. Plan for a
+  `service_role` key in the private repo's secrets — and note that this
+  is the one place a service_role key is legitimate, because it is a
+  private repo and never reaches the client. `js/config.js` must never
+  gain one; that warning is already in its comment.
+- **An unverified backup is not a backup.** Prove the restore end to end:
+  take a dump, restore it into the second Supabase project from D.4 (or a
+  scratch schema), and diff row-for-row. Record that this was actually
+  executed — "the script exists" does not satisfy this step.
+- `restore.mjs` must be idempotent (upsert on the natural keys) and must
+  refuse to run against a target it was not explicitly pointed at. A
+  restore script that defaults to production is a data-loss tool.
+- **GitHub disables scheduled workflows after ~60 days with no repository
+  activity.** A three-month feature park will cross that line. The backup
+  repo's own commits count as activity for that repo, but the keepalive in
+  `masihbn/daily` will go quiet — see D.8.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.4 — Move the test suite off the production database
+
+**Status:** TODO
+
+**Goal.** `npm test` cannot touch the user's real data, by construction
+rather than by care.
+
+**Preconditions.** D.2 (the test project must get the same schema).
+
+**Deliverables.** A second Supabase project; `tests/helpers/supabase.mjs`
+and `js/config.js` consumers reworked to read test credentials from the
+environment; `docs/PROJECT_NOTES.md` updated with the new project's id
+and its own keepalive arrangement.
+
+**Implementation notes.**
+- Today the integration tier creates, PATCHes and DELETEs rows in the
+  **live** database, and `sweepStaleTestRows()` runs an unfiltered SELECT
+  over `trackables` at suite start. The guard is genuinely good — it was
+  rewritten after the Step 0.0 `LIKE`-wildcard bug that would have deleted
+  real rows, and `isTestName()` is exhaustively fuzzed. **This step is not
+  a criticism of that guard**; it is about the blast radius being
+  unnecessary once the data is irreplaceable.
+- Create a second free Supabase project. Replay
+  `supabase/migrations/*.sql` into it **in order** — that is what the
+  numbered-migration discipline has been for.
+- **Test credentials must come from environment variables with no
+  fallback to `js/config.js`.** If the variables are unset, the suite must
+  fail loudly rather than quietly running against production. That
+  fail-closed default is the whole point of the step; a "helpful" fallback
+  reintroduces the hazard invisibly.
+- `js/config.js` stays exactly as it is — it is the *app's* config and
+  must keep pointing at production.
+- The second project also auto-pauses after 7 days idle. Either give it
+  its own keepalive or accept that a paused test project means the
+  integration tier fails until resumed — decide and record which.
+- Expect some churn in the 43 integration tests: they will need to
+  authenticate once D.7 lands. Sequencing D.4 before D.7 is deliberate so
+  that the auth change is made once, in a place where breaking it cannot
+  hurt real data.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.5 — CSV import (one-off, orchestrator-run)
+
+**Status:** TODO — blocked on the user supplying the CSV files.
+
+**Goal.** The user's existing workout and calorie history is in the
+database, correctly dated, and removable in one statement if it is wrong.
+
+**Preconditions.** D.1 (the model is settled), D.2 (`source` exists),
+D.3 (a backup exists before a bulk write).
+
+**Deliverables.** `scripts/import-csv.mjs` (or per-file transforms); a
+dry-run report reviewed by the user; the rows in `entries`; the original
+CSVs archived verbatim to the backup repo.
+
+**Implementation notes.**
+- **Scope, stated twice by the user and not to be re-scoped: this is NOT
+  an app feature.** The user hands over CSV files, the orchestrator writes
+  a transform and pushes the rows to Supabase. No file picker, no settings
+  screen, no iOS upload path. (An earlier draft of this phase got this
+  backwards; it is recorded here so it is not gotten backwards again.)
+- **Produce a dry-run report and get explicit approval before writing a
+  single row.** The report must state, per file: row count, date range,
+  **how many days carry more than one row**, distinct value ranges, any
+  unparseable rows, and how many target days already have an entry.
+- **Days with multiple rows are the decision point.** The unique
+  constraint on `(trackable_id, entry_date)` means they must be collapsed,
+  and collapsing is lossy and silent — no error will be raised. Present
+  the choice (sum / average / last / max) per file and let the user
+  choose; do not infer it from the trackable's `aggregation` column, which
+  answers a different question (how a *range* of days rolls up, not how
+  one day's rows combine).
+- **Timezone is the classic trap.** If the CSVs carry timestamps rather
+  than dates, naive extraction shifts anything logged after midnight UTC
+  onto the wrong local day — which is exactly the trap
+  `docs/BUILD_PLAN.md` → "Date handling" documents for the app. State the
+  assumed source timezone in the dry-run report and have the user confirm
+  it against a day they remember.
+- Every written row gets `source = 'import:<file>-<YYYY-MM-DD>'`.
+- **Collisions with existing entries:** decide skip-vs-overwrite
+  explicitly and say which in the report. Default to **skip** — a row the
+  user typed in the app is more trustworthy than a row from a file.
+- Archive the original CSVs unmodified into the private backup repo. If
+  the per-day collapse later turns out to be the wrong choice, the raw
+  data still exists and the import can be redone.
+- Verify after writing: row counts match the report, spot-check five days
+  the user can confirm from memory, and open the app on the phone to see
+  the imported history actually render in the calendar and the charts.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.6 — Outbox durability (pulled forward from Step 5.1)
+
+**Status:** TODO
+
+**Goal.** A log the user makes offline cannot sit in the queue unnoticed,
+and the user can see when something has not reached the server.
+
+**Preconditions.** None beyond the current code.
+
+**Deliverables.** Changes to `js/main.js` / `js/store.js` /
+`js/views/home.js`; `sw.js` `CACHE` bumped.
+
+**Implementation notes.**
+- **The concrete defect:** `flushOutbox()` is called from exactly one
+  place — `js/views/home.js:517`, on Home mount. Log something offline
+  from the calendar day-editor, kill the app, relaunch straight to
+  `#/t/:id`, and the queued write is never replayed. Over three months of
+  real use this is the most likely way data goes quietly missing.
+- Flush on: app start (regardless of route), `window` `online`, and
+  `visibilitychange` → visible. Debounce so a rapid
+  background/foreground cycle does not stack concurrent flushes.
+- `flushOutbox()` already stops at the first retryable failure and
+  preserves order — do not change that; it is what stops a tunnel from
+  burning the whole queue. The Step 1.1 notes and its 40 unit tests
+  describe the contract.
+- **Add a global pending indicator.** Per-row `pending`/`failed` state
+  already exists (`js/views/home.js:85-92`) and both Home and Detail
+  already show an offline banner. What is missing is an app-level "N
+  unsent" affordance visible from any route, so the user is not required
+  to be on the right screen to learn that a log did not land.
+- **Also fix the known latent `sw.js` bug carried since Step 0.3:** the
+  install handler's CDN branch does `cache.put(url, res)` without checking
+  `res.ok`, so a jsDelivr error response would be cached and then served
+  offline as if it were Chart.js. One-line guard. Step 5.1 still owns the
+  full service-worker pass; this is the one-line subset that matters
+  during the park.
+- Bump `CACHE` — `tests/unit/sw-assets.test.mjs` enforces the naming
+  scheme and will catch a forgotten bump.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.7 — RLS hardening + single-user Supabase Auth (moved from 5.3)
+
+**Status:** TODO
+
+**Goal.** Close the tracked security gap: real auth-scoped policies
+replacing `using (true)`.
+
+**Preconditions.** D.3 (**do not run a whole-schema migration with no
+backup**), D.4 (so the policy change can be proven against the test
+project first).
+
+**Deliverables.** `supabase/migrations/0007_*.sql`; auth handling in
+`js/api.js` / a new `js/auth.js`; `docs/DATA_MODEL.md` and
+`docs/PROJECT_NOTES.md` security sections rewritten.
+
+**Implementation notes.**
+- **This step does not have to block the user from starting.** The
+  migration is additive — add nullable `user_id` → backfill → set not null
+  → swap policies — and the backfill picks up whatever was logged in the
+  meantime. So the user can be logging daily while this is built. Say so
+  rather than holding the app hostage to it.
+- The full original notes are at **Step 5.3**, which is now a pointer to
+  this step. Read them; they are not repeated here.
+- **Two dependencies that break silently if forgotten:**
+  1. **The keepalive workflow** pings `counter` with the anon key. Keep a
+     permissive *read* policy on `counter` (it holds nothing sensitive) or
+     the workflow starts failing and the free project auto-pauses about a
+     week later, with no other symptom.
+  2. **The backup workflow from D.3** must be on a `service_role` key by
+     the time policies tighten, or backups silently start dumping zero
+     rows — a backup that succeeds and contains nothing is worse than one
+     that fails.
+- The client must handle signed-out state, token refresh, and the PWA
+  relaunch case where the session is restored from storage. Test the
+  relaunch case specifically: a standalone PWA that demands a login every
+  cold start will not survive daily use.
+- **Ship an escape hatch before enabling anything that can lock the user
+  out**, same rule as Step 5.2.
+- Run `mcp__supabase__get_advisors` afterwards. Baseline is clean today,
+  so the goal is: still clean, with the permissive policies gone.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## Step D.8 — Park the build: docs, markers, and the silence problem
+
+**Status:** TODO
+
+**Goal.** A cold session opening this repo in November knows the build was
+parked deliberately, where to resume, and what has been running unattended
+in the meantime.
+
+**Preconditions.** D.0–D.7.
+
+**Deliverables.** `CLAUDE.md`, `docs/BUILD_PLAN.md`,
+`docs/PROJECT_NOTES.md`, `docs/DATA_MODEL.md` updated.
+
+**Implementation notes.**
+- `CLAUDE.md` still says the data layer is "built but not yet wired to any
+  UI" and that the app "looks exactly like it did at the Phase 0 close".
+  Both are long false. Rewrite the status section to describe the parked
+  state: Phase 3 built through 3.3b, Phase D complete, **resume at Step
+  3.4**, real data in the database from `<date>`.
+- **The silence problem, stated explicitly for the future reader:**
+  GitHub disables scheduled workflows after ~60 days with no repository
+  activity. A three-month park crosses that line, and when it happens the
+  Supabase keepalive stops, the free project auto-pauses roughly a week
+  after that, and **the only symptom is that the app stops working one
+  morning**. Set a calendar reminder at ~4 weeks and ~8 weeks to check:
+  the keepalive workflow still enabled and green, the backup repo still
+  receiving daily commits, and the last backup actually containing rows.
+- Append a `PROJECT_NOTES.md` test-log entry for the Phase D device check
+  and the import, per the standing rule.
+- Do **not** delete or renumber Steps 3.4 onward. They are unchanged and
+  still correct.
+
+**Test Subjects.**
+
+_(To be filled in by the executing session.)_
+
+---
+
+## ⛔ PHASE D GATE — hard stop
+
+The user logs a real entry, on the phone, in normal daily use, and it
+survives a kill-and-relaunch. Then: confirm the backup repo has a commit
+containing that entry, and confirm the imported history renders in both
+the calendar and the charts. **Only after that is the app "in use" and
+the build parked.**
 
 ---
 
@@ -3359,13 +3913,19 @@ _(To be filled in by the executing session.)_
 
 ## Step 5.3 — RLS hardening + Supabase Auth
 
-**Status:** TODO
+**Status:** MOVED to **Step D.7** (2026-08-25). The user chose to harden
+before three months of real personal data accumulates, rather than after.
+The implementation notes below are still the authoritative description of
+*how* — D.7 covers only what changed by moving it earlier (the backup and
+keepalive workflows now depend on the policy shape). Execute it as D.7;
+do not execute it twice.
 
 **Goal.** Close the tracked security gap: real per-user, auth-scoped
 policies replacing `using (true)`.
 
-**Preconditions.** Feature set stable (Phases 1–4 done). This ordering
-is an explicit, recorded decision — not an oversight.
+**Preconditions.** ~~Feature set stable (Phases 1–4 done).~~ Superseded:
+see D.7's preconditions (a working backup, and the test project, both of
+which exist by then).
 
 **Implementation notes.**
 - **Read `docs/DATA_MODEL.md` → "Security status" and
@@ -3503,3 +4063,27 @@ unwind than to ask about.
   user after 5 failed fix cycles on the same failure.
 - **2026-08-21** — Added Step 0.0 (test harness) as the true first
   step — nothing else in the plan is verifiable until it exists.
+- **2026-08-25** — **Feature work parked at Step 3.3b.** The user wants to
+  use the app for real for ~3 months with imported historical data.
+  **Phase D** inserted before Step 3.4 to make that safe. Resume at 3.4.
+- **2026-08-25** — Checked and recorded: **no remaining step (3.4, 3.5,
+  4.1, 4.2, 5.1, 5.2) requires a schema change**, and the one that does
+  (RLS) is additive. The "using it now forces a big refactor later" worry
+  is unfounded *except* for three data-locked choices — per-day
+  granularity, `value_shape`, and absence-vs-zero — which is why D.1
+  exists as an explicit decision step.
+- **2026-08-25** — Backups go to a **separate private repo**, never to
+  `masihbn/daily`, which is public because free Pages requires it.
+- **2026-08-25** — Tests move to a **second Supabase project** with
+  fail-closed credentials, rather than continuing to write to the
+  database holding the user's only copy of their data.
+- **2026-08-25** — Smoking becomes a **numeric count per day**. Its 6
+  existing `value = 1` rows are trial data and are deleted, not
+  reinterpreted as counts.
+- **2026-08-25** — RLS hardening pulled forward from 5.3 to **D.7**, but
+  explicitly **not a blocker** on the user starting to log: the migration
+  is additive and its backfill picks up rows logged in the meantime.
+- **2026-08-25** — **CSV import is not an app feature.** The user supplies
+  files; the orchestrator transforms and pushes them. Stated twice by the
+  user after an earlier draft got it backwards. Do not re-scope it into a
+  settings-screen importer.

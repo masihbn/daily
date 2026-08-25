@@ -6,40 +6,57 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-**Currently mid-build — Phases 0 and 1 complete as of 2026-08-22.**
-Hosting and backend plumbing are live and verified. The placeholder
-tap-counter is **gone**: `index.html` boots a real app shell with a hash
-router (`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`) and a bottom
-nav.
+**Feature work is PARKED at Step 3.3b as of 2026-08-25 — read this before
+assuming the plan stalled.** Phases 0, 1 and 2 are complete and
+device-verified. Phase 3 is built through Step 3.3b (calendar heatmap,
+weekly trend chart with target line, selectable Daily/Weekly/Monthly
+granularity, two-bars threshold chart). The app is real and usable: a
+hash router (`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`), a
+trackable list with quick-log, create/edit forms, and per-trackable
+charts, all wired to `js/api.js` / `js/store.js`.
 
-**The data layer is built but not yet wired to any UI.** `js/api.js`,
-`js/store.js`, `js/dates.js` and `js/aggregate.js` are complete and
-tested, but **nothing imports them yet** — `js/main.js` still renders
-placeholder views. So the app on the phone looks exactly like it did at
-the Phase 0 close. Wiring starts at Step 2.1, which is the next step.
+**The user is about to start using it for real, for ~3 months, with
+historical data imported from CSV.** That is why the next work is
+**Phase D — Daily-use readiness**, inserted in `BUILD_PLAN.md` *before*
+Step 3.4. Phase D is backups, moving the test suite off the production
+database, entry provenance, the CSV import, outbox durability, and RLS
+hardening. **When feature work resumes, resume at Step 3.4** — nothing in
+Phase D changes what 3.4 onward need to do.
 
-**Consequence worth knowing before you trust the suite:** those four
-modules have only ever run in **Node**, never in a browser. The e2e tests
-load `index.html`, which does not import them. Step 2.1 is the first time
-they execute in Mobile Safari, so treat browser-specific behaviour
-(`localStorage` under iOS storage rules, the offline outbox on a real
-flaky connection, backgrounding the PWA mid-write) as unverified. Supabase
-CORS from the browser is the exception — the Phase 0 tap-counter already
-proved that path.
+**Two things that will bite an unwary session during the park:**
+
+1. **`npm test` currently writes to the LIVE database** — the integration
+   tier creates, PATCHes and DELETEs `__test__` rows in the same project
+   that holds the user's only copy of their data. The guard in
+   `tests/helpers/supabase.mjs` is strong (it was rewritten after a real
+   data-loss bug), but **Step D.4 moves the tier to a second Supabase
+   project.** Until D.4 lands, think before running the full suite.
+2. **GitHub disables scheduled workflows after ~60 days of repository
+   inactivity.** A three-month park crosses that line, which stops the
+   Supabase keepalive, which auto-pauses the free project about a week
+   later — and the only symptom is the app failing one morning. See
+   Step D.8.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**635 tests at Phase 1 close** (579 unit, 43 integration, 13 e2e). See
+**3455 tests as of Step 3.3b** (3286 unit, 43 integration, 126 e2e). See
 `docs/ORCHESTRATION.md`.
 
-**User decision on record (2026-08-22):** the user asked for an **extra
-deploy checkpoint after Step 2.1** — build 2.1, then stop, push, and hand
-them a manual test script, rather than running straight through 2.2 and
-2.3 to the Phase 2 gate. Reason: 2.1 is the screen they use daily and the
-first time the Phase 1 modules run in a browser at all, so an iOS
-surprise should surface after one step instead of three. Honor this; it
-is an addition to the protocol's normal "keep moving within a phase"
-rule, not a replacement for the Phase 2 gate, which still stands.
+**User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
+decision log:** backups go to a **separate private repo** (never this
+public one); tests move to a **second Supabase project**; Smoking becomes
+a **numeric count per day**; RLS hardening moves from Step 5.3 to **D.7**
+but does **not** block the user from starting to log; and **CSV import is
+not an app feature** — the user hands over files, the orchestrator
+transforms and pushes them. That last one was stated twice after an
+earlier draft got it backwards; do not re-scope it into an in-app
+importer.
+
+**Earlier user decision (2026-08-22), now satisfied:** an extra deploy
+checkpoint after Step 2.1 rather than running straight to the Phase 2
+gate. Kept here because it shows the standing preference — when a step is
+the first time something runs on the device, stop and let the user check
+it before stacking more on top.
 
 **The concept was reframed and the design is now resolved.** It went from
 a narrow "skill/habit tracker" to a more general personal logging +

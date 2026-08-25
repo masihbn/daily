@@ -300,6 +300,13 @@ first tier that fails.
 
 ### Test data isolation
 
+> **Changing at Step D.4 (2026-08-25).** Tests are moving to a **second
+> Supabase project**, because the live one now holds the user's real
+> logged data. Until D.4 lands, everything below still applies and the
+> `__test__` convention is the only thing protecting that data. After
+> D.4, the convention stays (it is cheap and it is defence in depth) but
+> the live project is no longer the target.
+
 Tests write to the **live** Supabase project, so isolation is by naming
 convention and is mandatory:
 
@@ -376,7 +383,10 @@ Escalate on sight, regardless of cycle count:
   built as specified. Do not resolve a design conflict unilaterally —
   that doc is the record of the user's decisions.
 - **Anything implying schema change beyond what the step authorizes**,
-  or any temptation to touch RLS before Step 5.3.
+  or any temptation to touch RLS outside its own step. **That step is now
+  D.7, not 5.3** (moved 2026-08-25 — see `BUILD_PLAN.md`'s decision log).
+  The rule is unchanged in spirit: RLS changes happen in one authorized
+  step, never opportunistically from another.
 - **Test data isolation broken** — a test touched a non-`__test__` row.
   Stop everything; this risks real logged data.
 
@@ -433,5 +443,6 @@ Within a phase, keep moving without pausing between steps.
 | Fix cycles before escalating | 5 |
 | Phase gate | Hard stop, wait for user |
 | Within a phase | Keep moving |
-| Test data | `__test__*` prefix, swept and torn down |
-| Never touch during v1 | RLS policies (Step 5.3), the `counter` table |
+| Test data | `__test__*` prefix, swept and torn down. Moving to a second Supabase project at Step D.4 |
+| Never touch during v1 | RLS policies (**Step D.7**, moved from 5.3), the `counter` table |
+| Current step | **Phase D** — see `BUILD_PLAN.md`. Feature work parked at 3.3b; resume at 3.4 |

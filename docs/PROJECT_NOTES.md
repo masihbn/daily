@@ -315,6 +315,58 @@ personal**:
 
 ## Test log
 
+### Attempt 10 — 2026-08-25, Step D.0: Phase 3 device check + trial-data wipe
+
+**Context**: the user decided to **park feature work at Step 3.3b** and
+start using the app for real for ~3 months, importing history from CSV
+first. `BUILD_PLAN.md` gained a new **Phase D — Daily-use readiness**
+before Step 3.4. This is its first step.
+
+**Device check — all five open items passed.** Steps 3.3 and 3.3b had
+been sitting at "suite-verified, awaiting device check", which meant the
+user was about to start three months of logging on charts nobody had
+looked at on a phone. Confirmed on the iPhone:
+
+1. The two-bars zone shading reads as **"where in the band am I"** at a
+   glance. This was Step 3.3's own stated "not verifiable from this
+   machine" item and the entire justification for the chart.
+2. The low-alpha zone tints are visible in **both** light and dark.
+3. A broken line at Monthly granularity reads as **missing data**, not as
+   a rendering fault.
+4. The two stacked granularity controls (3.2c's + 3.3b's) do **not**
+   crowd the screen at 390px.
+5. Weekly/Monthly smoothing reads as informative, not as breakage.
+
+**Still unexercised:** the **auto-bounds** path has never run — it needs a
+numeric trackable with `bounds_enabled` and 12+ readings, and only
+`Calories`' *manual* 1700–2100 path has ever been exercised. The CSV
+import is what will finally supply the readings, so this moved to the
+Phase D gate rather than being called done.
+
+**Trial-data wipe (authorized explicitly, then executed).** All 27 entries
+were build-phase taps: every boolean value was `1`; `Calories` held six
+round numbers (1650, 1650, 1700, 1800, 1900, 3500) created in a burst on
+2026-08-23→25, one of them backdated to 2026-07-11; `Weight` held 75 then
+80, a 5 kg jump in seven days. The user was asked specifically about the
+two `Weight` rows — the only plausibly-real ones — and confirmed they were
+not real.
+
+Deleted trackables `694 Test random` and `695 Numerx` (scratch), plus
+every entry on the four keepers. Verified after: `trackables` **4**
+(`Workout, Calories, Weight, Smoking`), `entries` **0**, **0 orphans**,
+`app_settings` singleton intact, `counter` intact.
+
+**Two things worth saving future-you:**
+
+- **Order this before the first backup.** Had D.3 run first, the scratch
+  data would have been preserved in every dump from then on.
+- **`ORCHESTRATION.md` had to be amended first.** Its §6 blocker list said
+  "never touch RLS before Step 5.3" and §9 said tests target the live
+  project — both now false under Phase D, and a cold session executing
+  D.7 would have hit a hard "stop immediately" rule for doing exactly what
+  the plan told it to do. Whenever a phase is inserted, check the
+  protocol doc for rules that name step numbers.
+
 ### Attempt 9 — 2026-08-23, Phase 2 gate (re-run) on the real iPhone
 
 **Goal**: re-verify the Step 2.4 defect fixes and the Step 2.5 icon/colour
