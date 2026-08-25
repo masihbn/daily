@@ -2617,11 +2617,27 @@ Deployed for the user to re-check.
 
 ## Step 3.2c — Selectable granularity (Daily / Weekly / Monthly)
 
-**Status:** DONE (2026-08-24) — suite-verified, **awaiting device check.**
+**Status:** DONE (2026-08-24) — suite-verified **and device-verified on the
+user's iPhone, 2026-08-24. No defects.**
 
 The user asked, after testing 3.1/3.2 on their phone, to choose the trend
 chart's bucketing. Also folds in the one device defect Step 3.2b failed to
 fix.
+
+**Device check (2026-08-24), against a five-item predicted checklist:** the
+per-period target rules (3 on Weekly, 12 on Monthly, none on Daily for a
+`weekly_count`; 1700 in all three views for the `weekly_average`), the
+Daily range cap disabling 6M/1Y/All and snapping to 3M, Weight rendering as
+a line with visible points on a non-zero-based axis, and ~90 daily bars
+being legible at 390px. All confirmed good.
+
+**This closes the Weight axis defect at the third attempt**, and is the
+first device confirmation of the mark-type diagnosis — the two earlier
+axis-level fixes were both verified wrong on this same phone.
+
+*Worth noting given this step's weaker process evidence (see the honest
+accounting below): the device check is carrying more weight here than
+usual, which is exactly the posture that section asked for.*
 
 Suite: **2939 green** (2784 unit, 43 integration, 112 e2e), up from 2411 — confirmed by two consecutive full runs.
 `sw.js` `CACHE` `daily-v20` → `daily-v21`; `ASSETS` unchanged.
