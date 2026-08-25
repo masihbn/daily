@@ -3527,11 +3527,9 @@ orphans, 0 rows with a non-null `source`, `app_settings` still
 
 ## Step D.3 — Backups and a verified restore
 
-**Status:** IN PROGRESS (2026-08-25) — scripts written, restore **verified
-end to end** against the live database, suite green at 3496. **Remaining:
-the private backup repo and its scheduled workflow**, which needs the
-user's authorization (creating a repo is an account-level, hard-to-reverse
-action — `ORCHESTRATION.md` §6).
+**Status:** DONE (2026-08-25) — scripts written, restore **verified end to
+end** against the live database, and the private backup repo
+(`masihbn/daily-backups`) is live with a green scheduled workflow.
 
 **Goal.** There is more than one copy of the data, it is created without
 the user remembering to do anything, and the restore path has actually
@@ -3644,9 +3642,48 @@ everything passes a one-sided test and quietly breaks the tool:
 - `RESTORE_PLAN` is asserted to restore `trackables` before `entries`,
   since restoring entries first fails the FK on a fresh database.
 
-*Remaining, and it is the half that makes this automatic:* the private
-backup repo and its scheduled workflow. Deliberately not done
-unilaterally — creating a repo is account-level and hard to reverse.
+*The automated half — `masihbn/daily-backups`, created 2026-08-25 with
+the user's explicit authorization.* **Verified `isPrivate: true` after
+creation, not assumed** — this is the whole reason it is a second repo,
+since `masihbn/daily` is public and these dumps are weight, calorie and
+smoking history.
+
+- **Daily at 03:17 UTC**, plus `workflow_dispatch`. The odd minute is
+  deliberate: GitHub's scheduler is heavily contended on the hour and
+  jobs at `:00` are the most likely to be delayed or dropped.
+- The workflow checks out `masihbn/daily` (public, no token needed) to get
+  `scripts/backup.mjs` fresh each run — **one source of truth, no copy to
+  drift**.
+- Output is `backups/latest.json`, rewritten each run. **Git history is
+  the archive**, so `git log backups/latest.json` lists every backup ever
+  taken and any past state is one `git show` away. No pile of dated files.
+- The dump is written to `$RUNNER_TEMP` and only `mv`'d into place on
+  success. A shell redirect truncates its target immediately, so writing
+  straight to `latest.json` would have **blanked the last good backup the
+  moment the script failed** — the opposite of what a backup is for.
+- The commit uses `--allow-empty`. GitHub disables scheduled workflows
+  after ~60 days without repository activity, and a day where the data
+  happens not to change must still count, or backups switch themselves
+  off silently during the park.
+
+*Verified by running it, twice.* The first dispatch **failed**, correctly
+and usefully: `Cannot find module app/scripts/backup.mjs`, because the
+script was committed locally but never pushed. A workflow that pulls from
+GitHub cannot see local commits. After pushing, the re-run went green and
+the committed `latest.json` was fetched back and inspected — real data,
+`taken_at 2026-08-25T14:42:41Z`, `project_ref okwzgmvnsdlheuolcthn`,
+counts `{trackables: 4, entries: 0, app_settings: 1}`, with `Workout`'s
+full row present including `color`, `relog_semantic` and `target_type`.
+Checked the file contents rather than trusting the green tick.
+
+*Known follow-up, recorded in the backup repo's README and in D.7:*
+`SUPABASE_KEY` is currently the **anon** key, which works only because
+every table still has a permissive `using (true)` policy. When D.7 scopes
+those policies, anon loses read access and the dump would come back empty.
+It must be swapped for a `service_role` key — a private repo's secrets
+being the one place that key legitimately belongs. `assertNonEmptyDump`
+makes that failure loud instead of silent; **do not "fix" a failing run by
+removing that check.**
 
 ---
 
