@@ -135,13 +135,18 @@ function withoutUndefined(obj) {
 // trackable's name BEFORE issuing any network call. Both functions
 // below take the trackable row object (not a bare id) for exactly this
 // reason.
-export async function createTestEntry(trackable, { entry_date, value, note } = {}) {
+// `source` (migration 0006) is accepted here but NOT by js/api.js — the app
+// must never write that column, and tests/unit/api-entry-source.test.mjs
+// asserts it still cannot. This helper stands in for the one-off import
+// script (Step D.5), which bypasses api.js entirely, so it is the only place
+// in the codebase allowed to set it.
+export async function createTestEntry(trackable, { entry_date, value, note, source } = {}) {
   assertTestName(trackable && trackable.name);
   if (!trackable || trackable.id === undefined || trackable.id === null) {
     throw new Error('createTestEntry requires a trackable row object with an id');
   }
 
-  const body = withoutUndefined({ trackable_id: trackable.id, entry_date, value, note });
+  const body = withoutUndefined({ trackable_id: trackable.id, entry_date, value, note, source });
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/entries`, {
     method: 'POST',

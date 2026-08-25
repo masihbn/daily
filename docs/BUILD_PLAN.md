@@ -3291,7 +3291,8 @@ taken first would have preserved the scratch data in every future dump.
 
 ## Step D.1 — Lock the irreversible modelling decisions
 
-**Status:** TODO
+**Status:** DONE (2026-08-25) — all three decisions taken by the user;
+row config updated live.
 
 **Goal.** Every choice that becomes expensive once data accumulates is
 made deliberately and written down, before any data accumulates.
@@ -3328,11 +3329,25 @@ Three decisions, in order of how expensive they are to change later.
 Two smaller things to settle in the same pass:
 
 - **`Calories` is `aggregation='sum'` with `target_type='weekly_average'`
-  and `target_value=1700`.** A weekly *sum* of daily calories against an
-  *average* target is very likely wrong — a week of 1700-kcal days sums to
-  11900 against a target line at 1700. Check what the user actually wants
-  (almost certainly `aggregation='average'`) and fix it now; a mis-set
-  aggregation is invisible until the chart has enough data to look absurd.
+  and `target_value=1700`. This is NOT a bug — do not "fix" it.** An
+  earlier draft of this step called it very likely wrong; that was
+  incorrect and is corrected here so nobody acts on it. Step 3.2 already
+  resolved this: `seriesAggregationFor()` in `js/charts/weekly.js:52`
+  **overrides `aggregation` to `'average'` whenever
+  `target_type === 'weekly_average'`**, precisely so weekly totals near
+  11,900 kcal are never drawn against a target line at 1,700. The
+  function carries an explicit "do NOT correct this back to
+  `aggregation`" comment. `js/charts/bounds.js:186` does the same thing
+  unconditionally — a per-day average is the only aggregate commensurable
+  with a per-day bound.
+- **What IS worth changing: `Calories.aggregation` `'sum'` → `'average'`.**
+  Not because anything is broken today — the two overrides above mean the
+  column is never consulted for this row — but because it is a trapdoor.
+  The moment the user sets Calories' target to `'none'`, the override
+  stops applying, the weekly chart falls back to the stored
+  `aggregation`, and the bars silently jump to ~11,900 kcal weekly
+  totals. Storing `'average'` makes the fallback correct and changes
+  nothing visible now.
 - **`Weight` uses `aggregation='last'`, `direction='break'`, no bounds.**
   Confirm bounds should stay off — `APP_CONCEPT.md`'s bounded-metric case
   was written with weight in mind, and the auto-derived 10th/90th
@@ -3341,13 +3356,66 @@ Two smaller things to settle in the same pass:
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+*Decision 1 — one row per trackable per day: CONFIRMED, keep it.* The
+user was asked about the three cases it forecloses and rejected all
+three: calories are entered as the day's total, not meal-by-meal;
+cigarettes as a daily count, not as they happen; and **if workouts ever
+needed counting, the user would convert Workout to a numeric trackable
+rather than want multiple rows per day.** No time-of-day column, no event
+table. This is the decision that could not be revisited after data
+accumulates, and it is now closed.
+
+*Decision 2 — Smoking becomes numeric.* Applied live:
+`value_shape` `'boolean'` → `'numeric'`, `unit` → `'cigarettes'`,
+`aggregation` stays `'sum'` (a weekly total of cigarettes is the useful
+figure), `direction` stays `'break'`, `relog_semantic` stays `'state'`.
+Safe to do as a plain data update rather than a migration: this is row
+config, not schema, and Smoking had **0 entries** after D.0, so no stored
+value had to be reinterpreted.
+
+*Decision 3 — absence vs. zero for the one remaining boolean
+(`Workout`): absence means "not done".* Recorded rather than changed;
+this is the existing behaviour (clearing a boolean day is a `DELETE`,
+see `js/aggregate.js:187`) and it is correct for a `build` habit.
+
+*Recorded caveat, raised by the user:* they may later want Workout as a
+numeric count if two-a-days become common. Flagged as the **lossy**
+direction — every stored `1` means "done", not "one session", so a
+converted history undercounts every day that actually had two. The
+recommendation given, and accepted for now, was to **keep it boolean**:
+the target is `weekly_count 3`, which counts days rather than sessions,
+and one-tap logging is a material part of whether daily logging survives
+three months. If this is revisited, revisit it *before* more history
+accumulates, not after.
+
+*Also applied — `Calories.aggregation` `'sum'` → `'average'`.* Not a
+visible change (both `weekly.js` and `bounds.js` already override it);
+done to make the fallback correct if the target is ever set to `'none'`.
+See the corrected note above — the original draft of this step wrongly
+called the existing config a bug.
+
+*Verified after (direct SQL), the four trackables now read:*
+
+| name | shape | unit | aggregation | direction | target | bounds |
+|---|---|---|---|---|---|---|
+| Workout | boolean | — | count | build | `weekly_count` 3 | off |
+| Calories | numeric | kcal | average | break | `weekly_average` 1700 | manual 1700–2100 |
+| Weight | numeric | kg | last | break | none | off |
+| Smoking | numeric | cigarettes | sum | break | none | off |
+
+*Deferred to after D.5, deliberately:* turning `bounds_enabled` on for
+`Weight` with `bounds_mode='auto'`. Auto-derivation is a 10th/90th
+percentile over `app_settings.rolling_window_days` and needs 12+ readings
+to mean anything; Weight currently has zero. The import supplies them,
+and this doubles as the first real exercise of the auto-bounds path,
+which has never run (see D.0).
 
 ---
 
 ## Step D.2 — Migration `0006`: entry provenance
 
-**Status:** TODO
+**Status:** DONE (2026-08-25) — applied as **`0006` + `0007`**; suite green
+at 3465.
 
 **Goal.** Every entry row records where it came from, so the CSV import
 is reversible in one statement.
@@ -3380,7 +3448,80 @@ Supabase MCP `apply_migration` tool; `docs/DATA_MODEL.md` updated.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **3465 green** — 3292 unit, 47 integration, 126
+e2e (up from 3455). Two migrations were applied, `0006` and then `0007`
+fixing a real defect in `0006` found by the new tests. `sw.js` `CACHE`
+bumped `daily-v23` → `daily-v24` (`js/api.js` gained a comment block, and
+the bump rule is unconditional).
+
+*A non-obvious behaviour discovered here, which changed the design:* the
+plan originally specified the undo as
+`delete from entries where source = '<batch>'`. **That is wrong**, and
+the reason is worth stating: PostgREST's `resolution=merge-duplicates`
+compiles to `INSERT ... ON CONFLICT DO UPDATE SET <only the request
+body's columns>`, and `js/api.js` never sends `source` — so on conflict
+the column is **left unchanged**. An imported day the user later corrects
+in the app keeps its batch id, and the naive undo would delete the
+correction along with the import. A `BEFORE UPDATE` trigger cannot
+distinguish the two cases either: in that form `NEW.source` already
+carries the old value.
+
+The safe undo therefore also scopes on `updated_at`, which the existing
+`set_updated_at` trigger bumps on that same conflict-update:
+
+```sql
+delete from public.entries
+where source = '<batch>' and updated_at < '<batch finish timestamp>';
+```
+
+**Both halves were verified live before being written down**, not
+reasoned about: `source` survives the upsert, and `updated_at` advances.
+The first attempt at the second check returned `false` and looked like a
+design failure — the cause was that both writes shared one transaction
+and `now()` is transaction-start time. Re-run as separate transactions it
+advanced by 13.3s. Recorded because the flawed version of that test was
+convincingly wrong.
+
+*Verified by unit tests (`tests/unit/api-entry-source.test.mjs`, 6
+cases):* `assertValidEntry` rejects `source`, **including `source: null`**
+— an explicit null would still reach the request body and, via
+merge-duplicates, overwrite an imported row's batch id, which is the
+exact corruption the guard exists to prevent. The four legal keys still
+pass, and `upsertEntry({..., source})` is asserted to issue **zero**
+fetches (the call count, not just the throw), with a companion case
+proving the stub does get used for a legal entry — otherwise "zero calls"
+would be vacuous. These are deliberately redundant with the existing
+generic "unknown key rejected" test: that one keeps passing if someone
+*adds* `source` to `ENTRY_KEYS`, which is the actual failure mode.
+
+*Verified by integration tests (`tests/integration/entry-source.test.mjs`,
+4 cases, live database):* an app-written entry (routed through
+`js/api.js`, not the helper) has `source = null`; the blank guard is
+fuzzed with `''`, `'   '`, `'\t'` and `'\n  '`; the undo trap above is
+asserted end to end; and the safe-undo predicate is shown to select the
+two untouched imported rows while sparing the hand-corrected one, with
+the naive predicate asserted to take all three so the file documents
+*why*.
+
+*Bug found by these tests, now fixed and permanently covered:*
+**`0006`'s guard used `btrim(source)`, and `btrim(text)` trims only
+spaces — not tabs or newlines.** A source of `E'\t'` passed. Such a row
+matches neither `source is null` nor `source = '<batch>'`: silently
+unattributable and unremovable, exactly the state the guard existed to
+prevent. Migration **`0007`** replaces it with `source ~ '[^[:space:]]'`.
+Judged **code wrong, test right**. `0006` was left unedited with a
+pointer comment, so the migration list stays an honest record of what was
+applied in what order.
+
+*One test of mine was also wrong* — the `upsertEntry` stub returned `[]`,
+which `js/api.js` correctly treats as `ApiError EMPTY_RESPONSE`, since a
+`return=representation` request that comes back empty means a save that
+reported success without persisting. Fixed the stub, not the code.
+
+*Post-run isolation check (direct SQL):* `trackables` 4 (`Workout,
+Calories, Weight, Smoking`), `entries` 0, **0** `__test__` residue, 0
+orphans, 0 rows with a non-null `source`, `app_settings` still
+`rolling_window_days = 90`. `get_advisors(security)`: **empty**.
 
 ---
 

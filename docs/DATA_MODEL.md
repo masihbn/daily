@@ -7,6 +7,12 @@ this schema implements; this file has the schema detail.
 Applied to the live Supabase project (`okwzgmvnsdlheuolcthn`):
 - `supabase/migrations/0002_skills_tracker.sql` (2026-08-21) — original
   `skills` / `skill_entries` tables.
+- `supabase/migrations/0006_entry_source.sql` (2026-08-25) — added
+  `entries.source` for import provenance (Step D.2).
+- `supabase/migrations/0005_target_average_and_icon.sql` (2026-08-23) —
+  added the `weekly_average` target type and the `icon` column.
+- `supabase/migrations/0004_replace_only_relog.sql` (2026-08-23) — made
+  `'state'` the `relog_semantic` default and converted every row.
 - `supabase/migrations/0003_trackables.sql` (2026-08-22) — renamed
   `skills` → `trackables` and `skill_entries` → `entries` (and
   `skill_id` → `trackable_id`), added the columns needed for flexible
@@ -99,6 +105,40 @@ One row per day a trackable has a logged value.
 | `note`         | text        | nullable free-text note                                    |
 | `created_at`   | timestamptz | default `now()`                                             |
 | `updated_at`   | timestamptz | default `now()` — kept current automatically by the `set_updated_at` trigger (see below); the app never needs to set it |
+| `source`       | text        | nullable provenance (migration `0006`, 2026-08-25). **`NULL` = logged in the app**; non-null = the id of the import batch that created the row, e.g. `'import:calories-2026-08-25'`. Check constraint `entries_source_nonblank_check` forbids an empty/whitespace value |
+
+**`source` — read this before writing an import or touching
+`assertValidEntry`.** The column exists so a bulk CSV import is
+reversible. Two non-obvious properties, both verified live on 2026-08-25
+rather than assumed:
+
+1. **The app never writes it, and must not start.** `ENTRY_KEYS` in
+   `js/api.js` rejects any key outside
+   `trackable_id`/`entry_date`/`value`/`note`, so "logged in the app" is
+   exactly "`source is null`". Imports are one-off scripts that bypass
+   `api.js` entirely.
+2. **An app edit to an imported day PRESERVES the batch id.** PostgREST's
+   `resolution=merge-duplicates` compiles to `INSERT ... ON CONFLICT DO
+   UPDATE SET <only the columns in the request body>`; `source` is never
+   in the body, so it is left unchanged. A `BEFORE UPDATE` trigger cannot
+   distinguish this case either — in that form `NEW.source` already
+   carries the old value.
+
+Consequence: **the naive undo is wrong.**
+
+```sql
+-- WRONG: also deletes imported days the user later corrected by hand
+delete from public.entries where source = '<batch>';
+
+-- RIGHT: updated_at is bumped by the set_updated_at trigger on every
+-- update, so this spares any row touched after the import finished.
+delete from public.entries
+where source = '<batch>'
+  and updated_at < '<the batch's finish timestamp>';
+```
+
+Record the finish timestamp when running an import, or only the naive
+form is available.
 
 **Unique constraint**: `entries_trackable_id_entry_date_key` on
 `(trackable_id, entry_date)` — enforces one entry per trackable per

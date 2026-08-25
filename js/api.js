@@ -19,6 +19,25 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const ID_RE = /^\d+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// The ONLY keys the app may send for an entry. Anything else throws a
+// ValidationError before a request is issued.
+//
+// `updated_at` is absent because a database trigger owns it (DATA_MODEL.md).
+//
+// `source` is absent DELIBERATELY, and must stay absent. Migration 0006 added
+// entries.source for provenance, with the contract "NULL = logged in the app,
+// non-null = the id of the import batch that created the row". The app is the
+// NULL case by definition, so it has nothing to say about this column. An
+// import is a one-off script run outside the app and does not go through
+// api.js at all. Adding `source` here would let a UI bug stamp a batch id onto
+// a hand-logged row, or blank one off an imported row — either way corrupting
+// the only thing that makes the import reversible.
+//
+// Related behaviour worth knowing before you touch upsertEntry(): because
+// `source` is never in the request body, PostgREST's merge-duplicates upsert
+// leaves it UNCHANGED on conflict. Editing an imported day in the app
+// therefore keeps its batch id. That is why migration 0006's undo query is
+// scoped by `updated_at` as well as by `source` — verified live, 2026-08-25.
 const ENTRY_KEYS = ['trackable_id', 'entry_date', 'value', 'note'];
 
 export class ValidationError extends Error {
