@@ -3689,7 +3689,20 @@ removing that check.**
 
 ## Step D.4 — Move the test suite off the production database
 
-**Status:** TODO
+**Status:** IN PROGRESS (2026-08-25) — **all plumbing built, tested and
+fail-closed.** Blocked only on the second Supabase project itself, which
+needs the user (the Supabase MCP connection is scoped to one project and
+the CLI is not installed on this machine).
+
+**To finish, once the project exists — three actions:**
+
+1. Run `scripts/bootstrap-test-project.sql` in the new project's SQL Editor.
+2. Set `DAILY_TEST_SUPABASE_URL` and `DAILY_TEST_SUPABASE_KEY`.
+3. **Delete `--allow-production` from `package.json`'s `test:integration`
+   script.** A test in `tests/unit/test-target.test.mjs` deliberately fails
+   the moment that flag disappears, as the reminder to delete the test and
+   mark this step `DONE` — so the interim escape cannot quietly become
+   permanent.
 
 **Goal.** `npm test` cannot touch the user's real data, by construction
 rather than by care.
@@ -3729,7 +3742,68 @@ and its own keepalive arrangement.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after the plumbing landed: **3548 green** — 3370 unit, 47
+integration, 131 e2e (up from 3531). New: `tests/helpers/test-target.mjs`,
+17 unit cases, and an env override in `js/config.js`.
+
+*What was built:*
+
+- **`tests/helpers/test-target.mjs` — `resolveTestTarget()`, fail-closed.**
+  With `DAILY_TEST_SUPABASE_URL` + `DAILY_TEST_SUPABASE_KEY` set, the tier
+  uses that project. Without them it **throws**. There is deliberately no
+  silent fallback to `js/config.js`: a fallback that quietly points
+  destructive tests at production is the exact hazard being removed, and it
+  would be invisible on every future run.
+- **`js/config.js` gained a guarded env override.** Ten lines, wrapped in
+  `typeof process === 'undefined'`, so the browser always gets the
+  production literals. Stated plainly as a tradeoff — it puts a
+  test-shaped concern into app code — but the alternatives were
+  dependency-injecting the URL through every module that reaches `api.js`,
+  or a build step to swap constants, and "no build step" is foundational
+  here.
+- **`run-tier.mjs` resolves the target before any test file loads.**
+  `node:test`'s `run()` executes each file in a child process that inherits
+  `process.env`, so setting the variables there is what actually reaches
+  `config.js` — doing it later would be too late, since `config.js`
+  resolves its constants at import time. Only the integration tier is
+  gated; the unit tier is pure and e2e intercepts every REST call, and
+  gating those too would be noise that trains people to ignore the check.
+
+*The interim escape, and how it is prevented from becoming permanent.*
+Until the second project exists, `--allow-production` on `run-tier.mjs`
+keeps the old behaviour so the suite is not red while the user creates the
+project. It is a **CLI flag, not an env var**, because `VAR=x cmd` is not
+portable to Windows and this project forbids dependencies (so no
+`cross-env`). Every run prints an unmissable banner naming the project and
+the exact fix. And `tests/unit/test-target.test.mjs` contains a case that
+asserts the flag is *still present in `package.json`* — it fails the moment
+the flag is removed, with a message saying to delete the test and mark this
+step `DONE`. An interim escape nobody is reminded about is how one becomes
+permanent.
+
+*Verified by unit tests (17 cases):* refuses with an actionable message
+when nothing is set; refuses when **only one** of the two vars is set
+(half-configured is an error, not a fallback — someone who set one meant
+to set both); treats whitespace-only values as unset; accepts and trims a
+real target; **refuses a "test" URL that is actually the production
+project**, recognised by ref rather than merely avoided by omission, since
+pasting production's URL is the single most plausible mistake in this
+step; rejects non-Supabase URLs; and — the precedence rule — **a configured
+test target WINS over `--allow-production`**, so leaving the flag in place
+by accident cannot send the tier back to production. Plus standing
+invariants on `config.js`: the production literals are asserted exactly,
+`process` is asserted to be guarded, and `service_role`/`sb_secret_` are
+asserted absent.
+
+*Verified by running it, not only by unit test:* with no flag and no vars,
+`node tests/helpers/run-tier.mjs integration` exits 1 printing the refusal.
+With a bogus test target set **and** `--allow-production` passed, the
+runner reported `integration tier target: test project
+zzzznotarealproject` — confirming precedence works in the real code path,
+not just in the resolver.
+
+*Still to do — see the Status block above.* The remaining work is
+creating the project, running the bootstrap SQL, and deleting the flag.
 
 ---
 

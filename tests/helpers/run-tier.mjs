@@ -63,6 +63,42 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// Step D.4 — decide which Supabase project the destructive tier may touch,
+// BEFORE any test file is loaded.
+//
+// node:test's run() executes each file in a child process that inherits
+// process.env, so setting the variables here is what actually reaches
+// js/config.js when the child imports it. Doing this any later would be too
+// late: config.js resolves its constants at import time.
+//
+// Only the integration tier talks to Supabase. The unit tier is pure and the
+// e2e tier intercepts every REST call, so neither needs a target — and
+// requiring one there would be noise that trains people to ignore the check.
+if (tier === 'integration') {
+  const { resolveTestTarget, productionWarningLines } = await import('./test-target.mjs');
+  const { SUPABASE_URL, SUPABASE_ANON_KEY } = await import('../../js/config.js');
+
+  let target;
+  try {
+    target = resolveTestTarget(process.env, {
+      productionUrl: SUPABASE_URL,
+      productionKey: SUPABASE_ANON_KEY,
+      allowProduction: process.argv.includes('--allow-production'),
+    });
+  } catch (err) {
+    console.error(`\n${err.message}\n`);
+    process.exit(1);
+  }
+
+  if (target.mode === 'production') {
+    for (const line of productionWarningLines(target.ref)) console.error(line);
+  } else {
+    process.env.DAILY_SUPABASE_URL = target.url;
+    process.env.DAILY_SUPABASE_KEY = target.key;
+    console.log(`integration tier target: test project ${target.ref}`);
+  }
+}
+
 let pass = 0;
 let fail = 0;
 let sawError = false;
