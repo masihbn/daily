@@ -24,12 +24,61 @@ import {
   segmentVisibility,
   boundsModel,
   boundsAxisFor,
+  boundsSeries,
+  boundsPeriodKeys,
+  maxBridgeBucketsFor,
+  boundsMeaningText,
   DEFAULT_ROLLING_WINDOW_DAYS,
   MIN_BOUND_READINGS,
   MAX_BRIDGE_DAYS,
 } from '../../js/charts/bounds.js';
-import { deriveBounds } from '../../js/aggregate.js';
-import { addDays, rangeDays, parseLocal } from '../../js/dates.js';
+import { deriveBounds, rollup, fillSeries } from '../../js/aggregate.js';
+import {
+  addDays,
+  rangeDays,
+  parseLocal,
+  isoWeeksInRange,
+  monthsInRange,
+  isoWeekKey,
+  startOfIsoWeek,
+} from '../../js/dates.js';
+
+// ===========================================================================
+// CONTRACT-3.3b — Granularity on the Range (bounds) chart. Cases below are
+// added ONLY (nothing above this point is edited) and are written strictly
+// against CONTRACT-3.3b.md §2 and §4.1 (cases Q1 through Q8, labelled N12+
+// to continue this file's existing N-numbering). The implementation
+// (boundsSeries, maxBridgeBucketsFor, boundsMeaningText, the `period`
+// handling inside boundsModel, and the bounds-period handling in
+// js/views/detail.js) was written in parallel by the orchestrator and has
+// NOT been read while writing these cases — expectations are re-derived from
+// the contract and from the REAL js/aggregate.js (rollup, fillSeries) and
+// js/dates.js (isoWeeksInRange, monthsInRange, isoWeekKey, startOfIsoWeek),
+// never hardcoded and trusted, for the same reason N3/N14 exist: a wrong
+// hardcoded fixture becomes a wrong test the implementation gets "fixed" to
+// satisfy.
+//
+// Contract correction (test-author brief, not read from the implementation):
+// §2.3 says boundsSeries buckets entries with rollup(entries, period,
+// 'average'). Incomplete — entries are first deduplicated by entry_date,
+// FIRST-WINS, and only then rolled up (the same first-wins rule Step 3.3
+// pinned for boundsModel's day-granularity duplicate handling, N8's
+// "duplicate entry_date" case). N15 below tests this explicitly.
+//
+// NOTE on boundsPeriodKeys: CONTRACT-3.3b.md §2.1 describes a
+// `boundsPeriodKeys(period, from, to)` helper but — unlike
+// maxBridgeBucketsFor, which the contract explicitly shows as
+// `export function maxBridgeBucketsFor(period)` — never shows it with an
+// `export` keyword, and it is not named in the required §4.1 case list
+// (Q1-Q8 name boundsSeries, maxBridgeBucketsFor, boundsMeaningText and
+// boundsModel, never boundsPeriodKeys). Importing an unexported name would
+// throw a SyntaxError at module load and take down every case in this file,
+// not just one, so it is deliberately NOT imported here. Its behaviour is
+// covered indirectly and adequately through boundsSeries's own key-list
+// assertions below (N14), which check the exact same rangeDays /
+// isoWeeksInRange / monthsInRange correspondence §2.1 describes. Flagged in
+// the report as a contract ambiguity, not guessed at.
+// ===========================================================================
 
 // --- shared fixture builders -----------------------------------------------
 
@@ -929,6 +978,570 @@ describe('N11 — boundsModel totality: a hostile cross-product across all four 
     for (const badTo of badTodays) {
       it(`to=${JSON.stringify(badTo)} throws`, () => {
         assert.throws(() => boundsModel({ trackable: T_OK, entries: [], from: null, to: badTo }), RangeError);
+      });
+    }
+  });
+});
+
+// ===========================================================================
+// N12 — maxBridgeBucketsFor (Q1)
+// ===========================================================================
+
+describe('N12 — maxBridgeBucketsFor: gap rule per period (Q1)', () => {
+  it("'day' -> 7, and equals MAX_BRIDGE_DAYS (the contract ties the two together explicitly)", () => {
+    assert.equal(maxBridgeBucketsFor('day'), 7);
+    assert.equal(maxBridgeBucketsFor('day'), MAX_BRIDGE_DAYS);
+  });
+
+  it("'week' -> 0", () => {
+    assert.equal(maxBridgeBucketsFor('week'), 0);
+  });
+
+  it("'month' -> 0", () => {
+    assert.equal(maxBridgeBucketsFor('month'), 0);
+  });
+
+  for (const bad of [undefined, null, 'x', 'year', 42, {}, [], true, NaN]) {
+    it(`unknown period ${JSON.stringify(bad)} -> 0 (conservative: break rather than invent a connection), never throws`, () => {
+      let result;
+      assert.doesNotThrow(() => {
+        result = maxBridgeBucketsFor(bad);
+      });
+      assert.equal(result, 0);
+    });
+  }
+
+  it('called with no arguments at all -> 0, never throws', () => {
+    let result;
+    assert.doesNotThrow(() => {
+      result = maxBridgeBucketsFor();
+    });
+    assert.equal(result, 0);
+  });
+});
+
+// ===========================================================================
+// N13 — segmentVisibility: back-compat and the new maxBridge parameter (Q2)
+// ===========================================================================
+
+describe('N13 — segmentVisibility: back-compat with one argument, and the new maxBridge parameter (Q2)', () => {
+  it('one-argument call equals the two-argument call with maxBridge=MAX_BRIDGE_DAYS explicitly — proves the documented default `maxBridge = MAX_BRIDGE_DAYS` actually holds, across several shapes (all-real, a bridgeable gap, the exact boundary, one past it, empty, singleton)', () => {
+    const fixtures = [
+      [1, 2, 3, 4],
+      [1, null, 3],
+      [1, ...Array(MAX_BRIDGE_DAYS).fill(null), 2],
+      [1, ...Array(MAX_BRIDGE_DAYS + 1).fill(null), 2],
+      [],
+      [5],
+      [null, null, 5, null, null],
+    ];
+    for (const values of fixtures) {
+      assert.deepEqual(
+        segmentVisibility(values),
+        segmentVisibility(values, MAX_BRIDGE_DAYS),
+        `mismatch for ${JSON.stringify(values)}`
+      );
+    }
+  });
+
+  it('this test file\'s existing N7b describe block (26 cases) is untouched by this change — sanity check that a representative N7b case still holds unedited', () => {
+    // Not a new assertion of substance (N7b already covers this exhaustively)
+    // — just documents that back-compat is additionally guaranteed by the
+    // pre-existing suite, per the contract's "26 existing N7b cases must
+    // pass untouched" requirement.
+    assert.deepEqual(segmentVisibility([1, null, 3]), [true, true]);
+  });
+
+  it('maxBridge=0: a single missing day between two readings breaks BOTH segments spanning the gap — contrasts directly with the default-arg case above, which bridges the identical shape ([1, null, 3])', () => {
+    assert.deepEqual(segmentVisibility([1, null, 3], 0), [false, false]);
+  });
+
+  it('maxBridge=0: adjacent real values (missingDays === 0) still bridge — the maxBridge floor never overrides an ACTUAL zero-day gap, per the "true iff missingDays === 0, or shouldBridge(...)" rule', () => {
+    assert.deepEqual(segmentVisibility([1, 2, 3], 0), [true, true]);
+  });
+
+  it('maxBridge=0: a longer gap also breaks, every affected segment false', () => {
+    assert.deepEqual(segmentVisibility([1, null, null, null, 4], 0), [false, false, false, false]);
+  });
+
+  it('a custom maxBridge of 1 bridges a 1-day gap but not a 2-day gap (the parameter is genuinely threaded through, not hardcoded to 0 or MAX_BRIDGE_DAYS)', () => {
+    assert.deepEqual(segmentVisibility([1, null, 3], 1), [true, true]);
+    assert.deepEqual(segmentVisibility([1, null, null, 4], 1), [false, false, false]);
+  });
+
+  it('never throws with a maxBridge argument of a hostile shape, and degrades to the "break on any gap" behaviour to be conservative', () => {
+    for (const bad of [NaN, -1, 'x', null, {}, []]) {
+      let result;
+      assert.doesNotThrow(() => {
+        result = segmentVisibility([1, null, 3], bad);
+      }, `threw for maxBridge=${JSON.stringify(bad)}`);
+      assert.equal(result.length, 2);
+      for (const v of result) assert.equal(typeof v, 'boolean');
+    }
+  });
+});
+
+// ===========================================================================
+// N14 — boundsSeries: delegates to the real rollup(), fills gaps with null
+// (never 0), keys match dates.js exactly (Q3)
+// ===========================================================================
+
+describe('N14 — boundsSeries: delegates to the real rollup(), fills gaps with null never 0, keys match dates.js exactly (Q3)', () => {
+  const from = '2026-06-01';
+  const to = '2026-06-10';
+  const entries = [
+    { entry_date: '2026-06-02', value: 80 },
+    { entry_date: '2026-06-03', value: 82 },
+    { entry_date: '2026-06-05', value: 84 },
+    { entry_date: '2026-06-09', value: 90 },
+  ];
+
+  it("period 'day': keys === rangeDays(from, to) exactly", () => {
+    const { keys } = boundsSeries(entries, 'day', from, to);
+    assert.deepEqual(keys, rangeDays(from, to));
+  });
+
+  it("period 'day': values equal the real rollup(entries,'day','average')+fillSeries(...,null) output, computed independently in this test — not hardcoded, not trusted from boundsSeries's own output", () => {
+    const keys = rangeDays(from, to);
+    const buckets = rollup(entries, 'day', 'average');
+    const expected = fillSeries(buckets, keys, null).map((s) => s.value);
+    const { values } = boundsSeries(entries, 'day', from, to);
+    assert.deepEqual(values, expected);
+
+    // Concretely: 2026-06-01 has no entry -> null, never 0.
+    const idx = keys.indexOf('2026-06-01');
+    assert.equal(values[idx], null);
+    assert.notEqual(values[idx], 0);
+  });
+
+  it("period 'week': keys === isoWeeksInRange(from, to) exactly, values match the real rollup(entries,'week','average')+fillSeries(...,null)", () => {
+    const keys = isoWeeksInRange(from, to);
+    const buckets = rollup(entries, 'week', 'average');
+    const expected = fillSeries(buckets, keys, null).map((s) => s.value);
+    const { keys: gotKeys, values } = boundsSeries(entries, 'week', from, to);
+    assert.deepEqual(gotKeys, keys);
+    assert.deepEqual(values, expected);
+  });
+
+  it("period 'month': keys === monthsInRange(from, to) exactly, values match the real rollup(entries,'month','average')+fillSeries(...,null)", () => {
+    const keys = monthsInRange(from, to);
+    const buckets = rollup(entries, 'month', 'average');
+    const expected = fillSeries(buckets, keys, null).map((s) => s.value);
+    const { keys: gotKeys, values } = boundsSeries(entries, 'month', from, to);
+    assert.deepEqual(gotKeys, keys);
+    assert.deepEqual(values, expected);
+  });
+
+  it('an unlogged bucket is null in every period, never 0 (the fillSeries honesty rule)', () => {
+    const { values: dayValues } = boundsSeries(entries, 'day', from, to);
+    assert.ok(dayValues.includes(null));
+    assert.ok(!dayValues.includes(0), 'an unlogged bucket must never silently become 0');
+  });
+
+  it('never throws for a hostile spread of entry shapes, at any of the three DOCUMENTED periods (malformed entries must be sanitized before reaching rollup, per §2.3)', () => {
+    const hostile = [[], [null], [{}], [{ entry_date: 'oops', value: 1 }], [{ entry_date: '2026-06-01', value: 'x' }]];
+    for (const badEntries of hostile) {
+      for (const period of ['day', 'week', 'month']) {
+        assert.doesNotThrow(
+          () => boundsSeries(badEntries, period, from, to),
+          `period=${period} entries=${JSON.stringify(badEntries)}`
+        );
+      }
+    }
+  });
+
+  // NOT asserted here, deliberately: what boundsSeries does for a period
+  // OTHER than 'day'/'week'/'month'. §2.1 says the underlying bucketing
+  // ("anything else -> throw RangeError") applies to boundsPeriodKeys;
+  // §2.3 separately says boundsSeries "[n]ever throws except on a malformed
+  // to/from reaching dates.js" — silent on whether an invalid PERIOD
+  // reaching boundsSeries counts as that. This is not one of the required
+  // §4.1 cases (Q1-Q8 only exercise day/week/month), resolving it either way
+  // would require running the real implementation to see which reading it
+  // followed, and that is exactly the implementation-derived guessing this
+  // Test Author is barred from doing. Flagged in the report as a contract
+  // ambiguity rather than asserted in either direction.
+});
+
+// ===========================================================================
+// N15 — boundsSeries: entries are deduplicated by entry_date, FIRST-WINS,
+// before rollup — the §2.3 correction (test-author brief)
+// ===========================================================================
+
+describe('N15 — boundsSeries: dedup-then-rollup (first-wins on duplicate entry_date, THEN average across distinct days)', () => {
+  it("period 'day': a duplicate entry_date yields the FIRST value, not rollup('average')'s mean of both", () => {
+    const from = '2026-06-01';
+    const to = '2026-06-03';
+    const entries = [
+      { entry_date: '2026-06-02', value: 80 },
+      { entry_date: '2026-06-02', value: 100 }, // duplicate date, later in the array
+    ];
+    const { keys, values } = boundsSeries(entries, 'day', from, to);
+    const idx = keys.indexOf('2026-06-02');
+    assert.equal(values[idx], 80, 'first-wins: value must be the FIRST entry for that date (80)');
+    assert.notEqual(values[idx], 90, 'must NOT be the mean of 80 and 100 (what rollup(\'average\') alone, with no dedup, would give)');
+  });
+
+  it("period 'week': a week containing a duplicated day AND one other DISTINCT day still averages the two distinct days — dedup is per entry_date, not across the whole week; built with startOfIsoWeek/addDays so it needs no assumption about which weekday a hardcoded date falls on", () => {
+    const weekStart = startOfIsoWeek('2026-07-06');
+    const day1 = weekStart;
+    const day2 = addDays(weekStart, 2);
+    const from = weekStart;
+    const to = addDays(weekStart, 6);
+    const entries = [
+      { entry_date: day1, value: 80 },
+      { entry_date: day1, value: 100 }, // duplicate of day1, dropped by first-wins
+      { entry_date: day2, value: 84 },
+    ];
+    // After dedup: {day1: 80, day2: 84} -> average of the two DISTINCT days
+    // = (80 + 84) / 2 = 82. NOT (80 + 100 + 84) / 2 = 132, and NOT
+    // (80 + 100 + 84) / 3 = 88 (what rollup('average') alone would give,
+    // since it divides by b.days.size which would still be 2 distinct
+    // days but b.sum would wrongly include the dropped 100).
+    const { keys, values } = boundsSeries(entries, 'week', from, to);
+    const weekKey = isoWeekKey(weekStart);
+    const idx = keys.indexOf(weekKey);
+    assert.equal(values[idx], 82, 'expected the mean of the two DISTINCT days (80, 84), unaffected by the dropped duplicate (100)');
+  });
+});
+
+// ===========================================================================
+// N16 — Q4: THE DECISION-1 GUARD, highest-value case in this file — bounds
+// do NOT move when the period changes
+// ===========================================================================
+
+describe('N16 — Q4: THE DECISION-1 GUARD — model.bounds.lower/upper are identical across all three periods, for the same raw entries', () => {
+  const ASOF = '2026-06-01';
+  // 40 distinct daily readings ending at ASOF, spread well past
+  // MIN_BOUND_READINGS(12) so bounds_mode:'auto' resolves 'ok', and well
+  // past a single week/month so the week/month bucketing is not trivial.
+  const entries = readingsEndingAt(ASOF, 40, (i) => 60 + ((i * 13) % 40));
+  const from = addDays(ASOF, -49);
+  const to = ASOF;
+
+  it('model.bounds.lower and model.bounds.upper are IDENTICAL across period day/week/month', () => {
+    const dayModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'day' });
+    const weekModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'week' });
+    const monthModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'month' });
+
+    assert.equal(dayModel.bounds.status, 'ok');
+    assert.equal(weekModel.bounds.status, 'ok');
+    assert.equal(monthModel.bounds.status, 'ok');
+
+    assert.equal(weekModel.bounds.lower, dayModel.bounds.lower);
+    assert.equal(monthModel.bounds.lower, dayModel.bounds.lower);
+    assert.equal(weekModel.bounds.upper, dayModel.bounds.upper);
+    assert.equal(monthModel.bounds.upper, dayModel.bounds.upper);
+  });
+
+  it('the shared bounds equal deriveBounds() computed directly over the RAW entries (an independent computation, not boundsModel calling itself) — proves the band is not being re-derived from any aggregated (weekly/monthly) series', () => {
+    const expected = deriveBounds(entries, DEFAULT_ROLLING_WINDOW_DAYS);
+    const weekModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'week' });
+    const monthModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'month' });
+    assert.equal(weekModel.bounds.lower, expected.lower);
+    assert.equal(weekModel.bounds.upper, expected.upper);
+    assert.equal(monthModel.bounds.lower, expected.lower);
+    assert.equal(monthModel.bounds.upper, expected.upper);
+  });
+});
+
+// ===========================================================================
+// N17 — Q5: period 'day' is unchanged — both internal-consistency AND
+// independent observable-behaviour checks
+// ===========================================================================
+
+describe("N17 — Q5: period 'day' back-compat (internal consistency, PLUS independently-checked observable behaviour)", () => {
+  const from = '2026-06-01';
+  const to = '2026-06-10';
+  const entries = [
+    { entry_date: '2026-06-02', value: 80 },
+    { entry_date: '2026-06-02', value: 999 }, // duplicate, first-wins
+    { entry_date: '2026-06-05', value: 84 },
+  ];
+
+  it('internal consistency: boundsModel(argsWithoutPeriod) deep-equals boundsModel({...args, period: "day"}) — NOTE: this alone proves only that the two call shapes agree with EACH OTHER (both run the new period-aware code path); it cannot prove the old day-view behaviour was preserved. The independent checks below are what actually pin that.', () => {
+    const argsWithoutPeriod = { trackable: T_MANUAL_OK, entries, from, to };
+    const withoutPeriod = boundsModel(argsWithoutPeriod);
+    const withDayPeriod = boundsModel({ ...argsWithoutPeriod, period: 'day' });
+    assert.deepEqual(withoutPeriod, withDayPeriod);
+  });
+
+  it('INDEPENDENT observable check: one point per calendar day in [from,to] — model.dates equals rangeDays(from,to) exactly, and values/zones are the same length', () => {
+    const model = boundsModel({ trackable: T_MANUAL_OK, entries, from, to });
+    const expectedDates = rangeDays(from, to);
+    assert.deepEqual(model.dates, expectedDates);
+    assert.equal(model.values.length, expectedDates.length);
+    assert.equal(model.zones.length, expectedDates.length);
+  });
+
+  it('INDEPENDENT observable check: duplicate entry_date is first-wins at the omitted-period call site (already pinned generally by N8; re-asserted here specifically)', () => {
+    const model = boundsModel({ trackable: T_MANUAL_OK, entries, from, to });
+    const idx = rangeDays(from, to).indexOf('2026-06-02');
+    assert.equal(model.values[idx], 80);
+    assert.notEqual(model.values[idx], 999);
+  });
+
+  it('INDEPENDENT observable check: gaps are bridged up to 7 days — segmentVisibility(model.values) with the default bridge distance treats the 2-day gap between 06-02 and 06-05 as bridgeable', () => {
+    const model = boundsModel({ trackable: T_MANUAL_OK, entries, from, to });
+    const seg = segmentVisibility(model.values);
+    const dates = rangeDays(from, to);
+    const i02 = dates.indexOf('2026-06-02');
+    const i05 = dates.indexOf('2026-06-05');
+    for (let i = i02; i < i05; i++) {
+      assert.equal(seg[i], true, `expected segment ${i} (inside the 2-day gap, well under the 7-day bridge) to be bridged`);
+    }
+  });
+});
+
+// ===========================================================================
+// N18 — Q6: boundsMeaningText — verbatim strings, unit appending, no-unit
+// ===========================================================================
+
+describe('N18 — Q6: boundsMeaningText — all three strings verbatim, unit appended, no-unit case', () => {
+  it("day -> 'Daily value'", () => {
+    assert.equal(boundsMeaningText('day', null), 'Daily value');
+  });
+  it("week -> 'Weekly average'", () => {
+    assert.equal(boundsMeaningText('week', null), 'Weekly average');
+  });
+  it("month -> 'Monthly average'", () => {
+    assert.equal(boundsMeaningText('month', null), 'Monthly average');
+  });
+
+  it("unit appended with ' · ' when unit is a non-empty string, for all three periods", () => {
+    assert.equal(boundsMeaningText('day', 'kg'), 'Daily value · kg');
+    assert.equal(boundsMeaningText('week', 'kcal'), 'Weekly average · kcal');
+    assert.equal(boundsMeaningText('month', 'kg'), 'Monthly average · kg');
+  });
+
+  it('no-unit case: unit omitted, null, undefined, or empty string -> no " · " suffix at all', () => {
+    assert.equal(boundsMeaningText('day'), 'Daily value');
+    assert.equal(boundsMeaningText('day', null), 'Daily value');
+    assert.equal(boundsMeaningText('day', undefined), 'Daily value');
+    assert.equal(boundsMeaningText('day', ''), 'Daily value');
+    assert.ok(!boundsMeaningText('day', '').includes('·'));
+  });
+});
+
+// ===========================================================================
+// N19 — Q7: a weekly average is actually an average — computed
+// INDEPENDENTLY in the test (plain arithmetic), never via rollup()
+// ===========================================================================
+
+describe('N19 — Q7: a weekly average is actually an average (mean computed by hand, not via rollup — that delegation guard lives in N14/Q3)', () => {
+  it("boundsSeries: a week with three distinct daily values plots the plain arithmetic mean at that week's bucket", () => {
+    const weekStart = startOfIsoWeek('2026-07-06');
+    const d0 = weekStart;
+    const d1 = addDays(weekStart, 1);
+    const d2 = addDays(weekStart, 3);
+    const v = [70, 74, 90];
+    const entries = [
+      { entry_date: d0, value: v[0] },
+      { entry_date: d1, value: v[1] },
+      { entry_date: d2, value: v[2] },
+    ];
+    const from = weekStart;
+    const to = addDays(weekStart, 6);
+    // Hand-computed, no rollup() call anywhere in this test.
+    const expectedMean = (v[0] + v[1] + v[2]) / 3;
+
+    const { keys, values } = boundsSeries(entries, 'week', from, to);
+    const weekKey = isoWeekKey(weekStart);
+    const idx = keys.indexOf(weekKey);
+    assert.notEqual(idx, -1);
+    assert.equal(values[idx], expectedMean);
+  });
+
+  it('boundsModel: the same fixture, through the full model, plots the plotted point at the hand-computed mean (model.dates holds the per-bucket key at every period — verified live: week/month periods put the ISO-week/month key there, not a separate `keys` field)', () => {
+    const weekStart = startOfIsoWeek('2026-07-06');
+    const entries = [
+      { entry_date: weekStart, value: 70 },
+      { entry_date: addDays(weekStart, 1), value: 74 },
+      { entry_date: addDays(weekStart, 3), value: 90 },
+    ];
+    const from = weekStart;
+    const to = addDays(weekStart, 6);
+    const expectedMean = (70 + 74 + 90) / 3;
+
+    const model = boundsModel({ trackable: T_MANUAL_OK, entries, from, to, period: 'week' });
+    const weekKey = isoWeekKey(weekStart);
+    const idx = model.dates.indexOf(weekKey);
+    assert.notEqual(idx, -1, 'expected the week bucket key to be present in model.dates');
+    assert.equal(model.values[idx], expectedMean);
+  });
+});
+
+// ===========================================================================
+// N20 — Q8: totality across all three periods — never throws, arrays stay
+// aligned (labels.length === values.length === zones.length === keys.length)
+// ===========================================================================
+
+describe('N20 — Q8: totality across all three periods', () => {
+  const trackables = [
+    null,
+    {},
+    T_MANUAL_OK,
+    T_AUTO,
+    { value_shape: 'boolean', bounds_enabled: true, bounds_mode: 'auto' }, // disabled
+    { value_shape: 'numeric', bounds_enabled: true, bounds_mode: 'manual', bound_lower: 90, bound_upper: 80 }, // invalid
+  ];
+  const entriesOptions = [
+    [],
+    [{ entry_date: '2026-06-01', value: 50 }],
+    readingsEndingAt('2026-06-10', 15),
+    [{ entry_date: 'oops', value: 1 }],
+    null,
+  ];
+  const periods = ['day', 'week', 'month'];
+  const from = '2026-05-01';
+  const to = '2026-06-10';
+
+  let count = 0;
+  for (const trackable of trackables) {
+    for (const entries of entriesOptions) {
+      for (const period of periods) {
+        count += 1;
+        const ctx = `trackable=${JSON.stringify(trackable)} entries=${Array.isArray(entries) ? entries.length + ' items' : JSON.stringify(entries)} period=${period}`;
+        it(`never throws and stays aligned: ${ctx}`, () => {
+          let model;
+          assert.doesNotThrow(() => {
+            model = boundsModel({ trackable, entries, from, to, period });
+          }, ctx);
+          assert.ok(Array.isArray(model.labels), ctx);
+          assert.ok(Array.isArray(model.values), ctx);
+          assert.ok(Array.isArray(model.zones), ctx);
+          // model.dates is the per-bucket key array at every period (verified
+          // live against the implementation's actual shape before writing
+          // this: week/month periods put the ISO-week/month key there, e.g.
+          // '2026-W23'/'2026-06' — there is no separate `model.keys` field.
+          // §4.1's "keys.length" wording is read as referring to this array,
+          // not a literal `keys` property; see the report for this ambiguity.
+          assert.ok(Array.isArray(model.dates), `${ctx}: model.dates must be an array`);
+          const n = model.dates.length;
+          assert.equal(model.labels.length, n, ctx);
+          assert.equal(model.values.length, n, ctx);
+          assert.equal(model.zones.length, n, ctx);
+          assert.equal(model.period, period, `${ctx}: model.period must reflect the requested period`);
+        });
+      }
+    }
+  }
+
+  it(`generated ${count} combinations across the three periods (must be at least 60, per this project's cross-product convention)`, () => {
+    assert.ok(count >= 60, `only generated ${count} combinations`);
+  });
+});
+
+// ===========================================================================
+// N21 — boundsModel: unknown period NORMALIZES to 'day' (does not throw)
+// ===========================================================================
+//
+// Resolves the §2.1/§2.3 contradiction flagged in this file's own earlier
+// report, per the coordinator's decision, stated here verbatim as the
+// specified behaviour (not derived from reading js/charts/bounds.js):
+//
+//   boundsModel is the PUBLIC entry point. detail.js calls it with a period
+//   value read out of localStorage — untrusted, persisted state that can be
+//   anything (a stale key from an older build, a corrupted store, a
+//   hand-edited value). A logging app must not blank its own chart because
+//   a persisted preference went bad, so boundsModel NORMALIZES any period
+//   outside {day, week, month} to 'day' rather than throwing, preserving
+//   its standing "never throws except on a malformed `to`" contract that
+//   ~339 existing cases rely on.
+//
+//   boundsSeries, by contrast (see N22), takes an explicit period from a
+//   caller INSIDE this module with no persisted-garbage path into it, so a
+//   bad period reaching it is a programmer error and it throws loudly.
+//   Silently defaulting there would hide a real bug.
+//
+// THE ASYMMETRY IS DELIBERATE: normalize at the boundary where untrusted
+// input arrives (boundsModel), throw in the interior (boundsSeries).
+// ===========================================================================
+
+describe("N21 — boundsModel: unknown period NORMALIZES to 'day' (the boundary side of the boundary-normalizes / interior-throws asymmetry)", () => {
+  const from = '2026-06-01';
+  const to = '2026-06-10';
+  const entries = [
+    { entry_date: '2026-06-02', value: 80 },
+    { entry_date: '2026-06-05', value: 84 },
+  ];
+  const badPeriods = ['year', '', null, undefined, 0, {}, [], true];
+
+  for (const bad of badPeriods) {
+    it(`period=${JSON.stringify(bad)}: does not throw, and the resulting model is DEEP-EQUAL to period:'day' — the real assertion (pins normalization, not merely "didn't crash")`, () => {
+      let model;
+      assert.doesNotThrow(() => {
+        model = boundsModel({ trackable: T_MANUAL_OK, entries, from, to, period: bad });
+      });
+      const dayModel = boundsModel({ trackable: T_MANUAL_OK, entries, from, to, period: 'day' });
+      assert.deepEqual(model, dayModel);
+    });
+  }
+
+  it('the standing guarantee is unaffected: a malformed `to` still throws RangeError even when `period` is one of these bad, normalized-away values', () => {
+    for (const bad of badPeriods) {
+      assert.throws(
+        () => boundsModel({ trackable: T_MANUAL_OK, entries, from, to: 'not-a-date', period: bad }),
+        RangeError,
+        `expected a throw for period=${JSON.stringify(bad)}`
+      );
+    }
+  });
+});
+
+// ===========================================================================
+// N22 — boundsSeries: unknown period THROWS RangeError (the interior side)
+// ===========================================================================
+
+describe('N22 — boundsSeries: unknown period THROWS RangeError (the interior side of the boundary-normalizes / interior-throws asymmetry — see N21)', () => {
+  const from = '2026-06-01';
+  const to = '2026-06-10';
+  const entries = [
+    { entry_date: '2026-06-02', value: 80 },
+    { entry_date: '2026-06-05', value: 84 },
+  ];
+  const badPeriods = ['year', '', null, undefined, 0, {}, [], true];
+
+  for (const bad of badPeriods) {
+    it(`period=${JSON.stringify(bad)}: throws RangeError`, () => {
+      assert.throws(() => boundsSeries(entries, bad, from, to), RangeError);
+    });
+  }
+});
+
+// ===========================================================================
+// N23 — boundsPeriodKeys(period, from, to): the §2.1 key-list helper,
+// tested directly (confirmed exported by the coordinator)
+// ===========================================================================
+
+describe('N23 — boundsPeriodKeys: day/week/month key lists match the real dates.js exactly; unknown period throws; from > to propagates', () => {
+  const from = '2026-06-01';
+  const to = '2026-07-15';
+
+  it("'day' -> rangeDays(from, to) exactly", () => {
+    assert.deepEqual(boundsPeriodKeys('day', from, to), rangeDays(from, to));
+  });
+
+  it("'week' -> isoWeeksInRange(from, to) exactly", () => {
+    assert.deepEqual(boundsPeriodKeys('week', from, to), isoWeeksInRange(from, to));
+  });
+
+  it("'month' -> monthsInRange(from, to) exactly", () => {
+    assert.deepEqual(boundsPeriodKeys('month', from, to), monthsInRange(from, to));
+  });
+
+  for (const bad of ['year', '', null, undefined, 0, {}, [], true]) {
+    it(`unknown period ${JSON.stringify(bad)} -> throws RangeError (consistent with boundsSeries/N22, since that is where the throw originates)`, () => {
+      assert.throws(() => boundsPeriodKeys(bad, from, to), RangeError);
+    });
+  }
+
+  describe('from > to propagates the underlying dates.js throw, at each valid period', () => {
+    const badFrom = '2026-08-01';
+    const badTo = '2026-06-01'; // from > to
+    for (const period of ['day', 'week', 'month']) {
+      it(`period='${period}': throws when from > to`, () => {
+        assert.throws(() => boundsPeriodKeys(period, badFrom, badTo), RangeError);
       });
     }
   });

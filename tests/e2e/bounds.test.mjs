@@ -95,6 +95,34 @@ const T_AUTO_FEW = {
   archived: false,
 };
 
+// CONTRACT-3.3b fixture: auto-derivation mode with ENOUGH entries (well
+// above MIN_BOUND_READINGS=12, documented in tests/unit/bounds.test.mjs's
+// N2 header) that bounds_mode:'auto' resolves 'ok' and the derived lower/
+// upper are genuinely computed from the raw daily entries — needed for Q12,
+// where the whole point is to prove the resolved band doesn't move when the
+// period changes. A manual-bounds fixture (like T_MANUAL) would pass Q12
+// vacuously: manual bounds are a fixed config value that never consults the
+// entries at any period, so they trivially "don't move" even if a period-
+// dependent regression existed.
+const T_AUTO_MANY = {
+  id: 504,
+  name: 'Weight Auto Many',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'last',
+  direction: 'break',
+  unit: 'kg',
+  bounds_enabled: true,
+  bounds_mode: 'auto',
+  bound_lower: null,
+  bound_upper: null,
+  target_type: 'none',
+  target_value: null,
+  color: '#5856d6',
+  sort_order: 2,
+  archived: false,
+};
+
 // A second, unrelated trackable — used only by P2 to push otherTrackableCount
 // above 0 so visibleSlots() also shows the 'overlay' slot (four slots live).
 const T_OTHER = {
@@ -189,6 +217,30 @@ async function routeEntries(page, { getFixture = [] } = {}) {
 // relying on it).
 function liveChartInstanceCount(page) {
   return page.evaluate(() => Object.keys(window.Chart.instances).length);
+}
+
+// Reads the RESOLVED lower/upper bound values off the live chart's
+// annotation config — the two 'line' annotations (lowerBound/upperBound),
+// per the same pattern P3 already established for reading all five
+// annotations. Used by Q12, which reads this once at Daily and once at
+// Monthly and must find the two values unchanged (Decision 1's device-level
+// proof).
+function readBoundsLineValues(page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('.bounds-canvas');
+    const chart = window.Chart.getChart(canvas);
+    if (!chart) return null;
+    const annotationOpt = chart.options && chart.options.plugins && chart.options.plugins.annotation;
+    const annotations = annotationOpt ? annotationOpt.annotations : null;
+    const entries = annotations && typeof annotations === 'object' ? Object.values(annotations) : [];
+    const lines = entries.filter((a) => a && a.type === 'line');
+    const values = lines.map((a) => {
+      if (a.yMin !== undefined && a.yMin !== null) return a.yMin;
+      if (a.yMax !== undefined && a.yMax !== null) return a.yMax;
+      return a.value;
+    });
+    return values.slice().sort((a, b) => a - b);
+  });
 }
 
 // ===========================================================================
@@ -516,6 +568,262 @@ test('P9 — changing range repeatedly, and navigating away and back, never leav
   await page.goto('/index.html#/t/501');
   await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
   await expect.poll(() => liveChartInstanceCount(page)).toBe(2);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-3.3b — Granularity on the Range (bounds) chart. Cases below are
+// added ONLY (P1-P9 above are untouched) and are written strictly against
+// CONTRACT-3.3b.md §4.2 (cases Q9 through Q13). The implementation (the
+// .bounds-periods control, the .bounds-period buttons/data-bounds-period
+// attribute, the .bounds-meaning line, and detail.js's boundsPeriodKey
+// wiring) was written in parallel by the orchestrator and has NOT been read
+// while writing these cases. Same guard-first mechanics as P1-P9 and as
+// weekly.test.mjs's C14/C17 (which these cases mirror at the control level):
+// catch-all abort-everything-unclaimed guard installed first, ZERO real
+// Supabase calls, and — per the race lesson C14 already encodes — a period
+// switch is only trusted to have re-rendered once the chart's OWN
+// data.labels differ from a pre-click snapshot, never from an aria-pressed
+// flip alone (that attribute is set synchronously on click).
+// ===========================================================================
+
+// ===========================================================================
+// Q9 — switching period issues ZERO requests, proven with genuine re-render
+// evidence first (the Step 3.2b race lesson, applied to this chart's control)
+// ===========================================================================
+
+test('Q9 — switching the bounds-chart period to Weekly issues ZERO new entries requests, and the chart genuinely re-renders first', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_MANUAL]);
+  const { getRequests } = await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.bounds-canvas')).toHaveCount(1);
+  await expect.poll(() => getRequests.length).toBe(1);
+  const countBefore = getRequests.length;
+
+  const labelsBefore = await page.evaluate(() => {
+    const canvas = document.querySelector('.bounds-canvas');
+    return window.Chart.getChart(canvas).data.labels.slice();
+  });
+
+  await page.locator('.bounds-period[data-bounds-period="week"]').click();
+  await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+
+  // Proof the re-render actually happened: the chart's OWN data, not the
+  // synchronously-set aria-pressed attribute (Step 3.2b's race lesson,
+  // C14's mechanic reused here).
+  await expect
+    .poll(async () => {
+      const labelsNow = await page.evaluate(() => {
+        const canvas = document.querySelector('.bounds-canvas');
+        const chart = window.Chart.getChart(canvas);
+        return chart ? chart.data.labels.slice() : null;
+      });
+      return JSON.stringify(labelsNow) !== JSON.stringify(labelsBefore);
+    })
+    .toBe(true);
+
+  // Only now, with genuine proof of re-render in hand, is "the request count
+  // did not change" a meaningful assertion rather than a vacuous one.
+  expect(getRequests.length).toBe(countBefore);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// Q10 — Decision 3: the range buttons are NOT disabled on the bounds
+// chart's Daily period (this is what stops someone "aligning" it with the
+// trend chart's own Daily cap)
+// ===========================================================================
+
+test('Q10 — the range buttons are NOT disabled when the bounds chart is set to Daily', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_MANUAL]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  // The bounds chart defaults to Daily — assert that explicitly first, so
+  // the range-button assertions below do not rest on an unstated default.
+  await expect(page.locator('.bounds-period[data-bounds-period="day"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await expect(page.locator('.detail-range[data-range="3m"]')).toBeEnabled();
+  await expect(page.locator('.detail-range[data-range="6m"]')).toBeEnabled();
+  await expect(page.locator('.detail-range[data-range="1y"]')).toBeEnabled();
+  await expect(page.locator('.detail-range[data-range="all"]')).toBeEnabled();
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// Q11 — the trend-chart period and the bounds-chart period are independent
+// controls, and both survive a navigation away and back
+// ===========================================================================
+
+test('Q11 — the trend period and the bounds period are independent, separately-persisted controls', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_MANUAL]);
+  await routeEntries(page, {
+    getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await page.locator('.trend-period[data-period="month"]').click();
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('.bounds-period[data-bounds-period="week"]').click();
+  await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+
+  // Independence: setting the bounds period did not disturb the trend
+  // period, and vice versa — every other button on both controls is false.
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.trend-period[data-period="day"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.trend-period[data-period="week"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.bounds-period[data-bounds-period="day"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.bounds-period[data-bounds-period="month"]')).toHaveAttribute('aria-pressed', 'false');
+
+  // Survives navigating away (Home) and back.
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.home')).toBeVisible();
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await expect(page.locator('.trend-period[data-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// Q12 — THE DECISION-1 GUARD, device-level twin of the unit N16 case: the
+// RESOLVED bounds annotation values do not move when the period changes.
+// Uses T_AUTO_MANY (auto-derived bounds from real entries), NOT T_MANUAL —
+// see that fixture's header comment for why a manual-bounds fixture would
+// make this assertion pass vacuously.
+// ===========================================================================
+
+test('Q12 — the RESOLVED bounds annotation values are identical at Daily and at Monthly', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_AUTO_MANY]);
+  // 20 distinct daily readings, comfortably above MIN_BOUND_READINGS(12),
+  // spread every other day over the 40 days before TODAY so both the
+  // default 3m range and the rolling window comfortably contain all of
+  // them, and so week/month bucketing is not trivial (multiple buckets).
+  const offsets = [];
+  for (let i = 2; i <= 40; i += 2) offsets.push(i);
+  const getFixture = offsets.map((offset, i) => ({
+    id: 950 + i,
+    trackable_id: 504,
+    entry_date: addDays(TODAY, -offset),
+    value: 70 + ((i * 3) % 20),
+    note: null,
+  }));
+  await routeEntries(page, { getFixture });
+
+  await page.goto('/index.html#/t/504');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.bounds-canvas')).toHaveCount(1);
+
+  // Daily is the default period — read the resolved bounds here first.
+  await expect(page.locator('.bounds-period[data-bounds-period="day"]')).toHaveAttribute('aria-pressed', 'true');
+  const boundsAtDay = await readBoundsLineValues(page);
+  expect(boundsAtDay).not.toBeNull();
+  expect(boundsAtDay.length).toBe(2);
+
+  const labelsBeforeMonthly = await page.evaluate(() => {
+    const canvas = document.querySelector('.bounds-canvas');
+    return window.Chart.getChart(canvas).data.labels.slice();
+  });
+
+  await page.locator('.bounds-period[data-bounds-period="month"]').click();
+  await expect(page.locator('.bounds-period[data-bounds-period="month"]')).toHaveAttribute('aria-pressed', 'true');
+
+  // Wait for real proof of re-render (data.labels change) before reading
+  // the annotations again — the same race-rule discipline as Q9.
+  await expect
+    .poll(async () => {
+      const labelsNow = await page.evaluate(() => {
+        const canvas = document.querySelector('.bounds-canvas');
+        const chart = window.Chart.getChart(canvas);
+        return chart ? chart.data.labels.slice() : null;
+      });
+      return JSON.stringify(labelsNow) !== JSON.stringify(labelsBeforeMonthly);
+    })
+    .toBe(true);
+
+  const boundsAtMonth = await readBoundsLineValues(page);
+  expect(boundsAtMonth).not.toBeNull();
+  expect(boundsAtMonth.length).toBe(2);
+
+  // THE assertion: the RESOLVED band is identical at Daily and at Monthly.
+  expect(boundsAtMonth).toEqual(boundsAtDay);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// Q13 — the control and the meaning text render even in the "insufficient"
+// status (no canvas) — the lens must be changeable with no data to draw
+// ===========================================================================
+
+test('Q13 — the bounds-period control and .bounds-meaning render in the "insufficient" status, and the lens is still changeable with no data', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_AUTO_FEW]);
+  const getFixture = [1, 3, 5, 7, 9].map((offset, i) => ({
+    id: 900 + i,
+    trackable_id: 502,
+    entry_date: addDays(TODAY, -offset),
+    value: 78 + i,
+    note: null,
+  }));
+  const { getRequests } = await routeEntries(page, { getFixture });
+
+  await page.goto('/index.html#/t/502');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  const bounds = page.locator('.chart-slot[data-slot="bounds"] .bounds');
+  await expect(bounds).toHaveCount(1);
+  await expect(bounds.locator('.bounds-summary')).toContainText('Not enough data yet');
+  await expect(bounds.locator('canvas')).toHaveCount(0);
+
+  // The control and the meaning line must still be present per contract
+  // §2.6 ("The control and the summary must render in every status,
+  // including insufficient/invalid/empty").
+  await expect(bounds.locator('.bounds-periods')).toHaveCount(1);
+  await expect(bounds.locator('.bounds-period[data-bounds-period="day"]')).toHaveCount(1);
+  await expect(bounds.locator('.bounds-period[data-bounds-period="week"]')).toHaveCount(1);
+  await expect(bounds.locator('.bounds-period[data-bounds-period="month"]')).toHaveCount(1);
+  await expect(bounds.locator('.bounds-meaning')).toHaveCount(1);
+
+  await expect.poll(() => getRequests.length).toBe(1);
+  const countBefore = getRequests.length;
+
+  // The lens is still changeable with no data: clicking Weekly updates the
+  // pressed state, does not crash, still shows no canvas, and issues no
+  // network request (the entries are already loaded; only bucketing
+  // changes, and there is nothing to bucket into a chart here regardless).
+  await bounds.locator('.bounds-period[data-bounds-period="week"]').click();
+  await expect(bounds.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(bounds.locator('.bounds-summary')).toContainText('Not enough data yet');
+  await expect(bounds.locator('canvas')).toHaveCount(0);
+  expect(getRequests.length).toBe(countBefore);
 
   expect(unexpected).toEqual([]);
 });

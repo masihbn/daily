@@ -1259,3 +1259,14 @@ button.hm-cell {
   color: var(--fg-muted);
   font-size: 13px;
 }
+
+/* Step 3.3b — the Range chart's granularity control reuses the trend
+   chart's .trend-periods / .trend-period rules verbatim (it carries both
+   classes), so the two controls cannot drift apart visually. Only the
+   meaning line below is new. */
+
+.bounds-meaning {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}

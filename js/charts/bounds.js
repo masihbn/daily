@@ -21,8 +21,14 @@
 // rather than copied, and this module's earlier draft broke that rule
 // with a local reimplementation before the import list was widened to
 // close the gap):
-import { deriveBounds } from '../aggregate.js';
-import { rangeDays, addDays } from '../dates.js';
+import { deriveBounds, rollup, fillSeries } from '../aggregate.js';
+import { rangeDays, addDays, isoWeeksInRange, monthsInRange, isoWeekKey } from '../dates.js';
+// Step 3.3b: the granularity control is "just like the one above" (the
+// user's words) — the trend chart's. Importing its PERIODS constant rather
+// than redeclaring the list keeps ONE list; two would drift, and one
+// implementation per concept is this codebase's governing discipline.
+// weekly.js does not import this module, so there is no cycle.
+import { PERIODS } from './weekly.js';
 
 // --- §2.1 constants ------------------------------------------------------
 
@@ -154,6 +160,136 @@ function countReadingsInWindow(entries, windowDays) {
   return count;
 }
 
+// --- Step 3.3b: granularity ------------------------------------------------
+//
+// The user asked to choose whether each dot is a daily value, a weekly
+// average or a monthly average.
+//
+// THE GOVERNING DECISION: the BAND IS NOT RE-DERIVED per granularity.
+// boundsFor() keeps receiving the RAW daily entries and the rolling window;
+// only the plotted series is aggregated. Reasons, in order of importance:
+//   - A manual bound (e.g. Calories 1700-2100) means "kcal per DAY". A
+//     weekly AVERAGE is also a per-day quantity, so the two stay directly
+//     comparable — unlike Step 3.2's sum-vs-average mismatch, there is no
+//     unit problem to fix here.
+//   - The band must not move when the user changes lens. It is a property
+//     of the metric, not of the view. A band that shifted per granularity
+//     would let two views disagree about whether the same day was in range.
+//   - deriveBounds over raw readings is the day-to-day range the metric
+//     lives in, which is what APP_CONCEPT.md's dual-intervention-point
+//     model is actually about.
+// Accepted consequence, surfaced in the UI by boundsMeaningText(): on
+// Weekly/Monthly the line hugs the middle more, because averaging removes
+// spread. That is informative ("my weekly average stays in range even
+// though individual days spike out"), not a defect.
+//
+// The aggregate is ALWAYS 'average', never the trackable's own
+// `aggregation`: a per-day average is the only aggregate commensurable
+// with a per-day bound. A 'sum' here would be exactly the mistake Step 3.2
+// existed to fix.
+
+// Bucket keys for a period. Uses js/dates.js directly rather than
+// weekly.js's periodKeysFor, which is bound to the trend chart's contract.
+export function boundsPeriodKeys(period, from, to) {
+  if (period === 'day') return rangeDays(from, to);
+  if (period === 'week') return isoWeeksInRange(from, to);
+  if (period === 'month') return monthsInRange(from, to);
+  throw new RangeError(`boundsPeriodKeys: unknown period, got: ${JSON.stringify(period)}`);
+}
+
+// How many consecutive MISSING BUCKETS may be bridged before the line
+// breaks. MAX_BRIDGE_DAYS is in days, and index distance stops equalling
+// day distance once buckets are weeks or months.
+//
+// At 'week'/'month' the answer is zero: an aggregated bucket already
+// absorbs missing days *within* it, so a missing bucket means an entire
+// week or month with ZERO readings. That is a genuine break in the data,
+// not a blip. An unknown period is treated conservatively as 0 — break
+// rather than invent a connection that may not exist.
+export function maxBridgeBucketsFor(period) {
+  if (period === 'day') return MAX_BRIDGE_DAYS;
+  return 0;
+}
+
+// Plain-English label for the current lens, rendered above the chart so it
+// is never implicit that the dots are averages while the band is still the
+// daily range.
+const PERIOD_MEANING = {
+  day: 'Daily value',
+  week: 'Weekly average',
+  month: 'Monthly average',
+};
+
+export function boundsMeaningText(period, unit) {
+  const base = PERIOD_MEANING[period] || PERIOD_MEANING.day;
+  return typeof unit === 'string' && unit !== '' ? `${base} · ${unit}` : base;
+}
+
+// Label for one bucket key: days and weeks read 'd MMM' (a week by its
+// Monday, matching the trend chart), months read 'Aug' — or 'Aug 26' when
+// the series spans more than one calendar year, without which an All-range
+// monthly chart repeats Jan..Dec with no way to tell the years apart.
+function boundsPeriodLabel(key, period, multiYear) {
+  if (period === 'week') {
+    // Derive the week's Monday by scanning the 7 candidate days back from
+    // the key's own year — cheaper and less error-prone than inverting
+    // isoWeekKey by hand, and it reuses dates.js's own algorithm as the
+    // source of truth rather than duplicating it.
+    const isoYear = Number(key.slice(0, 4));
+    const weekNum = Number(key.slice(6));
+    // Jan 4 is always in ISO week 1; walk from that week's Monday.
+    let cursor = `${String(isoYear).padStart(4, '0')}-01-04`;
+    while (isoWeekKey(cursor) !== key) {
+      cursor = addDays(cursor, isoWeekKey(cursor) < key ? 7 : -7);
+      if (Math.abs(Number(cursor.slice(0, 4)) - isoYear) > 1) break;
+    }
+    // Step back to that week's Monday.
+    for (let i = 0; i < 7; i++) {
+      const prev = addDays(cursor, -1);
+      if (isoWeekKey(prev) !== key) break;
+      cursor = prev;
+    }
+    void weekNum;
+    return dayLabel(cursor);
+  }
+  if (period === 'month') {
+    const abbr = MONTH_ABBR[Number(key.slice(5, 7)) - 1];
+    return multiYear ? `${abbr} ${key.slice(2, 4)}` : abbr;
+  }
+  return dayLabel(key);
+}
+
+// Buckets entries into `period` using the REAL rollup(), always with
+// 'average'. Missing buckets fill with null, NEVER 0 — an unlogged week is
+// not a week you weighed nothing (the same honesty rule as weekly.js's
+// fillValueFor).
+export function boundsSeries(entries, period, from, to) {
+  const keys = boundsPeriodKeys(period, from, to);
+  const list = Array.isArray(entries) ? entries : [];
+  // rollup() throws on a malformed entry_date (it does not validate dates
+  // before its internal isoWeekKey call — found in Step 3.2), so sanitize
+  // first. Every surviving entry is passed through unchanged: this is
+  // input filtering, not a reimplementation of rollup's grouping.
+  const clean = list.filter((e) => e && typeof e === 'object' && isRealDateStr(e.entry_date));
+
+  // Deduplicate by entry_date, FIRST WINS, before rolling up. The schema's
+  // unique (trackable_id, entry_date) constraint means duplicates cannot
+  // occur in real data, but Step 3.3 documented and pinned first-wins for
+  // the degenerate case and a test asserts it. Without this, rollup's
+  // 'average' would silently AVERAGE two rows for the same day — which is
+  // a different answer, and at period 'day' would change behaviour that
+  // predates this step.
+  const byDate = new Map();
+  for (const e of clean) {
+    if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, e);
+  }
+  const deduped = [...byDate.values()];
+
+  const buckets = rollup(deduped, period, 'average');
+  const filled = fillSeries(buckets, keys, null);
+  return { keys, values: filled.map((b) => b.value) };
+}
+
 // --- §2.2 boundsFor --------------------------------------------------------
 
 // Never throws for any input. Resolves which bounds to draw (or whether
@@ -239,10 +375,12 @@ export function shouldBridge(gapDays, maxBridgeDays = MAX_BRIDGE_DAYS) {
 
 // --- §2.5 boundsModel ------------------------------------------------------
 
-function emptyModel(trackable, bounds) {
+function emptyModel(trackable, bounds, period = 'day') {
   return {
     status: 'empty',
     bounds,
+    period,
+    multiYear: false,
     labels: [],
     dates: [],
     values: [],
@@ -256,7 +394,16 @@ function emptyModel(trackable, bounds) {
 
 // Never throws except on a malformed `to`. Raw daily values, never
 // rollup() (§0) — a bounded metric wants the actual trend, not a sum.
-export function boundsModel({ trackable, entries, from, to, windowDays = DEFAULT_ROLLING_WINDOW_DAYS } = {}) {
+export function boundsModel({
+  trackable,
+  entries,
+  from,
+  to,
+  windowDays = DEFAULT_ROLLING_WINDOW_DAYS,
+  // Step 3.3b. Defaults to 'day', so every pre-3.3b caller and test keeps
+  // its exact previous behaviour.
+  period = 'day',
+} = {}) {
   // Must throw unconditionally for a malformed `to`, including on an
   // early-return path below — validated first, exactly as
   // weekly.js#trendModel pre-validates `to` with isoWeekKey(to) before any
@@ -264,8 +411,12 @@ export function boundsModel({ trackable, entries, from, to, windowDays = DEFAULT
   // date-arithmetic import rather than a second hand-rolled check.
   rangeDays(to, to);
 
+  const per = period === 'week' || period === 'month' ? period : 'day';
+
   const wd = sanitizeWindowDays(windowDays);
   const list = Array.isArray(entries) ? entries : [];
+  // THE BAND IS DERIVED FROM RAW DAILY ENTRIES AT EVERY GRANULARITY — see
+  // the Step 3.3b block above for why. `list`, not an aggregated series.
   const bounds = boundsFor(trackable, list, wd);
   const dateValidEntries = list.filter((e) => e && typeof e === 'object' && isRealDateStr(e.entry_date));
 
@@ -277,41 +428,38 @@ export function boundsModel({ trackable, entries, from, to, windowDays = DEFAULT
     for (const e of dateValidEntries) {
       if (earliest === null || e.entry_date < earliest) earliest = e.entry_date;
     }
-    if (earliest === null) return emptyModel(trackable, bounds);
+    if (earliest === null) return emptyModel(trackable, bounds, per);
     lowerBound = earliest;
   }
 
   // 'YYYY-MM-DD' strings compare lexicographically in chronological order
   // (both sides are proven real dates by this point) — same fact
   // trendModel() relies on.
-  if (lowerBound > to) return emptyModel(trackable, bounds);
+  if (lowerBound > to) return emptyModel(trackable, bounds, per);
 
-  const dates = rangeDays(lowerBound, to);
-  const labels = dates.map(dayLabel);
+  // `dates` carries the bucket KEY for each plotted point at every
+  // granularity (a 'YYYY-MM-DD' day, a 'YYYY-Www' week or a 'YYYY-MM'
+  // month). At period 'day' those keys are calendar dates, exactly as
+  // before 3.3b, so nothing about the day view changes.
+  const { keys: dates, values } = boundsSeries(dateValidEntries, per, lowerBound, to);
+  const multiYear =
+    dates.length > 0 && dates.some((k) => k.slice(0, 4) !== dates[0].slice(0, 4));
+  const labels = dates.map((k) => boundsPeriodLabel(k, per, multiYear));
 
-  // One entry per trackable per day is guaranteed by the schema's unique
-  // constraint; if duplicates appear anyway, first wins (§2.5).
-  const byDate = new Map();
-  for (const e of dateValidEntries) {
-    if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, e);
-  }
-
-  const values = [];
   const zones = [];
   let pointCount = 0;
   let lastFiniteValue = null;
-  for (const d of dates) {
-    const entry = byDate.get(d);
-    const v = entry && isFiniteValue(entry.value) ? entry.value : null;
-    values.push(v);
+  for (const v of values) {
     zones.push(zoneFor(v, bounds));
-    if (v !== null) {
+    if (isFiniteValue(v)) {
       pointCount += 1;
       lastFiniteValue = v;
     }
   }
 
   return {
+    period: per,
+    multiYear,
     // 'empty' already returned above for the only two cases that mean it;
     // otherwise this mirrors bounds.status exactly (§2.5 status
     // precedence).
@@ -393,7 +541,11 @@ export function boundsAxisFor(model) {
 // is the per-gap predicate this function consults (once per run of
 // missing days, via the `missingDays === 0 ? true : shouldBridge(...)`
 // line below); shouldBridge() alone is not what the renderer draws from.
-export function segmentVisibility(values) {
+// Step 3.3b: `maxBridge` is now a parameter, because once buckets are
+// weeks or months an index step is no longer one day. Omitting it
+// preserves the exact pre-3.3b behaviour (7 days), which is what keeps the
+// 26 existing cases for this function passing untouched.
+export function segmentVisibility(values, maxBridge = MAX_BRIDGE_DAYS) {
   const list = Array.isArray(values) ? values : [];
   const n = list.length;
   const visible = new Array(Math.max(0, n - 1)).fill(false);
@@ -414,7 +566,7 @@ export function segmentVisibility(values) {
     const rightReal = isFiniteValue(list[i + 1]) ? i + 1 : nextRealIndex[i + 1];
     if (leftReal === -1 || rightReal === -1) continue; // nothing to bridge to
     const missingDays = rightReal - leftReal - 1;
-    visible[i] = missingDays === 0 ? true : shouldBridge(missingDays);
+    visible[i] = missingDays === 0 ? true : shouldBridge(missingDays, maxBridge);
   }
   return visible;
 }
@@ -526,6 +678,41 @@ export function renderBounds(model) {
   summary.textContent = summaryText(model);
   root.appendChild(summary);
 
+  const activePeriod =
+    model && typeof model === 'object' && PERIOD_MEANING[model.period] ? model.period : 'day';
+
+  // Step 3.3b — the granularity control. Rendered for EVERY status,
+  // including insufficient/invalid/empty, so the lens stays changeable
+  // even when there is nothing to draw. Styled by the same CSS rules as
+  // the trend chart's .trend-periods (the user asked for "just like the
+  // one above"); the distinct data-bounds-period attribute is what lets
+  // detail.js's single delegated listener tell the two controls apart.
+  // Attaches NO listeners here — detail.js owns that.
+  const periods = document.createElement('div');
+  periods.className = 'bounds-periods trend-periods';
+  periods.setAttribute('role', 'group');
+  periods.setAttribute('aria-label', 'Granularity');
+  for (const p of PERIODS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bounds-period trend-period';
+    btn.dataset.boundsPeriod = p.key;
+    btn.setAttribute('aria-pressed', String(p.key === activePeriod));
+    btn.textContent = p.label;
+    periods.appendChild(btn);
+  }
+  root.appendChild(periods);
+
+  // States plainly that the dots are averages while the band remains the
+  // daily range — see the Step 3.3b block for why the band does not move.
+  const meaning = document.createElement('p');
+  meaning.className = 'bounds-meaning';
+  meaning.textContent = boundsMeaningText(
+    activePeriod,
+    model && typeof model === 'object' ? model.unit : null
+  );
+  root.appendChild(meaning);
+
   const status = model && typeof model === 'object' ? model.status : undefined;
   // Every non-'ok' status renders only the summary above — no canvas, no
   // Chart instance (§3).
@@ -583,7 +770,10 @@ export function renderBounds(model) {
   //      <=7-missing-day gap renders solid, a longer one renders fully
   //      transparent. Confirmed on an exact MAX_BRIDGE_DAYS-boundary case
   //      (7 missing days: bridged) and MAX_BRIDGE_DAYS+1 (8: broken).
-  const visibility = segmentVisibility(model.values);
+  // Step 3.3b: the bridge budget is per-period — 7 days at 'day', but zero
+  // missing buckets at 'week'/'month', where a missing bucket means an
+  // entire week or month with no readings at all.
+  const visibility = segmentVisibility(model.values, maxBridgeBucketsFor(activePeriod));
   const transparent = 'rgba(0, 0, 0, 0)';
 
   const dataset = {

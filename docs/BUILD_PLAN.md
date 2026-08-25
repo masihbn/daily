@@ -2972,6 +2972,157 @@ exercises the auto path**, which needs `bounds_enabled` on a numeric with
 
 ---
 
+## Step 3.3b — Granularity on the Range chart
+
+**Status:** DONE (2026-08-25) — suite-verified, **awaiting device check.**
+
+User request, after seeing Step 3.3 on their phone: choose whether each dot
+is a daily value, a weekly average or a monthly average — with a control
+"just like the one above" (the trend chart's).
+
+Suite: **3455 green**, two consecutive full runs (3286 unit, 43
+integration, 126 e2e), up from 3287. `sw.js` `CACHE` `daily-v22` →
+`daily-v23`; `ASSETS` unchanged.
+
+### The governing decision: the band does not move
+
+**Bounds are derived from raw daily readings at every granularity.** Only
+the plotted series is aggregated.
+
+- A manual bound (the user's `Calories` 1700–2100) means *kcal per day*. A
+  weekly **average** is also a per-day quantity, so the two stay directly
+  comparable — unlike Step 3.2's sum-vs-average mismatch, there is no unit
+  problem here to fix.
+- **The band must not move when the lens changes.** It is a property of
+  the metric, not of the view. A band that shifted per granularity would
+  let two views disagree about whether the same day was in range.
+
+Accepted consequence, surfaced on screen by `boundsMeaningText()`: at
+Weekly/Monthly the line hugs the middle more, because averaging removes
+spread. That is informative ("my weekly average stays in range even though
+individual days spike out"), not a defect.
+
+The aggregate is **always `average`**, never the trackable's own
+`aggregation` — a per-day average is the only aggregate commensurable with
+a per-day bound. A `sum` here would be exactly the mistake Step 3.2 fixed.
+
+### Other decisions
+
+- **No Daily range cap**, deliberately unlike the trend chart. That cap
+  exists because 365 *bars* are unreadable; this is a line, where 365
+  points are legible. The range control is shared by both charts, so
+  capping it from here would couple two independent lenses. Commented at
+  both sites so nobody "aligns" them.
+- **A missing week or month breaks the line** (zero bridging), against
+  Daily's 7-day tolerance. An aggregated bucket already absorbs missing
+  days *within* it, so a missing bucket means an entire week or month with
+  **zero** readings — a real gap, not a blip.
+- **Separate persistence key** (`daily.detail.boundsPeriod.v1`). Daily
+  bounds alongside a monthly trend is a reasonable thing to want.
+- The control renders in **every** status, including `insufficient` /
+  `invalid` / `empty`, so the lens stays changeable when there is nothing
+  to draw. It carries both `.bounds-period` and `.trend-period` classes so
+  the two controls share one rule set and cannot drift visually, and is
+  matched on `data-bounds-period` so the single delegated listener can
+  tell them apart.
+
+### A contradiction in the orchestrator's own contract
+
+§2.1 said unknown-period bucketing **throws**; §2.3 said the series
+function **never throws** except on bad dates. Both were in the same
+document, and the implementation resolved them two different ways in two
+places. The Test Author hit it, **refused to guess, and reported it.**
+
+Settled deliberately rather than accidentally: **normalize at the
+boundary, throw in the interior.**
+
+- `boundsModel` normalizes an unknown period to `'day'` and never throws.
+  It is the public entry point, and `detail.js` calls it with a value out
+  of `localStorage`, which can be stale or corrupted. A logging app must
+  not blank its own chart over a bad saved preference — the same posture
+  as `readStoredBoundsPeriod`'s fallback, and it preserves the standing
+  "never throws except on a malformed `to`" guarantee ~339 cases rely on.
+- `boundsSeries` / `boundsPeriodKeys` **throw** on an unknown period. They
+  take an explicit argument from inside the module, so a bad value is a
+  programmer error and should fail loudly.
+
+N21 pins this by asserting a garbage period produces a model
+**deep-equal to `period: 'day'`** — normalization, not merely the absence
+of a crash.
+
+### A regression the existing suite caught, and why self-verification missed it
+
+The first implementation replaced first-wins duplicate handling with
+`rollup(..., 'average')`, which **averages** duplicate dates. Step 3.3 had
+documented and pinned first-wins, and an existing test failed immediately.
+Fixed by deduplicating by `entry_date` (first wins) **before** the rollup,
+so a duplicate day behaves exactly as before while a week still correctly
+averages across *different* days.
+
+**The orchestrator's own verification could not have caught this.** It
+asserted `boundsModel(args)` deep-equals `boundsModel({...args,
+period:'day'})` — but both ran the *new* code path, so it proved internal
+consistency, never preservation of the old behaviour.
+
+> **Transferable lesson, and the second instance of it in two
+> self-implemented steps** (Step 3.2c was the first, where widening
+> `targetFor`'s return shape broke six tests): when the author of a change
+> writes its verification, the check tends to compare the new code against
+> itself. That is structurally blind to behaviour change. The independent
+> test pass is not bookkeeping on these steps — it catches a class of error
+> self-verification cannot.
+>
+> The Test Author was accordingly briefed on this exact trap and asked to
+> assert the day view's *observable* properties independently (one point
+> per calendar day, calendar-date keys, first-wins, 7-day bridging) rather
+> than relying on a new-vs-new comparison.
+
+### Verified by tests
+
+- **N16 — the band-does-not-move guard.** Bounds identical at all three
+  periods for the same entries, **and** that shared value asserted equal
+  to `deriveBounds(entries, 90)` computed directly over the raw entries —
+  an independent computation, not the model checking itself.
+- **Q12 — its device-level twin.** Resolved annotation values read off the
+  live chart at Daily, then at Monthly after waiting for genuine re-render
+  proof (`data.labels` changing, **never** `aria-pressed`, which is set
+  synchronously and would pass vacuously). Deliberately uses an
+  **auto-bounds** fixture: with manual bounds the assertion would pass
+  regardless, since a fixed config value cannot move.
+- **N19 — a weekly average is really an average**, computed by hand in the
+  test (`(70+74+90)/3`) rather than by calling `rollup`, keeping it
+  distinct from N14's delegation guard.
+- N12–N15, N17, N18, N20–N23: the per-period bridge budget, one-arg
+  back-compat for `segmentVisibility`, `boundsSeries` key/value delegation
+  with null-never-zero, dedupe-then-rollup, the day-view observable
+  properties, all three meaning strings, a 90-combination totality
+  cross-product, and the normalize/throw asymmetry.
+
+*Test Author disclosure, recorded rather than waved away:* it resolved one
+structural ambiguity (`model.dates` vs a hypothetical `model.keys` —
+caused by the orchestrator's own case list saying "keys.length") by
+executing the real module in Node after its contract-derived expectation
+failed, and disclosed this prominently. It learned a field name that way;
+the bucketing, dedupe, period-handling and rendering logic remained
+contract-derived. `model.dates` is the intended shape, consistent with the
+untouched pre-3.3b cases.
+
+**Process caveat, as in Steps 2.5, 3.2c:** the orchestrator wrote the
+implementation, after **seven** subagent attempts across this step and
+3.2c were killed by API session limits. This step therefore lacks the
+two-independent-agents guarantee. What offsets it: the tests were written
+against the contract by an agent that did not read the implementation, it
+found a real contract contradiction and refused to guess, and the
+pre-existing suite caught the one real regression. Prefer device
+verification here.
+
+**Not verifiable from this machine:** whether the smoothing at
+Weekly/Monthly reads as informative rather than as "the chart stopped
+working", whether a broken line at Monthly reads as missing data, and
+whether the second control under the chart crowds the screen at 390px.
+
+---
+
 ## Step 3.4 — Correlation marker overlay
 
 **Status:** TODO

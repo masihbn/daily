@@ -108,6 +108,10 @@ export const SLOT_TITLES = {
 
 const RANGE_STORAGE_KEY = 'daily.detail.range.v1';
 const PERIOD_STORAGE_KEY = 'daily.detail.period.v1';
+// Step 3.3b: a SEPARATE key from the trend chart's. The two charts answer
+// different questions and their lenses are independent — daily bounds
+// alongside a monthly trend is a perfectly reasonable thing to want.
+const BOUNDS_PERIOD_STORAGE_KEY = 'daily.detail.boundsPeriod.v1';
 
 // Step 3.2c: Daily is capped at 3 months (recorded user decision,
 // 2026-08-24). 365 daily marks on a 390px screen is unreadable, so
@@ -160,6 +164,26 @@ function writeStoredPeriod(key) {
   }
 }
 
+function readStoredBoundsPeriod() {
+  try {
+    const raw = localStorage.getItem(BOUNDS_PERIOD_STORAGE_KEY);
+    if (typeof raw === 'string' && PERIODS.some((p) => p.key === raw)) {
+      return raw;
+    }
+  } catch {
+    // Fall through to the default below.
+  }
+  return 'day';
+}
+
+function writeStoredBoundsPeriod(key) {
+  try {
+    localStorage.setItem(BOUNDS_PERIOD_STORAGE_KEY, key);
+  } catch {
+    // Best-effort only, same as writeStoredRange.
+  }
+}
+
 export function createDetailView({ id, store, api, today } = {}) {
   const st = store || getStore();
   // `api` is accepted per CONTRACT-2.3.md §3, for interface symmetry
@@ -205,6 +229,14 @@ export function createDetailView({ id, store, api, today } = {}) {
   // here rather than in the chart module for the same reason monthStr does
   // — js/charts/weekly.js is stateless and this view owns the render loop.
   let periodKey = 'week';
+
+  // Step 3.3b: the Range chart's own lens, independent of periodKey above.
+  // Deliberately does NOT carry over the trend chart's Daily range cap —
+  // that cap exists because 365 BARS are unreadable, and this is a line,
+  // where 365 points are perfectly legible. The range control is shared by
+  // both charts, so capping it from here would couple two independent
+  // lenses. Do not "align" these.
+  let boundsPeriodKey = 'day';
 
   // Step 3.1: calendar heatmap state. The heatmap module itself is
   // stateless (js/charts/heatmap.js) — the displayed month and the
@@ -491,7 +523,9 @@ export function createDetailView({ id, store, api, today } = {}) {
       } else if (slot === 'bounds') {
         const { from, to } = resolveRange(rangeKey, day);
         slotSection.appendChild(
-          renderBounds(boundsModel({ trackable, entries: entriesForRange, from, to }))
+          renderBounds(
+            boundsModel({ trackable, entries: entriesForRange, from, to, period: boundsPeriodKey })
+          )
         );
       } else {
         // overlay keeps its existing placeholder — Step 3.4.
@@ -779,6 +813,20 @@ export function createDetailView({ id, store, api, today } = {}) {
     render();
   }
 
+  // Step 3.3b. Re-buckets data already in hand, so it must issue ZERO
+  // network requests — and unlike handlePeriodChange it never touches
+  // rangeKey, because the Daily range cap is deliberately not carried over
+  // to this chart (see boundsPeriodKey's declaration).
+  function handleBoundsPeriodChange(key) {
+    if (entriesLoading) return;
+    if (key === boundsPeriodKey) return;
+    if (!PERIODS.some((p) => p.key === key)) return;
+
+    boundsPeriodKey = key;
+    writeStoredBoundsPeriod(key);
+    render();
+  }
+
   function handleClick(event) {
     try {
       const target = event.target;
@@ -793,6 +841,15 @@ export function createDetailView({ id, store, api, today } = {}) {
       const periodBtn = target.closest('button.trend-period[data-period]');
       if (periodBtn && sectionEl.contains(periodBtn)) {
         handlePeriodChange(periodBtn.dataset.period);
+        return;
+      }
+
+      // Step 3.3b. Matched on data-bounds-period, not data-period, so the
+      // two granularity controls stay independently addressable by this
+      // one delegated listener.
+      const boundsPeriodBtn = target.closest('button[data-bounds-period]');
+      if (boundsPeriodBtn && sectionEl.contains(boundsPeriodBtn)) {
+        handleBoundsPeriodChange(boundsPeriodBtn.dataset.boundsPeriod);
         return;
       }
 
@@ -853,6 +910,7 @@ export function createDetailView({ id, store, api, today } = {}) {
     disposed = false;
     rangeKey = readStoredRange();
     periodKey = readStoredPeriod();
+    boundsPeriodKey = readStoredBoundsPeriod();
     // A stored Daily period with a stored range wider than 3M is a legal
     // combination on disk (the two keys are written independently) but not
     // a legal one on screen, so reconcile before the first load rather than
@@ -930,6 +988,7 @@ export function createDetailView({ id, store, api, today } = {}) {
     monthStr = null;
     dayFocusMode = null;
     periodKey = 'week';
+    boundsPeriodKey = 'day';
   }
 
   return { mount, unmount };
