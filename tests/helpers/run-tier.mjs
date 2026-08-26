@@ -75,12 +75,26 @@ if (files.length === 0) {
 // e2e tier intercepts every REST call, so neither needs a target — and
 // requiring one there would be noise that trains people to ignore the check.
 if (tier === 'integration') {
-  const { resolveTestTarget, productionWarningLines } = await import('./test-target.mjs');
+  const { resolveTestTarget, productionWarningLines, parseEnvFile, mergeEnv } =
+    await import('./test-target.mjs');
   const { SUPABASE_URL, SUPABASE_ANON_KEY } = await import('../../js/config.js');
+
+  // Optional, gitignored. Lets `npm test` just work without exporting two
+  // variables by hand every session — see .env.test.example. Real environment
+  // variables still win (mergeEnv), so a one-off override and CI both behave.
+  let fileEnv = {};
+  try {
+    const { readFileSync } = await import('node:fs');
+    fileEnv = parseEnvFile(readFileSync(path.join(repoRoot, '.env.test'), 'utf8'));
+  } catch {
+    // Absent is the normal case on a fresh clone. Missing credentials are
+    // handled by resolveTestTarget below, which refuses rather than guessing.
+  }
+  const env = mergeEnv(process.env, fileEnv);
 
   let target;
   try {
-    target = resolveTestTarget(process.env, {
+    target = resolveTestTarget(env, {
       productionUrl: SUPABASE_URL,
       productionKey: SUPABASE_ANON_KEY,
       allowProduction: process.argv.includes('--allow-production'),

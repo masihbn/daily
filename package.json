@@ -7,7 +7,7 @@
   "scripts": {
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:unit": "node tests/helpers/run-tier.mjs unit",
-    "test:integration": "node tests/helpers/run-tier.mjs integration --allow-production",
+    "test:integration": "node tests/helpers/run-tier.mjs integration",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

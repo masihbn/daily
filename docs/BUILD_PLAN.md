@@ -3689,20 +3689,9 @@ removing that check.**
 
 ## Step D.4 — Move the test suite off the production database
 
-**Status:** IN PROGRESS (2026-08-25) — **all plumbing built, tested and
-fail-closed.** Blocked only on the second Supabase project itself, which
-needs the user (the Supabase MCP connection is scoped to one project and
-the CLI is not installed on this machine).
-
-**To finish, once the project exists — three actions:**
-
-1. Run `scripts/bootstrap-test-project.sql` in the new project's SQL Editor.
-2. Set `DAILY_TEST_SUPABASE_URL` and `DAILY_TEST_SUPABASE_KEY`.
-3. **Delete `--allow-production` from `package.json`'s `test:integration`
-   script.** A test in `tests/unit/test-target.test.mjs` deliberately fails
-   the moment that flag disappears, as the reminder to delete the test and
-   mark this step `DONE` — so the interim escape cannot quietly become
-   permanent.
+**Status:** DONE (2026-08-25). Test project **`dftqrsngiroitugbwtaz`**
+(`daily-test`) is live and seeded; the escape hatch is deleted; `npm test`
+can no longer reach the production database.
 
 **Goal.** `npm test` cannot touch the user's real data, by construction
 rather than by care.
@@ -3802,8 +3791,68 @@ runner reported `integration tier target: test project
 zzzznotarealproject` — confirming precedence works in the real code path,
 not just in the resolver.
 
-*Still to do — see the Status block above.* The remaining work is
-creating the project, running the bootstrap SQL, and deleting the flag.
+*Finishing the step (2026-08-25).* Final suite: **3558 green** — 3380
+unit, 47 integration, 131 e2e.
+
+- **Test project `dftqrsngiroitugbwtaz` (`daily-test`)** created by the
+  user and seeded with `scripts/bootstrap-test-project.sql`. Rather than
+  ask whether the bootstrap had worked, the schema was **checked directly
+  over PostgREST**: all four tables present with the right seed counts
+  (`trackables` 0, `entries` 0, `app_settings` 1, `counter` 1), the
+  `entries.source` column readable, `daily_resync_identity()` callable
+  (returning `next_id 1` for both tables), and the `0003`/`0005` columns
+  selectable.
+- **All 47 integration tests pass against it**, with the runner reporting
+  `integration tier target: test project dftqrsngiroitugbwtaz` and no
+  production banner.
+- **`--allow-production` deleted from `package.json`.** Verified
+  immediately afterwards: with no credentials available, `npm run
+  test:integration` exits 1 printing the refusal. There is now no path
+  from the test suite to the production database.
+- The unit test that asserted the flag was *present* is **inverted, not
+  deleted** — it now asserts the flag is absent. Re-adding it would
+  silently re-point a tier that CREATES and DELETES rows at the user's
+  only copy of their data; that should require deleting a test.
+
+*The proof that production is untouched.* Row counts alone would not show
+it — the tier creates rows and deletes them again, so counts return to
+zero either way. **Identity sequences were read before and after two full
+suite runs**: `trackables_id_seq` 1501 and `entries_id_seq` 1209, both
+**identical afterwards**. A single test-created trackable would have
+advanced them permanently. Production also still holds exactly 4
+trackables, 0 entries, 0 `__test__` residue.
+
+*Added while finishing: a gitignored `.env.test`.* With the escape hatch
+gone, `npm test` refuses unless the test project is configured — correct,
+but requiring two env vars to be exported by hand every session is a trap
+during a months-long park, where the realistic outcome is someone
+concluding the suite is broken. `run-tier.mjs` now reads an optional
+`.env.test`, with `.env.test.example` committed as the template. The
+parser is hand-rolled (no dependencies allowed) and **real environment
+variables win over the file**, so a one-off override still works and a
+stray local file can never silently redirect CI. Fail-closed survives the
+addition: a file without credentials still produces the refusal, asserted.
+`.env.test` is gitignored **because this repo is public** — and a test
+asserts that gitignore entry exists.
+
+*Verified by 10 further unit cases:* comment/blank handling, one matched
+pair of surrounding quotes stripped (a pasted quoted value would otherwise
+produce a 401 that looks like a wrong key), `=` preserved inside values,
+malformed lines ignored rather than thrown on, empty/null input, real-env
+precedence, an empty real env var **not** blanking a file value (Windows
+hands through empty strings freely), the fail-closed guarantee surviving a
+useless file, and `.env.test.example` carrying the correct variable names —
+a template with a typo'd name is worse than no template, because it
+produces the "both must be set together" error with both lines apparently
+present.
+
+*Operational note — the test project also auto-pauses after 7 days idle.*
+Recommendation on record: **let it pause.** A paused test project makes
+the integration tier fail loudly, is un-paused from the dashboard in about
+30 seconds, and cannot cost any data. The alternative — a second keepalive
+workflow — is one more scheduled job to maintain and monitor through the
+park, and exactly the kind of thing that rots quietly. Revisit only if the
+pausing becomes annoying in practice.
 
 ---
 

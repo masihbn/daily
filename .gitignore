@@ -7,3 +7,6 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+
+# Step D.4: local test-project credentials. This repo is PUBLIC.
+.env.test

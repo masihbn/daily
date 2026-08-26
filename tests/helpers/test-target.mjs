@@ -35,6 +35,49 @@ export const ALLOW_PROD_VAR = 'DAILY_TEST_ALLOW_PRODUCTION';
 // the URL closest to hand — and it would silently defeat the whole step.
 export const PRODUCTION_REF = 'okwzgmvnsdlheuolcthn';
 
+// Minimal KEY=VALUE parser for the gitignored `.env.test` file.
+//
+// WHY A FILE AT ALL: with the production escape hatch gone, `npm test`
+// refuses to run the integration tier unless the test project is configured.
+// Requiring two env vars to be exported by hand every session is a trap
+// during a months-long park — the realistic outcome is that someone
+// concludes the suite is broken. A gitignored file makes `npm test` just
+// work while keeping the credentials out of a PUBLIC repo.
+//
+// Deliberately hand-rolled: this project forbids dependencies, and the
+// format needed is a handful of lines. No `export` prefixes, no multi-line
+// values, no interpolation — anything fancier belongs in the shell.
+export function parseEnvFile(text) {
+  const out = {};
+  for (const rawLine of String(text ?? '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    if (key === '') continue;
+    let value = line.slice(eq + 1).trim();
+    // Strip one matched pair of surrounding quotes, so a pasted value that
+    // came wrapped in quotes does not silently become part of the key.
+    if (value.length >= 2 && ((value[0] === '"' && value.endsWith('"')) || (value[0] === "'" && value.endsWith("'")))) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+// Real environment variables WIN over the file. A one-off
+// `DAILY_TEST_SUPABASE_URL=... npm test` must be able to override whatever is
+// on disk, and CI must never be silently redirected by a stray local file.
+export function mergeEnv(processEnv, fileEnv) {
+  const merged = { ...fileEnv };
+  for (const [k, v] of Object.entries(processEnv ?? {})) {
+    if (typeof v === 'string' && v.trim() !== '') merged[k] = v;
+  }
+  return merged;
+}
+
 export function projectRefOf(url) {
   const m = /^https:\/\/([a-z0-9-]+)\.supabase\.co\/?$/i.exec(String(url ?? '').trim());
   return m ? m[1].toLowerCase() : null;
