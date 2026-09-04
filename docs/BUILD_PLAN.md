@@ -4148,6 +4148,172 @@ confirm the count appears and then clears once the network returns.
 
 ---
 
+## Step D.6b — Reaching imported history: the 1,000-row cap and the range control
+
+**Status:** TODO — **added 2026-09-04 at the user's request, after D.5.**
+Diagnosed but deliberately not fixed in that session; the user asked for
+a plan entry a cold session could execute, not a fix.
+
+**Goal.** The user can look at any month, and any stretch of the trend
+chart, back to the first imported entry — and what they see is complete.
+Today neither is true: the detail screen for Calories cannot show anything
+before June 2026, and the one control that would reach further (the `All`
+range) is about to start silently dropping the *newest* rows.
+
+**Preconditions.** D.5 (there is now enough history to hit the limits).
+Independent of D.7 — do this **before** D.7 and D.8; it is small, and the
+cap bites on a known date (below).
+
+**Deliverables.** `js/api.js` (paginated `listEntries`), `js/views/detail.js`
+and `js/charts/heatmap.js` (however the range/calendar decision below
+lands), amended e2e tests in `tests/e2e/detail.test.mjs` /
+`weekly.test.mjs` / `bounds.test.mjs`, new unit tests for the pager,
+and the D.8 gate check "imported history renders" made meaningful.
+
+**Diagnosis (verified 2026-09-04 against production).** The symptom has
+three independent causes stacked on top of each other. Fix them in order;
+B without A produces a calendar that reaches back to 2023 with holes in
+2026.
+
+- **Cause 1 — the default range is 3M, and the calendar is clamped to it.**
+  `RANGES` in `js/views/detail.js` defaults to `3m` (90 days back from
+  today, so on 2026-09-04 the window starts 2026-06-07 — "June"). The
+  calendar's month navigation is clamped to the range's first month:
+  `monthBoundsFor()` in `js/charts/heatmap.js` derives `min` from `from`,
+  and `clampMonthState()` in `detail.js` re-applies it after every load.
+  So with 3M selected, "back" stops at June. The 3M/6M/1Y/All buttons do
+  exist on the detail screen; two things hide them from the user:
+  1. When the trend chart's granularity is **Daily**, 6M/1Y/All are
+     **disabled** (Step 3.2c, recorded user decision 2026-08-24: 365
+     daily bars are unreadable). Whoever has Daily selected sees three
+     greyed buttons and reasonably concludes there is no way back.
+  2. The range is a *query window*, not a view filter (Step 2.3's "one
+     entries GET per range change", e2e `D6`). The calendar therefore
+     cannot show a month the current range did not fetch.
+- **Cause 2 — PostgREST's 1,000-row cap, and it drops the wrong end.**
+  Supabase's PostgREST `db-max-rows` is 1,000 on this project. Verified:
+  an unfiltered `GET /rest/v1/entries` returns exactly 1,000 of 2,029
+  rows. `api.listEntries()` issues **one** request with no `limit`/`offset`
+  and orders `entry_date.asc,trackable_id.asc`, so when a trackable
+  crosses 1,000 rows the **most recent** rows are the ones cut off — the
+  `All` range would show Calories as if logging had stopped a few weeks
+  ago, with no error. Per-trackable counts on 2026-09-04 (from
+  `Content-Range` with `Prefer: count=exact`):
+
+  | Trackable | id | rows | crosses 1,000 |
+  |---|---|---|---|
+  | Calories | 366 | 989 | **~2026-09-15** at one row/day |
+  | Workout | 365 | 614 | 2027 or later |
+  | Weight | 367 | 419 | 2028 or later |
+  | Smoking | 468 | 7 | — |
+
+  Only the `All` range is exposed today (3M/6M/1Y fetch at most 365 rows
+  per trackable). The home screen fetches a single day and is unaffected.
+  `scripts/backup.mjs` already pages correctly (`PAGE_SIZE`,
+  `buildPageUrl`, loop until a short page) — the client never learned to.
+- **Cause 3 — density at `All`.** Workout has ~255 ISO weeks of history.
+  `All` + Weekly is 255 bars on a 390px canvas; `All` + Monthly is ~60,
+  which is fine and already gets year-suffixed labels (`weekly.js`,
+  `periodLabel`). Not a bug, but the reason "just default to All" is not
+  the whole answer for the trend chart.
+
+**Implementation notes.**
+
+**Part A — paginate `listEntries` (do this regardless of Part B).**
+- Loop `offset`/`limit` in pages of 1,000 until a page comes back short,
+  exactly like `fetchAll()` in `scripts/backup.mjs`; keep the existing
+  `order=entry_date.asc,trackable_id.asc` (offset paging is only safe
+  under a total order — see the comment above `buildPageUrl`). Concatenate
+  and return; callers never see pages.
+- Do **not** "fix" this by raising Max Rows in the Supabase dashboard.
+  That is a per-project setting recorded nowhere in this repo, would not
+  survive a project rebuild from `supabase/migrations/`, and only moves
+  the cliff. Paginating is the fix; a higher cap would merely be a
+  courtesy.
+- The e2e invariant "exactly ONE GET to `/rest/v1/entries` on load"
+  (`detail.test.mjs` D6, `weekly.test.mjs` B16/C14/C18, `bounds.test.mjs`
+  Q9) was written to catch chart slots fetching on their own. Pagination
+  makes it "one *logical* load, N HTTP pages". Amend the assertions to
+  count distinct *load windows* (group requests by their `gte`/`lte`
+  query string, or assert every extra request carries `offset=`), not
+  raw request count. **Restating what a test guards is allowed; deleting
+  it is not** (ORCHESTRATION.md). Keep a test that a chart slot still
+  cannot issue its own fetch.
+- Unit-test the pager with a fake `fetch` returning 1,000 / 1,000 / 37
+  rows: three requests, 2,037 rows, offsets 0/1000/2000, stops on the
+  short page, and a first page of 0 rows makes exactly one request.
+  Integration: seed 1,001+ `__test__` rows on the **test project** (D.4)
+  in one upsert batch (see `restore.mjs`'s `chunk`/`BATCH_SIZE`) and
+  assert the count round-trips; the seeding cost is the reason this test
+  did not exist before.
+- Sanity-check the localStorage mirror afterwards (`persistCache` in
+  `store.js` serialises every cached entry): ~2,100 rows today is roughly
+  250 KB, far under the ~5 MB quota. At one row per trackable per day it
+  grows ~150 KB/year across four trackables — fine for years, but note it
+  in `docs/DATA_MODEL.md` so the ten-year reader is not surprised.
+
+**Part B — let the calendar and chart reach the whole history.** Two
+viable designs; the recommendation is the first. The user should choose
+(AskUserQuestion) because they trade data volume against simplicity.
+
+1. **Recommended — fetch the whole history once, make the range a local
+   filter.** On detail mount, `loadEntriesForRange` loads
+   `{trackableIds:[id]}` with no `from`/`to` (paginated per Part A). The
+   3M/6M/1Y/All buttons then slice `entriesForRange` in memory exactly the
+   way `handlePeriodChange` already re-buckets without fetching. Effects:
+   the calendar's `monthBoundsFor` already falls back to the earliest
+   loaded entry when `from` is null, so month navigation reaches the
+   first imported day with **no heatmap change**; range switches become
+   instant and work offline; the "one logical entries load per detail
+   open" guarantee gets *stronger* (one, not one per range change). Cost:
+   ~1,000 rows ≈ 100 KB per detail open for the biggest trackable today,
+   two paged requests; at ten years, ~3,700 rows and four requests.
+   Acceptable on a phone. Delete the `from`-dependent `resolveRange`
+   plumbing in `refreshEntriesFromStore` or keep it as the in-memory
+   filter — either, but not both paths half-alive.
+2. **Alternative — keep the range as the query window, extend it on
+   demand.** When the user navigates the calendar to a month before the
+   loaded `from`, issue one more `loadEntries` for `[monthStart, from-1]`;
+   the store merges by window already (`loadEntries` keeps rows outside
+   the requested window). Preserves today's fetch volume for the common
+   case but adds a second loading state to the calendar, a new invariant
+   ("one GET per backward navigation past the window"), and the trend
+   chart still cannot see the extended months without a range change.
+   Choose this only if the user objects to loading a full trackable.
+
+- Either way, **keep the Daily → 3M cap** (recorded user decision,
+  2026-08-24). Under design 1 the cap is a filter, not a fetch, so the
+  disabled 6M/1Y/All buttons are the only remaining discoverability
+  problem — give them a `title`/hint ("Daily shows 3 months; pick Weekly
+  or Monthly for more") or, better, make the calendar not care about the
+  trend chart's cap at all, since under design 1 it no longer needs to.
+- Consider whether `All` should nudge the trend chart to Monthly (Cause 3).
+  Not a requirement; if done, make it a suggestion, never a silent
+  switch — "predictable beats clever" is the standing rule from 3.2c.
+- `sw.js`: no cached-asset change is implied, but if `detail.js`,
+  `api.js` or `heatmap.js` change, they are cached assets — **bump
+  `CACHE`** (`daily-v25` as of D.5) or the phone keeps the old code.
+
+**Why this sits in Phase D and not at 3.x.** D.5 imported three years of
+history precisely so the user could see trends; a UI that cannot reach
+past June, and an `All` range that silently truncates from 2026-09-15,
+would make the Phase D gate's "imported history renders in both the
+calendar and the charts" check pass only for the last 90 days. Part A is
+a correctness bug with a date on it. Part B is what the user asked for
+on 2026-09-04: "when I look at the monthly view or the weekly trend,
+there's no way for me to see before June."
+
+**Test Subjects.**
+
+_(To be filled in by the executing session. At minimum: the pager unit
+and integration cases above; an e2e that seeds 14 months of entries on
+the test project and, under whichever Part B design lands, navigates the
+calendar to the earliest month and finds the seeded day marked; and the
+amended load-once assertions still failing when a chart slot fetches on
+its own.)_
+
+---
+
 ## Step D.7 — RLS hardening + single-user Supabase Auth (moved from 5.3)
 
 **Status:** TODO
@@ -4203,7 +4369,8 @@ _(To be filled in by the executing session.)_
 parked deliberately, where to resume, and what has been running unattended
 in the meantime.
 
-**Preconditions.** D.0–D.7.
+**Preconditions.** D.0–D.7, including D.6b (the gate check "imported
+history renders" is only meaningful once the calendar can reach it).
 
 **Deliverables.** `CLAUDE.md`, `docs/BUILD_PLAN.md`,
 `docs/PROJECT_NOTES.md`, `docs/DATA_MODEL.md` updated.
@@ -4653,3 +4820,10 @@ unwind than to ask about.
   files; the orchestrator transforms and pushes them. Stated twice by the
   user after an earlier draft got it backwards. Do not re-scope it into a
   settings-screen importer.
+- **2026-09-04** — **Step D.6b added** (after D.5, at the user's request,
+  diagnosed but not fixed): the detail screen cannot reach history before
+  the 3M default window, and Supabase's 1,000-row PostgREST cap will start
+  silently truncating the `All` range for Calories around 2026-09-15.
+  Recorded as a plan step for a cold session rather than fixed in place.
+  Recommended shape: paginate `listEntries`, then load a trackable's whole
+  history once and make the range control a local filter.

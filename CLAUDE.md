@@ -19,8 +19,9 @@ charts, all wired to `js/api.js` / `js/store.js`.
 historical data imported from CSV.** That is why the next work is
 **Phase D — Daily-use readiness**, inserted in `BUILD_PLAN.md` *before*
 Step 3.4. Phase D is backups, moving the test suite off the production
-database, entry provenance, the CSV import, outbox durability, and RLS
-hardening. **When feature work resumes, resume at Step 3.4** — nothing in
+database, entry provenance, the CSV import, outbox durability, reaching
+the imported history in the UI (D.6b — the 1,000-row PostgREST cap and
+the 3M range clamp), and RLS hardening. **When feature work resumes, resume at Step 3.4** — nothing in
 Phase D changes what 3.4 onward need to do.
 
 **Two things that will bite an unwary session during the park:**
