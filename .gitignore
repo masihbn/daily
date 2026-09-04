@@ -10,3 +10,7 @@ blob-report/
 
 # Step D.4: local test-project credentials. This repo is PUBLIC.
 .env.test
+
+# Step D.5: raw CSV exports of personal history. NEVER commit — this repo is PUBLIC.
+# The verbatim copies live in the private backup repo.
+data/

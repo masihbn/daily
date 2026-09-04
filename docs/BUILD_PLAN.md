@@ -3858,7 +3858,12 @@ pausing becomes annoying in practice.
 
 ## Step D.5 — CSV import (one-off, orchestrator-run)
 
-**Status:** TODO — blocked on the user supplying the CSV files.
+**Status:** DONE (2026-09-04) — **2,005 rows written to production** across
+three batches, every one verified by count and spot-check; originals and
+run logs archived in `masihbn/daily-backups` under `imports/2026-09-04/`.
+Suite green at **3,596** (3418 unit, 47 integration, 131 e2e). **Not yet
+device-verified** — the Phase D gate covers "imported history renders in
+the calendar and the charts".
 
 **Goal.** The user's existing workout and calorie history is in the
 database, correctly dated, and removable in one statement if it is wrong.
@@ -3906,7 +3911,86 @@ CSVs archived verbatim to the backup repo.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+*What was imported (all user-approved on 2026-09-04 after a dry-run
+report, per file):*
+
+| file | trackable | batch id (`source`) | days in file | written | skipped (collision) |
+|---|---|---|---|---|---|
+| `Nutrition-Summary-2023-07-15-to-2026-09-04.csv` | Calories | `import:calories-2026-09-04` | 989 | **977** | 12 |
+| `strong_workouts (2).csv` | Workout | `import:workout-2026-09-04` | 612 | **612** | 0 |
+| `weight_Masih_1788553012.csv` | Weight | `import:weight-2026-09-04` | 417 | **416** | 1 |
+
+All 23,256 CSV rows parsed; **0 unparseable**. The 13 skipped days are
+the ones the user had already logged in the app since 2026-08-24, and
+`--on-collision skip` kept the app's values — they were the user's own
+rounded copies of the same totals (e.g. app 1717 vs file 1717.4), so
+nothing was lost.
+
+*Collapse decisions (the lossy step, chosen by the user, not inferred):*
+Calories = **sum** of the meal rows per day (the file is one row per
+meal, 976 of 989 days have several). Weight = **first** reading of the
+day (37 days had 2–4 weigh-ins; only 4 differed by ≥1 kg, and one was a
+clear scale glitch — 80.9 then 87.1 a minute apart on 2026-01-24 with
+80.6 / 80.1 on the neighbouring days — which `first` discards and
+`average` would have baked in as 84.0). Workout = **1 per day**, the
+workout name(s) joined into `note` (e.g. `Chest Biceps`, or
+`Chest + Evening Workout` on the one two-session day, 2024-06-16).
+
+*The timezone trap, found and handled.* Strong stores instants and
+renders its export in the phone's **current** zone, not the zone the
+workout happened in. Through 2023-07-19 every session sits at
+01:00–16:00 with auto-names like "Afternoon Workout" at 08:00 and
+"Morning Workout" at 02:43; from 2023-11-16 onward every session sits at
+17:00–23:00. That is Tehran (UTC+3:30) rendered in Toronto — an 8.5 h
+shift — and the user confirmed it. Modelled as
+`--source-tz America/Toronto --local-tz America/Toronto
+--local-tz-until 2023-09-01=Asia/Tehran`. **It moved zero days**: no
+pre-move session was rendered late enough (≥15:30 EST / ≥16:30 EDT) to
+cross Tehran midnight. So the calendar days are right under either
+reading, but the assumption is on record rather than silent. The
+nutrition file carries plain dates (no conversion needed); the weight
+file is entirely post-move.
+
+*Verified after writing (direct SQL, not the script's own count):*
+`entries` total **2,029** = 2,005 imported + 24 app rows; **0** app rows
+have an `updated_at` inside the import window; **0** duplicate
+`(trackable_id, entry_date)` pairs; per-batch counts exactly match the
+report. Spot checks: Calories 2023-07-15 = 1987.6 (694.9+641.9+650.8),
+2024-10-04 = 6174.4, 2026-09-03 still the app's 4163 with `source` null;
+Weight 2023-11-24 = 82, 2025-08-31 = 81.1 (the 07:14 reading, not the
+13:53 one — the scale export is newest-first, so file order is the wrong
+order for `first`), 2026-01-24 = 80.9, 2026-08-26 still the app's 86.6;
+Workout 2021-10-22 note `Chest + Biceps`, 2024-06-16 note
+`Chest + Evening Workout`.
+
+*Reversibility.* A fresh `scripts/backup.mjs` dump (24 entries) was
+taken immediately before the first write. The three safe-undo statements
+(scoped on `updated_at` per the D.2 finding) are in the archived logs;
+batch finish timestamps: calories `2026-09-04T20:44:33.098Z`, workout
+`2026-09-04T20:44:40.087Z`, weight `2026-09-04T20:44:42.371Z`.
+
+*Verified by unit tests (`tests/unit/import-csv.test.mjs`, 38 cases):*
+CSV parsing (quotes, doubled quotes, CRLF, BOM); the zone conversion at
+both sides of the Tehran-midnight boundary in winter and summer (Iran
+dropped DST in 2022, so the boundary moves), era splitting, and the
+identity case inside a Toronto DST gap/overlap; every collapse rule from
+both sides, including the refusal to collapse a multi-row day without an
+explicit rule; `first`/`last` following timestamp order rather than file
+order; collision policy; and the arg guards — no `--target`, no run.
+
+*Two things noticed and deliberately NOT acted on:*
+1. **Smoking has drifted from what D.1 recorded.** It is now
+   `value_shape='boolean'`, `aggregation='count'`, `target weekly_count 1`,
+   with a new id (468 vs the original 365–367 range) — the user evidently
+   deleted and recreated it in the app. The 7 rows logged so far are all
+   `1`. Not touched; no CSV was supplied for it. If the numeric-count
+   intent from D.1 still holds, revisit before more history accumulates.
+2. **D.1 deferred enabling auto-bounds on Weight until the import
+   supplied enough readings.** It now has 419. Left off, for the user to
+   decide at the Phase D gate.
+
+*Also done:* `data/` added to `.gitignore` with a comment saying why —
+the CSVs were sitting untracked in the PUBLIC repo's working tree.
 
 ---
 

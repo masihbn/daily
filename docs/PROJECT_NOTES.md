@@ -315,6 +315,48 @@ personal**:
 
 ## Test log
 
+### Attempt 11 — 2026-09-04, Step D.5: three years of history imported from CSV
+
+**Context**: the user had dropped three CSV exports into an untracked
+`data/` folder — MyFitnessPal-style nutrition (one row per meal), Strong
+(one row per set), and a smart-scale export (one row per weigh-in). Step
+D.5 was blocked on exactly these. First action was adding `data/` to
+`.gitignore`: this repo is public and a stray `git add .` would have
+published three years of calorie and body-composition history.
+
+**Result: 2,005 rows written to production** — Calories 977, Workout 612,
+Weight 416 — each tagged with a batch id in `entries.source`, after a
+dry-run report per file and explicit user approval of the two lossy
+choices (calories = sum of meals, weight = first reading of the day).
+Verified by direct SQL: totals add up, 0 duplicate days, 0 app rows
+touched, spot checks correct. Originals and run logs archived in the
+private `masihbn/daily-backups` repo under `imports/2026-09-04/`. Full
+detail in `BUILD_PLAN.md` → D.5 Test Subjects.
+
+**The one real finding — Strong renders its export in the phone's
+*current* timezone.** Pre-mid-2023 sessions showed at 02:00–16:00 with
+auto-names like "Afternoon Workout" at 08:00; the user lived in Tehran
+then and Toronto now, an 8.5 h shift. `scripts/import-csv.mjs` gained
+`--source-tz <IANA>` / `--local-tz` / `--local-tz-until <date>=<zone>`
+to model it. It moved zero days in this file, but a later-evening gym
+habit in the old country would have put every session on the wrong day
+silently. Any future timestamped import must be run with the same flags.
+
+**Two things worth saving future-you:**
+
+- The scale export is **newest-first**, so "first reading of the day"
+  must sort by timestamp, not take the first row in file order. Caught
+  by a unit test before the write; it would otherwise have picked the
+  evening weigh-in on every double day.
+- `Smoking` in production no longer matches D.1's record (it is boolean
+  again, with a new id) — the user recreated it in the app. Not touched
+  here; flagged in D.5 for the gate.
+
+**Not device-verified.** The Phase D gate's "imported history renders in
+the calendar and the charts" check is still open; the calendar now has
+~1,000 Calories days and ~600 Workout days to draw, which is the first
+time the charts have seen real volume.
+
 ### Attempt 10 — 2026-08-25, Step D.0: Phase 3 device check + trial-data wipe
 
 **Context**: the user decided to **park feature work at Step 3.3b** and
