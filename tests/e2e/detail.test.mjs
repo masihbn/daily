@@ -161,7 +161,11 @@ async function routeTrackables(page, trackables) {
 // good enough for every case except D10, which needs per-trackable data.
 // Returns `getRequests`, an array of { url } this test can assert counts/
 // query-strings on — this is what D5/D6/D7 key their assertions off of.
-async function routeEntries(page, { getFixture = [] } = {}) {
+// getDelayMs is new for D18 (order-holds-while-loading case): every other
+// existing call site omits it (defaults to 0), so this is additive and does
+// not change any existing test's behaviour. Same mechanic as
+// tests/e2e/weekly.test.mjs's B16, copied locally rather than imported.
+async function routeEntries(page, { getFixture = [], getDelayMs = 0 } = {}) {
   const getRequests = [];
   await page.route('**/rest/v1/entries*', async (route) => {
     const req = route.request();
@@ -170,6 +174,7 @@ async function routeEntries(page, { getFixture = [] } = {}) {
       return;
     }
     getRequests.push({ url: req.url() });
+    if (getDelayMs) await new Promise((resolve) => setTimeout(resolve, getDelayMs));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -211,6 +216,22 @@ async function routeEntriesByTrackable(page, fixturesById) {
 
 function chartSlotKeys(page) {
   return page.locator('.chart-slot').evaluateAll((els) => els.map((el) => el.getAttribute('data-slot')));
+}
+
+// D17/D18: maps each DIRECT child of section.detail to a short descriptor
+// (tag + class list + data-slot, e.g. 'section.chart-slot[data-slot="heatmap"]')
+// so the exact DOM order can be asserted with a single array equality,
+// including anything unexpected (an offline banner, a stray node) that a
+// looser per-selector assertion would silently ignore.
+function detailChildDescriptors(page) {
+  return page.locator('section.detail').evaluate((section) =>
+    Array.from(section.children).map((el) => {
+      const tag = el.tagName.toLowerCase();
+      const cls = el.className && el.className.trim() ? `.${el.className.trim().split(/\s+/).join('.')}` : '';
+      const slot = el.getAttribute('data-slot');
+      return `${tag}${cls}${slot ? `[data-slot="${slot}"]` : ''}`;
+    })
+  );
 }
 
 // Step D.6b (D14): a route that inspects the requested offset= and serves a
@@ -842,5 +863,97 @@ test('D16 — a trackable with ZERO entries can navigate the calendar back to th
   await expect(page.locator('.hm-nav[data-heatmap-nav="prev"]')).toBeDisabled();
 
   expect(getRequests.length).toBe(1);
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// D17 — the range control's new position (Step D.6b follow-up, 2026-09-04):
+// it now sits directly above the charts it governs (weekly trend + bounds),
+// not at the top of the screen, since it does not affect the calendar
+// (calendarFrom() reads allEntries regardless — see D12/D13). The heatmap
+// slot is deliberately the one thing left above it.
+// ===========================================================================
+
+test('D17 — the range control sits between the calendar and the trend chart: section.detail\'s children are head, heatmap slot, .detail-ranges, .detail-count, weekly slot, then the rest', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  // T_NUM_BOUNDS + T_OTHER => bounds_enabled numeric with otherTrackableCount
+  // > 0 => all four slots (heatmap, weekly, bounds, overlay), same fixture
+  // pairing as D3/D6, so every slot named in the contract's sequence is
+  // actually present to check.
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  const { getRequests } = await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.chart-slot')).toHaveCount(4);
+  await expect.poll(() => getRequests.length).toBe(1);
+
+  const descriptors = await detailChildDescriptors(page);
+  expect(descriptors).toEqual([
+    'header.detail-head',
+    'section.chart-slot[data-slot="heatmap"]',
+    'div.detail-ranges',
+    'p.detail-count',
+    'section.chart-slot[data-slot="weekly"]',
+    'section.chart-slot[data-slot="bounds"]',
+    'section.chart-slot[data-slot="overlay"]',
+  ]);
+
+  // The control still works from its new place: clicking it is a pure
+  // local filter (same load-once guard as D6/D7) — data-range updates and
+  // no further request is issued.
+  await page.locator('.detail-range[data-range="6m"]').click();
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '6m');
+  await page.waitForTimeout(300);
+  expect(getRequests.length).toBe(1);
+
+  expect(unexpected).toEqual([]);
+});
+
+// ===========================================================================
+// D18 — the same order holds while the charts are still loading (Step
+// 3.2b's U1 loading placeholder, still true after the D17 reorder): the
+// range control and count line are appended in their fixed position inside
+// render() regardless of chartsPending, so they must not shift while every
+// slot shows `.chart-slot-loading` instead of its real chart.
+// ===========================================================================
+
+test('D18 — the same order holds while the charts are still loading', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  // Delayed entries response (same mechanic as weekly.test.mjs's B16,
+  // copied locally rather than imported) — long enough to reliably observe
+  // the loading placeholders before the GET resolves.
+  const { getRequests } = await routeEntries(page, { getFixture: [], getDelayMs: 800 });
+
+  await page.goto('/index.html#/t/366');
+
+  // trackablesLoaded alone is enough for computeState() to report 'ready'
+  // (see js/views/detail.js computeState()) — entries are still in flight.
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.chart-slot')).toHaveCount(4);
+  await expect(page.locator('.chart-slot-loading').first()).toBeVisible();
+  // Every visible slot shows its placeholder, not just the first.
+  expect(await page.locator('.chart-slot-loading').count()).toBe(4);
+
+  const descriptors = await detailChildDescriptors(page);
+  expect(descriptors).toEqual([
+    'header.detail-head',
+    'section.chart-slot[data-slot="heatmap"]',
+    'div.detail-ranges',
+    'p.detail-count',
+    'section.chart-slot[data-slot="weekly"]',
+    'section.chart-slot[data-slot="bounds"]',
+    'section.chart-slot[data-slot="overlay"]',
+  ]);
+
+  // Let the delayed response resolve and confirm the placeholders clear —
+  // proves the assertion above really was taken mid-load, not after.
+  await expect.poll(() => getRequests.length).toBe(1);
+  await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
+
   expect(unexpected).toEqual([]);
 });

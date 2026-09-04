@@ -4352,6 +4352,13 @@ there's no way for me to see before June."
   fixtures could no longer navigate to the previous month). Judged as a
   product regression, not a stale test: fixed in code with the 90-day
   floor; H3/H4 untouched and green afterwards.
+- **Follow-up, same day (device check)** — the user found the range
+  control confusing at the top of the screen now that the calendar
+  ignores it. It and the count line moved to sit between the calendar
+  and the trend chart (`CACHE` → `daily-v27`). E2E D17 asserts the exact
+  child order of `section.detail`; D18 asserts it during the loading
+  placeholder too. Suite after the move: 3455 unit, 48
+  integration, 138 e2e — 3641 total.
 
 ---
 
@@ -4874,4 +4881,6 @@ unwind than to ask about.
   calendar's reach after the first suite run showed empty trackables
   locked to the current month. `sw.js` `CACHE` → `daily-v26`.
   ORCHESTRATION.md's model policy reworded from "Opus" to "top tier"
-  (Fable 5.1 orchestrated this step).
+  (Fable 5.1 orchestrated this step). After the device check the user
+  asked for the range control to move below the calendar, above the
+  charts it governs — done the same day (`daily-v27`).

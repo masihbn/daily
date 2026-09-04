@@ -1205,10 +1205,12 @@ button.hm-cell {
 }
 
 /* Trend granularity control (Step 3.2c) ---------------------------------
-   Sits ON the trend chart, unlike .detail-ranges which stays global at the
-   top of the screen: the range also bounds the heatmap's navigable months,
-   whereas bucketing affects only this one chart. Same visual idiom as
-   .detail-range so the two read as controls of the same family. */
+   Sits ON the trend chart. .detail-ranges now sits between the calendar
+   and the trend chart (Step D.6b follow-up, 2026-09-04) rather than at
+   the top of the screen, because it governs only the trend and range
+   charts, not the heatmap — see js/views/detail.js's comment above where
+   rangesDiv is built. Same visual idiom as .detail-range so the two read
+   as controls of the same family. */
 
 .trend-periods {
   display: flex;

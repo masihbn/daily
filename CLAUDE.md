@@ -41,7 +41,7 @@ Phase D changes what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3639 tests as of Step D.6b** (3455 unit, 48 integration, 136 e2e). See
+**3641 tests as of Step D.6b** (3455 unit, 48 integration, 138 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s

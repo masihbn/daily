@@ -511,6 +511,17 @@ export function createDetailView({ id, store, api, today } = {}) {
 
     section.appendChild(header);
 
+    // Step D.6b follow-up (2026-09-04): the range control sits directly
+    // above the charts it governs (weekly trend + bounds/range), not at
+    // the top of the screen — it does NOT affect the calendar (see
+    // calendarFrom()), and placing it above the calendar read as if it
+    // did, which is exactly the confusion this reordering fixes. The
+    // calendar heatmap slot is deliberately the one thing above this
+    // control, since it's the one chart that ignores it. Built here
+    // (same markup as before) but appended below, inside the slot loop,
+    // immediately before the 'weekly' slot's section — visibleSlots()
+    // guarantees 'weekly' is always present and always second, so this
+    // always lands right after the heatmap slot.
     const rangesDiv = document.createElement('div');
     rangesDiv.className = 'detail-ranges';
     rangesDiv.setAttribute('role', 'group');
@@ -527,16 +538,22 @@ export function createDetailView({ id, store, api, today } = {}) {
       btn.textContent = r.label;
       rangesDiv.appendChild(btn);
     }
-    section.appendChild(rangesDiv);
 
     const n = entriesForRange.length;
     const countP = document.createElement('p');
     countP.className = 'detail-count';
     countP.textContent = n === 1 ? '1 entry in range' : `${n} entries in range`;
-    section.appendChild(countP);
 
     const slots = visibleSlots(trackable, otherTrackableCount);
     for (const slot of slots) {
+      if (slot === 'weekly') {
+        // See the comment above rangesDiv's construction: this is where
+        // the range control and count line land, between the heatmap
+        // slot (already appended) and the weekly slot (about to be).
+        section.appendChild(rangesDiv);
+        section.appendChild(countP);
+      }
+
       const slotSection = document.createElement('section');
       slotSection.className = 'chart-slot';
       slotSection.dataset.slot = slot;
