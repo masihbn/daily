@@ -192,6 +192,50 @@ export async function upsertTestEntry(trackable, { entry_date, value, note } = {
   return rows[0];
 }
 
+// Step D.6b: bulk-seeds entries for a pagination test (1,000+ rows) without
+// issuing one POST per row. Mirrors scripts/restore.mjs's batch-upsert shape
+// (chunk into BATCH_SIZE-ish groups, POST each batch with
+// on_conflict=trackable_id,entry_date and Prefer:
+// resolution=merge-duplicates,return=minimal) rather than createTestEntry's
+// one-row-at-a-time POST. This is a WRITE (POST) helper, not a destructive
+// one — it builds no DELETE/PATCH URL; entries cascade-delete with their
+// parent trackable via cleanupTestRows()/deleteTestTrackablesByName().
+const UPSERT_BATCH_SIZE = 500;
+
+export async function upsertTestEntries(trackable, rows) {
+  assertTestName(trackable && trackable.name);
+  if (!trackable || trackable.id === undefined || trackable.id === null) {
+    throw new Error('upsertTestEntries requires a trackable row object with an id');
+  }
+  const list = Array.isArray(rows) ? rows : [];
+
+  let written = 0;
+  for (let i = 0; i < list.length; i += UPSERT_BATCH_SIZE) {
+    const batch = list
+      .slice(i, i + UPSERT_BATCH_SIZE)
+      .map((r) => withoutUndefined({ trackable_id: trackable.id, ...r }));
+    if (batch.length === 0) continue;
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/entries?on_conflict=trackable_id,entry_date`,
+      {
+        method: 'POST',
+        headers: {
+          ...standardHeaders(),
+          Prefer: 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify(batch),
+      }
+    );
+    if (!res.ok) {
+      const { text, json } = await parseBody(res);
+      throwHttpError(res.status, text, json);
+    }
+    written += batch.length;
+  }
+  return written;
+}
+
 export async function deleteTestTrackablesByName(name) {
   assertTestName(name);
   const url = buildDeleteByNameUrl(name);

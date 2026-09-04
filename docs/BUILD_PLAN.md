@@ -4150,9 +4150,14 @@ confirm the count appears and then clears once the network returns.
 
 ## Step D.6b — Reaching imported history: the 1,000-row cap and the range control
 
-**Status:** TODO — **added 2026-09-04 at the user's request, after D.5.**
-Diagnosed but deliberately not fixed in that session; the user asked for
-a plan entry a cold session could execute, not a fix.
+**Status:** DONE — 2026-09-04, same day it was added. Executed under the
+ORCHESTRATION.md loop (Implementer + Test Author in parallel, Runner,
+one fix cycle). User decisions taken at execution time: Part B design 1
+(whole history once, range = local filter); the calendar always reaches
+the first entry; no `All`+Weekly nudge. One orchestrator decision after
+the first suite run: the calendar's reach has a **90-day floor**
+(`calendarFrom` in `detail.js`) so a new or empty trackable can still
+back-fill the previous ~3 months, as it could before this step.
 
 **Goal.** The user can look at any month, and any stretch of the trend
 chart, back to the first imported entry — and what they see is complete.
@@ -4303,14 +4308,50 @@ a correctness bug with a date on it. Part B is what the user asked for
 on 2026-09-04: "when I look at the monthly view or the weekly trend,
 there's no way for me to see before June."
 
-**Test Subjects.**
+**Test Subjects** (all green 2026-09-04: 3455 unit, 48 integration,
+136 e2e — 3639 total).
 
-_(To be filled in by the executing session. At minimum: the pager unit
-and integration cases above; an e2e that seeds 14 months of entries on
-the test project and, under whichever Part B design lands, navigates the
-calendar to the earliest month and finds the seeded day marked; and the
-amended load-once assertions still failing when a chart slot fetches on
-its own.)_
+- **Unit, `tests/unit/api.test.mjs`** — `listEntries` pagination with a
+  sequenced fake fetch: 1000/1000/37 rows → three requests at offsets
+  0/1000/2000, 2,037 rows in order, every page carrying the same filters
+  and `limit=1000`; a first page of 0 rows → one request; exactly 1000
+  then 0 → two requests; 999 → one; a non-array body → `[]`; HTTP 500 on
+  page 2 → `ApiError` with nothing partial; a rejected fetch on page 2 →
+  `NetworkError`; validation failures still make zero fetches. The six
+  pre-existing exact-URL assertions now end in `&offset=0&limit=1000`.
+- **Unit, `tests/unit/detail-model.test.mjs`** — `historyFrom`: earliest of
+  an unsorted array, single row, empty/non-array → null, malformed rows
+  skipped, never throws. `calendarFrom` / `CALENDAR_FLOOR_DAYS`: the floor
+  is `addDays(today, -89)`; an earlier first entry wins; a later one, an
+  entry on the floor day, and no entries at all return the floor; never
+  null, never throws.
+- **Integration, `tests/integration/pagination.test.mjs`** (test project
+  only) — seeds 1,001 consecutive daily rows on `__test__d6b_pager` via the
+  new batched `upsertTestEntries` helper, then (a) proves the cap: one
+  unpaged GET returns exactly 1,000 rows; (b) `listEntries` returns all
+  1,001, ascending, no duplicates, first 2023-12-06 / last 2026-09-01;
+  (c) a full-span `from`/`to` also returns 1,001; (d) a one-day window
+  returns 1. Cleanup cascades with the trackable.
+- **E2E, `tests/e2e/detail.test.mjs`** — restated: D5 (mount GET carries
+  `trackable_id=in.(366)`, `offset=0`, `limit=1000` and no `gte`/`lte`),
+  D6 (four slots, one GET; 1Y adds none), D7 (6M/1Y/All each add none).
+  New: D12 (with 3M selected the calendar walks back to January 2024, the
+  seeded day is marked, days before it are `before`, count line still
+  "1 entry in range"), D13 (same with the trend chart on Daily and
+  6M/1Y/All disabled), D14 (a paged mock serving 1,000 + 5 rows → exactly
+  two GETs at offsets 0 and 1000, `All` shows "1005 entries in range" with
+  no third request), D15 (tapping a day outside the 3M slice opens the
+  editor pre-filled with that day's value and a Clear button), D16 (a
+  trackable with zero entries navigates back exactly to the month 89 days
+  ago and no further).
+- **E2E, `tests/e2e/weekly.test.mjs`** — C15 restated: switching to Daily
+  from 1Y forces 3M with **zero** new requests (was "+1"). Every other
+  load-once assertion (X2/B16/C14/C18, heatmap H2, bounds P2) passes
+  unchanged because sub-1,000-row fixtures are a single page.
+- **Fix cycle 1** — the first run failed heatmap H3/H4 (zero-entry
+  fixtures could no longer navigate to the previous month). Judged as a
+  product regression, not a stale test: fixed in code with the 90-day
+  floor; H3/H4 untouched and green afterwards.
 
 ---
 
@@ -4827,3 +4868,10 @@ unwind than to ask about.
   Recorded as a plan step for a cold session rather than fixed in place.
   Recommended shape: paginate `listEntries`, then load a trackable's whole
   history once and make the range control a local filter.
+- **2026-09-04** — **Step D.6b executed.** User chose design 1 (whole
+  history once, range = local filter), calendar always reaches the first
+  entry, no `All`+Weekly nudge. Orchestrator added a 90-day floor to the
+  calendar's reach after the first suite run showed empty trackables
+  locked to the current month. `sw.js` `CACHE` → `daily-v26`.
+  ORCHESTRATION.md's model policy reworded from "Opus" to "top tier"
+  (Fable 5.1 orchestrated this step).

@@ -20,8 +20,9 @@ historical data imported from CSV.** That is why the next work is
 **Phase D — Daily-use readiness**, inserted in `BUILD_PLAN.md` *before*
 Step 3.4. Phase D is backups, moving the test suite off the production
 database, entry provenance, the CSV import, outbox durability, reaching
-the imported history in the UI (D.6b — the 1,000-row PostgREST cap and
-the 3M range clamp), and RLS hardening. **When feature work resumes, resume at Step 3.4** — nothing in
+the imported history in the UI (D.6b, done 2026-09-04 — `listEntries`
+now pages past the 1,000-row PostgREST cap and the detail screen loads a
+trackable's whole history once), and RLS hardening. **When feature work resumes, resume at Step 3.4** — nothing in
 Phase D changes what 3.4 onward need to do.
 
 **Two things that will bite an unwary session during the park:**
@@ -40,7 +41,7 @@ Phase D changes what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3455 tests as of Step 3.3b** (3286 unit, 43 integration, 126 e2e). See
+**3639 tests as of Step D.6b** (3455 unit, 48 integration, 136 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -71,7 +72,8 @@ since been migrated to match (migration `0003`, applied 2026-08-22) —
 first, then `docs/BUILD_PLAN.md`.**
 
 - `ORCHESTRATION.md` — **how the session runs.** Model policy (this
-  session must be **Opus**; all subagents **Sonnet**), the four
+  session must be a **top-tier model — Fable 5.1 or Opus**; all
+  subagents **Sonnet**), the four
   subagent roles, the implement→test→fix loop, prompt templates,
   escalation rules. Read it before spawning anything.
 - `BUILD_PLAN.md` — **what to build, in order.** Numbered steps with
@@ -150,7 +152,7 @@ package.json         TEST-ONLY (Playwright devDep + scripts). Does NOT
                       step; GitHub Pages ignores it. node_modules/ is
                       gitignored and must never reach Pages.
 docs/                 all notes/reference docs live here (see below)
-  ORCHESTRATION.md     HOW SESSIONS RUN — Opus orchestrator, Sonnet
+  ORCHESTRATION.md     HOW SESSIONS RUN — top-tier orchestrator, Sonnet
                         subagents, the implement→test→fix loop, phase
                         gates. Read before executing any build step.
   BUILD_PLAN.md        THE EXECUTION PLAN — numbered, ordered steps from

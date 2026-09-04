@@ -271,6 +271,15 @@ export async function archiveTrackable(id) {
 
 // --- entries -----------------------------------------------------------
 
+// PostgREST's db-max-rows is 1,000 on this project — a single unfiltered
+// GET /rest/v1/entries silently truncates to the first 1,000 rows in
+// server order (verified 2026-09-04; see BUILD_PLAN.md Step D.6b). Since
+// listEntries() orders by entry_date.asc, an unpaged call would drop the
+// MOST RECENT rows once a trackable crosses that count with no error at
+// all. listEntries() below pages through offset/limit until a short page
+// comes back, mirroring scripts/backup.mjs's fetchAll()/buildPageUrl().
+export const ENTRIES_PAGE_SIZE = 1000;
+
 export async function listEntries({ trackableIds, from, to } = {}) {
   const parts = ['select=*'];
 
@@ -298,9 +307,28 @@ export async function listEntries({ trackableIds, from, to } = {}) {
 
   parts.push('order=entry_date.asc,trackable_id.asc');
 
-  const url = `${SUPABASE_URL}/rest/v1/entries?${parts.join('&')}`;
-  const rows = await request('GET', url, { headers: baseHeaders() });
-  return Array.isArray(rows) ? rows : [];
+  const base = parts.join('&');
+
+  // Offset paging is only safe under a total order over all rows: this
+  // query's order (entry_date, trackable_id) is unique because of the
+  // (trackable_id, entry_date) uniqueness constraint on `entries`, so no
+  // row can be skipped or duplicated across page boundaries. Every page
+  // reissues the exact same filters/order as the first, varying only
+  // offset/limit — appended after `order=`, in that order, so a page URL
+  // is always `<base>&offset=<n>&limit=1000`.
+  const rows = [];
+  for (let offset = 0; ; offset += ENTRIES_PAGE_SIZE) {
+    const url = `${SUPABASE_URL}/rest/v1/entries?${base}&offset=${offset}&limit=${ENTRIES_PAGE_SIZE}`;
+    const page = await request('GET', url, { headers: baseHeaders() });
+    const pageRows = Array.isArray(page) ? page : [];
+    rows.push(...pageRows);
+    // A short page (including empty) means there is no more data. A full
+    // page means there may be more, so we always issue one extra request
+    // rather than guessing from a count header — same rule as
+    // scripts/backup.mjs's fetchAll().
+    if (pageRows.length < ENTRIES_PAGE_SIZE) break;
+  }
+  return rows;
 }
 
 export async function upsertEntry(entry) {

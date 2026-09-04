@@ -30,6 +30,7 @@ const {
   deleteEntry,
   getSettings,
   updateSettings,
+  ENTRIES_PAGE_SIZE,
 } = api;
 
 const BASE = SUPABASE_URL;
@@ -72,6 +73,45 @@ afterEach(() => {
 
 function lastCall(calls) {
   return calls[calls.length - 1];
+}
+
+// Step D.6b: listEntries now pages through PostgREST's 1,000-row cap, which
+// means a single test case can involve several sequential fetch() calls that
+// must return DIFFERENT bodies (page 1, page 2, ...). installFetch() above
+// always returns the same configured response for every call, so it cannot
+// express "page 1 has 1000 rows, page 2 has 37". installFetchSequence()
+// records every call exactly like installFetch() but returns the Nth
+// configured response for the Nth call (the last configured response repeats
+// if more calls happen than responses were supplied, which no pagination
+// test here relies on).
+function installFetchSequence(responses) {
+  const calls = [];
+  let callIndex = 0;
+  const stub = async (url, init = {}) => {
+    const record = {
+      url: String(url),
+      method: init.method || 'GET',
+      headers: { ...(init.headers || {}) },
+      body: init.body,
+    };
+    calls.push(record);
+    const resp = responses[Math.min(callIndex, responses.length - 1)] || {};
+    callIndex += 1;
+    if (resp.reject) {
+      throw resp.reject;
+    }
+    const { status = 200, body = [] } = resp;
+    const responseText =
+      resp.text !== undefined ? resp.text : body === null ? '' : JSON.stringify(body);
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => responseText,
+      json: async () => JSON.parse(responseText),
+    };
+  };
+  globalThis.fetch = stub;
+  return calls;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,13 +159,19 @@ describe('exact method + URL per function', () => {
     assert.equal(lastCall(calls).url, `${BASE}/rest/v1/trackables?id=eq.5`);
   });
 
+  // Step D.6b: listEntries now pages through PostgREST's 1,000-row cap, so
+  // even a single-page result (this fixture returns 0 rows, well under the
+  // page size) carries the offset/limit pair on every request — amended
+  // per CONTRACT-D.6b.md §1.3's worked example, which appends
+  // '&offset=0&limit=1000' after 'order=...' on every page including the
+  // first.
   it('listEntries GET with all params in order', async () => {
     const calls = installFetch({ body: [] });
     await listEntries({ trackableIds: [1, 2], from: '2026-01-01', to: '2026-01-31' });
     assert.equal(lastCall(calls).method, 'GET');
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&trackable_id=in.(1,2)&entry_date=gte.2026-01-01&entry_date=lte.2026-01-31&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&trackable_id=in.(1,2)&entry_date=gte.2026-01-01&entry_date=lte.2026-01-31&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
   });
 
@@ -453,13 +499,20 @@ describe('listEntries — validation, zero fetches on invalid input', () => {
   });
 });
 
+// Step D.6b (CONTRACT-D.6b.md §1.3): every request now carries
+// '&offset=0&limit=1000' after 'order=...', on the first page as much as
+// any later one — these fixtures all return 0 rows (well under the page
+// size), so each case here still makes exactly one request, but that
+// request's URL now ends with the offset/limit pair. This restates the
+// exact-URL assertions to the new invariant; it does not change what each
+// case is checking (which params are present for which inputs).
 describe('listEntries — partial params build corresponding URL, order always present', () => {
   it('no params at all: only select and order', async () => {
     const calls = installFetch({ body: [] });
     await listEntries();
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
   });
 
@@ -468,7 +521,7 @@ describe('listEntries — partial params build corresponding URL, order always p
     await listEntries({ trackableIds: [3] });
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&trackable_id=in.(3)&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&trackable_id=in.(3)&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
   });
 
@@ -477,7 +530,7 @@ describe('listEntries — partial params build corresponding URL, order always p
     await listEntries({ from: '2026-01-01' });
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&entry_date=gte.2026-01-01&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&entry_date=gte.2026-01-01&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
   });
 
@@ -486,7 +539,7 @@ describe('listEntries — partial params build corresponding URL, order always p
     await listEntries({ to: '2026-01-31' });
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&entry_date=lte.2026-01-31&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&entry_date=lte.2026-01-31&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
   });
 
@@ -495,8 +548,124 @@ describe('listEntries — partial params build corresponding URL, order always p
     await listEntries({ from: '2026-01-01', to: '2026-01-01' });
     assert.equal(
       lastCall(calls).url,
-      `${BASE}/rest/v1/entries?select=*&entry_date=gte.2026-01-01&entry_date=lte.2026-01-01&order=entry_date.asc,trackable_id.asc`
+      `${BASE}/rest/v1/entries?select=*&entry_date=gte.2026-01-01&entry_date=lte.2026-01-01&order=entry_date.asc,trackable_id.asc&offset=0&limit=1000`
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step D.6b — listEntries pages through PostgREST's 1,000-row cap
+// (CONTRACT-D.6b.md §1). Callers never see pages; api.js concatenates and
+// returns a single flat array. These tests are written strictly from that
+// contract; js/api.js's pagination loop is being written in parallel by
+// another agent and is expected to fail here until that lands.
+// ---------------------------------------------------------------------------
+
+describe('listEntries — pagination (Step D.6b)', () => {
+  it('ENTRIES_PAGE_SIZE is exported and equals 1000', () => {
+    assert.equal(ENTRIES_PAGE_SIZE, 1000);
+  });
+
+  it('pages of 1000/1000/37 rows -> exactly 3 requests; 2037 rows in concatenated order; offsets 0/1000/2000; every URL identical to the first except offset', async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ n: i }));
+    const page2 = Array.from({ length: 1000 }, (_, i) => ({ n: 1000 + i }));
+    const page3 = Array.from({ length: 37 }, (_, i) => ({ n: 2000 + i }));
+    const calls = installFetchSequence([{ body: page1 }, { body: page2 }, { body: page3 }]);
+
+    const result = await listEntries();
+
+    assert.equal(calls.length, 3);
+    assert.equal(result.length, 2037);
+    // Concatenation order: page 1 rows, then page 2, then page 3.
+    assert.equal(result[0].n, 0);
+    assert.equal(result[999].n, 999);
+    assert.equal(result[1000].n, 1000);
+    assert.equal(result[1999].n, 1999);
+    assert.equal(result[2000].n, 2000);
+    assert.equal(result[2036].n, 2036);
+
+    assert.ok(calls[0].url.endsWith('&offset=0&limit=1000'), calls[0].url);
+    assert.ok(calls[1].url.endsWith('&offset=1000&limit=1000'), calls[1].url);
+    assert.ok(calls[2].url.endsWith('&offset=2000&limit=1000'), calls[2].url);
+
+    const withoutOffset0 = calls[0].url.replace('offset=0', 'offset=__X__');
+    const withoutOffset1 = calls[1].url.replace('offset=1000', 'offset=__X__');
+    const withoutOffset2 = calls[2].url.replace('offset=2000', 'offset=__X__');
+    assert.equal(withoutOffset1, withoutOffset0, 'page 2 URL must be identical to page 1 except offset');
+    assert.equal(withoutOffset2, withoutOffset0, 'page 3 URL must be identical to page 1 except offset');
+  });
+
+  it('first page of 0 rows -> exactly 1 request, result []', async () => {
+    const calls = installFetchSequence([{ body: [] }]);
+    const result = await listEntries();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(result, []);
+  });
+
+  it('first page of exactly 1000 rows, second page 0 rows -> exactly 2 requests, result has 1000 rows', async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ n: i }));
+    const calls = installFetchSequence([{ body: page1 }, { body: [] }]);
+    const result = await listEntries();
+    assert.equal(calls.length, 2);
+    assert.equal(result.length, 1000);
+  });
+
+  it('first page of 999 rows -> exactly 1 request (the short-page rule)', async () => {
+    const page1 = Array.from({ length: 999 }, (_, i) => ({ n: i }));
+    const calls = installFetchSequence([{ body: page1 }]);
+    const result = await listEntries();
+    assert.equal(calls.length, 1);
+    assert.equal(result.length, 999);
+  });
+
+  it('with trackableIds/from/to, every page URL carries the same filters and order, before offset=', async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ n: i }));
+    const page2 = Array.from({ length: 5 }, (_, i) => ({ n: 1000 + i }));
+    const calls = installFetchSequence([{ body: page1 }, { body: page2 }]);
+
+    await listEntries({ trackableIds: [3], from: '2026-01-01', to: '2026-01-31' });
+
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+      assert.ok(call.url.includes('trackable_id=in.(3)'), call.url);
+      assert.ok(call.url.includes('entry_date=gte.2026-01-01'), call.url);
+      assert.ok(call.url.includes('entry_date=lte.2026-01-31'), call.url);
+      const orderIdx = call.url.indexOf('order=entry_date.asc,trackable_id.asc');
+      const offsetIdx = call.url.indexOf('offset=');
+      assert.ok(orderIdx !== -1, `missing order= in ${call.url}`);
+      assert.ok(offsetIdx !== -1, `missing offset= in ${call.url}`);
+      assert.ok(orderIdx < offsetIdx, `order= must precede offset= in ${call.url}`);
+    }
+  });
+
+  it('a non-array JSON body on page 1 counts as an empty page -> 1 request, result []', async () => {
+    const calls = installFetchSequence([{ body: {} }]);
+    const result = await listEntries();
+    assert.equal(calls.length, 1);
+    assert.deepEqual(result, []);
+  });
+
+  it('page 2 returning HTTP 500 rejects the whole call with ApiError (status 500, retryable true); nothing partial is returned', async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ n: i }));
+    installFetchSequence([{ body: page1 }, { status: 500, body: { message: 'server error' } }]);
+    await assert.rejects(() => listEntries(), (err) => {
+      assert.equal(err.name, 'ApiError');
+      assert.equal(err.status, 500);
+      assert.equal(err.retryable, true);
+      return true;
+    });
+  });
+
+  it('page 2 fetch rejecting (TypeError) rejects the whole call with NetworkError', async () => {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({ n: i }));
+    installFetchSequence([{ body: page1 }, { reject: new TypeError('fetch failed') }]);
+    await assert.rejects(() => listEntries(), { name: 'NetworkError' });
+  });
+
+  it('validation failure still makes zero fetches under pagination (empty trackableIds array)', async () => {
+    const calls = installFetchSequence([{ body: [] }]);
+    await assert.rejects(() => listEntries({ trackableIds: [] }), { name: 'ValidationError' });
+    assert.equal(calls.length, 0);
   });
 });
 

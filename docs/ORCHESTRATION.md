@@ -14,12 +14,16 @@ implement→test→fix loop, and the rules about when to stop.
 
 | Role | Model | Why |
 |---|---|---|
-| **Orchestrator** (the main session — you) | **Opus** | Holds the whole plan, writes subagent prompts, judges whether a failure is a bad test or bad code, decides when to escalate. This is the judgment-heavy work. |
+| **Orchestrator** (the main session — you) | **The strongest model available** — Fable 5.1 as of 2026-09-04; Opus is the floor | Holds the whole plan, writes subagent prompts, judges whether a failure is a bad test or bad code, decides when to escalate. This is the judgment-heavy work. |
 | **All subagents** | **Sonnet** | Bounded, well-specified tasks: implement one module, write one test file, run the suite and diagnose. Cheap and fast, which matters because the loop runs many times. |
 
-**Verify you are running Opus before doing anything else.** If you are
-not, tell the user and stop — do not orchestrate from a smaller model.
-The user can switch with `/model opus`.
+**Verify you are running Opus or better before doing anything else.**
+If you are on Sonnet or Haiku, tell the user and stop — do not
+orchestrate from a smaller model. The user can switch with
+`/model opus` (or a newer top-tier model, when one is available).
+(Updated 2026-09-04, Step D.6b: the policy was written when Opus was
+the top model; the rule is "top tier orchestrates, Sonnet executes",
+not "Opus specifically".)
 
 **How to enforce Sonnet on subagents:** pass `model: "sonnet"`
 explicitly in every `Agent` call.
@@ -54,12 +58,12 @@ Agent({
 
 ## 1. The four roles
 
-You (Opus) never write feature code yourself. You write prompts, judge
+You (the orchestrator) never write feature code yourself. You write prompts, judge
 results, and own the repo's state.
 
 | Role | Model | Writes | Never touches |
 |---|---|---|---|
-| **Orchestrator** | Opus | `BUILD_PLAN.md` statuses, commits, prompts | feature code, test code |
+| **Orchestrator** | Top tier (Fable 5.1 / Opus) | `BUILD_PLAN.md` statuses, commits, prompts | feature code, test code |
 | **Implementer** | Sonnet | `js/**`, `css/**`, `index.html`, migrations | `tests/**` |
 | **Test Author** | Sonnet | `tests/**` | `js/**`, `css/**`, `index.html` |
 | **Test Runner / Diagnostician** | Sonnet | nothing (read-only diagnosis) | everything — it reports, it does not fix |
@@ -434,7 +438,7 @@ Within a phase, keep moving without pausing between steps.
 
 | Question | Answer |
 |---|---|
-| Orchestrator model | Opus |
+| Orchestrator model | Top tier — Fable 5.1 as of 2026-09-04; Opus is the floor |
 | Subagent model | Sonnet, passed explicitly as `model: "sonnet"` |
 | Subagent type | `general-purpose` — **never `fork`** (ignores model override) |
 | Implementer + Test Author | Parallel, one message, strict file boundaries |

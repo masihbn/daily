@@ -102,6 +102,49 @@ export const SLOT_TITLES = {
   overlay: 'Overlay',
 };
 
+// --- historyFrom -----------------------------------------------------------
+//
+// Step D.6b: the calendar's reach is the trackable's whole history OR the
+// last 90 days, whichever is earlier (see calendarFrom() below for why) —
+// this helper computes the "whole history" half of that: the earliest
+// entry_date across ALL loaded entries (not just the range-filtered
+// slice). Never throws for any input; a row is only counted if it is a
+// plain object with a well-formed 'YYYY-MM-DD' entry_date. Plain string
+// comparison is safe — 'YYYY-MM-DD' strings order chronologically, the
+// same fact js/charts/heatmap.js relies on.
+const HISTORY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export function historyFrom(entries) {
+  if (!Array.isArray(entries)) return null;
+  let earliest = null;
+  for (const e of entries) {
+    if (!e || typeof e !== 'object') continue;
+    const d = e.entry_date;
+    if (typeof d !== 'string' || !HISTORY_DATE_RE.test(d)) continue;
+    if (earliest === null || d < earliest) earliest = d;
+  }
+  return earliest;
+}
+
+// --- calendarFrom ------------------------------------------------------------
+//
+// Step D.6b, revised 2026-09-04 after the first full-suite run: deriving
+// the calendar's reach from history alone (historyFrom() above) locked a
+// trackable with zero entries to the current month — a regression against
+// pre-D.6b behaviour, where the 3M default range let a brand-new
+// trackable back-fill the previous ~3 months. So the calendar's actual
+// reach is "the whole history or the last 90 days, whichever is
+// earlier": whatever history exists is never hidden, but a young or
+// empty trackable still gets the old ~90-day back-fill. `floor` uses the
+// same arithmetic as resolveRange('3m', today).from, so CALENDAR_FLOOR_DAYS
+// intentionally mirrors the old 3M default's day count. Never returns
+// null; never throws for any entries input.
+export const CALENDAR_FLOOR_DAYS = 90;
+export function calendarFrom(entries, today) {
+  const floor = addDays(today, -(CALENDAR_FLOOR_DAYS - 1));
+  const earliest = historyFrom(entries);
+  return earliest !== null && earliest < floor ? earliest : floor;
+}
+
 // =============================================================================
 // DOM + network wiring
 // =============================================================================
@@ -202,6 +245,16 @@ export function createDetailView({ id, store, api, today } = {}) {
 
   let trackable = null; // raw loaded row, or null before/if not found
   let otherTrackableCount = 0;
+  // Step D.6b: two arrays instead of one. allEntries is every entry of
+  // this trackable the store knows about (the whole history, loaded once
+  // — see loadAllEntries()); entriesForRange is allEntries sliced to the
+  // range control's window. The calendar reads allEntries (and
+  // calendarFrom(allEntries, day)) so it reaches the whole history or the
+  // last 90 days, whichever is earlier, regardless of the range control;
+  // the weekly/bounds charts and the "N entries in range" line keep
+  // reading entriesForRange. Both are kept in sync by the single
+  // synchronous applyRangeFilter() below.
+  let allEntries = [];
   let entriesForRange = [];
   let rangeKey = '3m';
 
@@ -211,18 +264,19 @@ export function createDetailView({ id, store, api, today } = {}) {
   let entriesLoading = false;
 
   // Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): true from the start of
-  // mount() until the FIRST loadEntriesForRange() settles — success or
-  // failure alike, since an offline failure still returns real cached
-  // rows from the store that must be shown, not treated as "still
-  // loading". While true, every visible chart slot renders a "Loading…"
-  // placeholder instead of its chart/placeholder, so the user never sees
-  // provisional/cached-only content snap into real content ~1s later.
-  // First-load only, by design: it is set false exactly once, in
-  // loadEntriesForRange(), and nothing ever sets it back to true — a
-  // range change re-populates the same charts with plausible data
-  // already in hand, so blanking them again would be worse than the
-  // snap-in this fixes. See loadEntriesForRange() and mount()'s catch
-  // block for the two paths that settle it.
+  // mount() until the FIRST loadAllEntries() (Step D.6b; formerly
+  // loadEntriesForRange()) settles — success or failure alike, since an
+  // offline failure still returns real cached rows from the store that
+  // must be shown, not treated as "still loading". While true, every
+  // visible chart slot renders a "Loading…" placeholder instead of its
+  // chart/placeholder, so the user never sees provisional/cached-only
+  // content snap into real content ~1s later. First-load only, by design:
+  // it is set false exactly once, in loadAllEntries(), and nothing ever
+  // sets it back to true — a range or period change re-populates the same
+  // charts with plausible data already in hand (a local filter, never a
+  // reload — Step D.6b), so blanking them again would be worse than the
+  // snap-in this fixes. See loadAllEntries() and mount()'s catch block
+  // for the two paths that settle it.
   let chartsPending = true;
 
   // Step 3.2c: trend-chart granularity ('day' | 'week' | 'month'). Lives
@@ -285,58 +339,59 @@ export function createDetailView({ id, store, api, today } = {}) {
     return 'ready';
   }
 
-  // Exactly ONE entries request per range change: this is the only
-  // function in the module that calls store.loadEntries, and every
-  // caller (mount's initial load, handleRangeChange) is guarded so at
-  // most one call is ever in flight at a time. Chart slots receive the
-  // already-loaded array via entriesForRange and must never fetch of
-  // their own accord — see BUILD_PLAN.md Step 2.3.
-  async function loadEntriesForRange(key) {
-    entriesLoading = true;
-    const { from, to } = resolveRange(key, day);
+  // Step D.6b: the one synchronous function that keeps allEntries and
+  // entriesForRange in sync with the store's in-memory cache. Both
+  // st.getEntries() calls are synchronous and issue ZERO requests — do
+  // NOT call st.loadEntries() here; the whole point of this step is that
+  // range/period changes and post-write refreshes never fetch again.
+  // Replaces the old refreshEntriesFromStore().
+  function applyRangeFilter() {
+    allEntries = st.getEntries({ trackableIds: [id] });
+    const { from, to } = resolveRange(rangeKey, day);
     const filters = { trackableIds: [id], to };
     // For the 'all' range, `from` is omitted entirely rather than passed
     // as null — api.listEntries validates `from` and would throw a
-    // ValidationError on a literal null.
+    // ValidationError on a literal null; store.getEntries mirrors that
+    // shape even though it never calls the network itself.
     if (from !== null) filters.from = from;
+    entriesForRange = st.getEntries(filters);
+  }
 
-    const result = await st.loadEntries(filters);
+  // Step D.6b: one logical entries load per detail mount (loadAllEntries,
+  // called exactly once from mount()'s step 3, and nowhere else — see
+  // that function's comment). Loads the trackable's WHOLE history — no
+  // from/to — so the 3M/6M/1Y/All range control becomes a purely local
+  // filter over data already in hand (§2 of CONTRACT-D.6b.md). This
+  // replaces the old loadEntriesForRange(key); do not resurrect it.
+  async function loadAllEntries() {
+    entriesLoading = true;
+    const result = await st.loadEntries({ trackableIds: [id] });
     entriesLoading = false;
     // Settles chartsPending unconditionally — idempotent after the first
     // call (see the flag's own comment above for why it must never flip
-    // back to true on a later range change).
+    // back to true on a later range/period change).
     chartsPending = false;
     lastEntriesError = result.error;
-    entriesForRange = Array.isArray(result.data) ? result.data : [];
-    // The 'all' range's navigable minimum month depends on what actually
-    // got loaded, so re-clamp every time the loaded window changes.
+    applyRangeFilter();
     clampMonthState();
   }
 
-  // Keeps monthStr inside the months the current range/entries allow
-  // navigating to (CONTRACT-3.1.md §4.3).
+  // Keeps monthStr inside the months the calendar allows navigating to.
+  // Step D.6b: the calendar is decoupled from the range control — it
+  // reaches the trackable's whole history or the last 90 days, whichever
+  // is earlier (calendarFrom(), revised 2026-09-04 after the first
+  // full-suite run: deriving the reach from history alone locked a
+  // zero-entry trackable to the current month, a regression against the
+  // pre-D.6b 3M default's ~90-day back-fill). Uses allEntries, never just
+  // entriesForRange, so month navigation is never limited by the 3M/6M/1Y
+  // range selection or by the trend chart's Daily cap.
   function currentBounds() {
-    const { from } = resolveRange(rangeKey, day);
-    return monthBoundsFor({ from, today: day, entries: entriesForRange });
+    return monthBoundsFor({ from: calendarFrom(allEntries, day), today: day, entries: allEntries });
   }
 
   function clampMonthState() {
     const b = currentBounds();
     monthStr = clampMonth(monthStr === null ? monthOf(day) : monthStr, b);
-  }
-
-  // Synchronous refresh of entriesForRange from the store's in-memory
-  // cache after a write. entriesForRange is a snapshot taken at load
-  // time, so a write that only updates the store's cache would otherwise
-  // leave the heatmap showing stale data. store.getEntries() is
-  // synchronous and issues ZERO requests — do NOT call st.loadEntries()
-  // here, that would re-issue the range GET and break Step 2.3's D6
-  // load-once guarantee (CONTRACT-3.1.md §4.7).
-  function refreshEntriesFromStore() {
-    const { from, to } = resolveRange(rangeKey, day);
-    const filters = { trackableIds: [id], to };
-    if (from !== null) filters.from = from;
-    entriesForRange = st.getEntries(filters);
   }
 
   // --- render --------------------------------------------------------------
@@ -509,8 +564,14 @@ export function createDetailView({ id, store, api, today } = {}) {
         // and after every entries load — see CONTRACT-3.1.md §4.3/§4.4.
         // heatmapModel() itself tolerates a garbage month by clamping, but
         // that is a safety net here, not the normal path.
-        const { from } = resolveRange(rangeKey, day);
-        const model = heatmapModel({ trackable, entries: entriesForRange, month: monthStr, today: day, from });
+        // Step D.6b: the calendar reads allEntries (the trackable's whole
+        // loaded history), not entriesForRange, and its `from` is
+        // calendarFrom(allEntries, day) — the whole history or the last
+        // 90 days, whichever is earlier (see calendarFrom()'s comment for
+        // why a history-only reach regressed a zero-entry trackable) — so
+        // month navigation and the "no data before" state never depend on
+        // the 3M/6M/1Y/All range control.
+        const model = heatmapModel({ trackable, entries: allEntries, month: monthStr, today: day, from: calendarFrom(allEntries, day) });
         slotSection.appendChild(renderHeatmap(model));
         if (selectedDay !== null) {
           slotSection.appendChild(buildDayEditor());
@@ -573,7 +634,13 @@ export function createDetailView({ id, store, api, today } = {}) {
   // result is known. See CONTRACT-3.1.md §4.5-§4.7.
 
   function buildDayEditor() {
-    const existing = entriesForRange.find((e) => e.entry_date === selectedDay) || null;
+    // Step D.6b (CONTRACT-D.6b.md §2.7): looked up in allEntries, not
+    // entriesForRange. The calendar now shows days outside the range
+    // control's window (it reads allEntries — see currentBounds()/the
+    // heatmap render), so a tapped day's existing value must be found
+    // there too, or a day outside the range slice would render as if
+    // never logged and lose its Clear button.
+    const existing = allEntries.find((e) => e.entry_date === selectedDay) || null;
     const hasExisting = hasEntryValue(trackable, existing);
 
     const div = document.createElement('div');
@@ -674,7 +741,9 @@ export function createDetailView({ id, store, api, today } = {}) {
       render();
       return;
     }
-    const existing = entriesForRange.find((e) => e.entry_date === dateStr) || null;
+    // Step D.6b (CONTRACT-D.6b.md §2.7): allEntries, not entriesForRange —
+    // same reasoning as buildDayEditor()'s lookup above.
+    const existing = allEntries.find((e) => e.entry_date === dateStr) || null;
     selectedDay = dateStr;
     // The user is correcting a day, so the current value must be visible.
     dayDraft = existing && Number.isFinite(existing.value) ? String(existing.value) : '';
@@ -711,7 +780,7 @@ export function createDetailView({ id, store, api, today } = {}) {
       })
       .finally(() => {
         dayInFlight = false;
-        refreshEntriesFromStore();
+        applyRangeFilter();
         if (!disposed) render();
       });
   }
@@ -756,35 +825,34 @@ export function createDetailView({ id, store, api, today } = {}) {
 
   // --- event handlers ------------------------------------------------------
 
-  async function handleRangeChange(key) {
+  // Step D.6b: the range control is now a purely local filter over
+  // allEntries (already loaded in full — see loadAllEntries()), so this
+  // handler is synchronous and issues ZERO requests for every range,
+  // 'all' included. The calendar is unaffected by a range change at all
+  // (see currentBounds()/render()'s heatmap branch, which read allEntries
+  // regardless of rangeKey).
+  function handleRangeChange(key) {
     if (entriesLoading) return;
     if (key === rangeKey) return;
     if (!RANGES.some((r) => r.key === key)) return;
 
     rangeKey = key;
     writeStoredRange(key);
-    // A change of range can put the selected day out of the loaded
-    // window, so the day editor cannot survive a range change.
+    // Kept from the pre-D.6b behaviour: a range change closes the day
+    // editor rather than trying to decide whether the selected day still
+    // makes sense under the new range.
     selectedDay = null;
     dayError = null;
     dayDraft = '';
-    render();
-
-    await loadEntriesForRange(key);
-    if (disposed) return;
-    // loadEntriesForRange() already re-clamps monthStr internally, but the
-    // 'all' range's min depends on exactly this load, so make it explicit
-    // here too (CONTRACT-3.1.md §4.3) — clampMonthState() is idempotent.
-    clampMonthState();
+    applyRangeFilter();
     render();
   }
 
-  // Step 3.2c. Changing granularity re-buckets data already in hand, so it
-  // must issue ZERO network requests — that is the load-once guarantee
-  // Steps 2.3/3.1/3.2 all assert. The single exception is the Daily cap:
-  // switching to Daily from a range wider than 3M genuinely changes the
-  // query window, so that one path reloads.
-  async function handlePeriodChange(key) {
+  // Step 3.2c / Step D.6b. Changing granularity re-buckets data already in
+  // hand, so it must issue ZERO network requests — every branch, Daily
+  // cap included: the cap now just re-points rangeKey at the local filter
+  // (applyRangeFilter()), since the whole history is already loaded.
+  function handlePeriodChange(key) {
     if (entriesLoading) return;
     if (key === periodKey) return;
     if (!PERIODS.some((p) => p.key === key)) return;
@@ -798,18 +866,12 @@ export function createDetailView({ id, store, api, today } = {}) {
     dayError = null;
     dayDraft = '';
 
-    const needsRangeChange = key === 'day' && rangeKey !== DAILY_RANGE_KEY;
-    if (!needsRangeChange) {
-      render();
-      return;
+    if (key === 'day' && rangeKey !== DAILY_RANGE_KEY) {
+      rangeKey = DAILY_RANGE_KEY;
+      writeStoredRange(rangeKey);
+      applyRangeFilter();
     }
 
-    rangeKey = DAILY_RANGE_KEY;
-    writeStoredRange(rangeKey);
-    render();
-    await loadEntriesForRange(rangeKey);
-    if (disposed) return;
-    clampMonthState();
     render();
   }
 
@@ -921,8 +983,12 @@ export function createDetailView({ id, store, api, today } = {}) {
     }
 
     // Step 1: synchronous first paint from the store's already-hydrated
-    // cache — must happen before any await.
+    // cache — must happen before any await. Step D.6b adds
+    // applyRangeFilter() here so a warm cache already bounds the calendar
+    // correctly (allEntries/entriesForRange populated) before the first
+    // render, not just after the network load below.
     refreshTrackableFromStore();
+    applyRangeFilter();
     clampMonthState();
     render();
 
@@ -941,8 +1007,9 @@ export function createDetailView({ id, store, api, today } = {}) {
         return;
       }
 
-      // Step 3: resolve the range, then exactly ONE loadEntries call.
-      await loadEntriesForRange(rangeKey);
+      // Step 3 (Step D.6b): load the trackable's WHOLE history exactly
+      // once — not range-scoped. See loadAllEntries()'s comment.
+      await loadAllEntries();
       if (disposed) return;
 
       // Step 4: final render.

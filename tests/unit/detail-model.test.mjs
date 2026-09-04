@@ -16,7 +16,15 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { RANGES, resolveRange, visibleSlots, SLOT_TITLES } from '../../js/views/detail.js';
+import {
+  RANGES,
+  resolveRange,
+  visibleSlots,
+  SLOT_TITLES,
+  historyFrom,
+  calendarFrom,
+  CALENDAR_FLOOR_DAYS,
+} from '../../js/views/detail.js';
 import { addDays, rangeDays } from '../../js/dates.js';
 
 // ===========================================================================
@@ -264,6 +272,189 @@ describe('SLOT_TITLES — exact mapping (contract §2.4)', () => {
     for (const slot of possibleSlots) {
       assert.equal(typeof SLOT_TITLES[slot], 'string');
       assert.ok(SLOT_TITLES[slot].length > 0);
+    }
+  });
+});
+
+// ===========================================================================
+// historyFrom (Step D.6b, CONTRACT-D.6b.md §2.1) — the calendar's "reach the
+// whole history regardless of the range control" primitive. Returns the
+// smallest entry_date string among an array's well-formed rows, or null.
+// Never throws. Plain string comparison, same fact js/charts/heatmap.js
+// relies on for 'YYYY-MM-DD' ordering.
+// ===========================================================================
+
+describe('historyFrom(entries) — Step D.6b (contract §2.1)', () => {
+  it('returns the earliest entry_date of an unsorted array', () => {
+    const entries = [
+      { entry_date: '2026-03-01' },
+      { entry_date: '2024-01-15' },
+      { entry_date: '2025-06-10' },
+    ];
+    assert.equal(historyFrom(entries), '2024-01-15');
+  });
+
+  it('a single-row array returns that row\'s own entry_date', () => {
+    assert.equal(historyFrom([{ entry_date: '2026-01-01' }]), '2026-01-01');
+  });
+
+  it('an empty array returns null', () => {
+    assert.equal(historyFrom([]), null);
+  });
+
+  const nonArrayInputs = [null, undefined, {}, 'nope', 42, true];
+  for (const v of nonArrayInputs) {
+    it(`non-array input ${JSON.stringify(v)} returns null`, () => {
+      assert.equal(historyFrom(v), null);
+    });
+  }
+
+  it('skips malformed rows (null, a number, a string, {}) and rows whose entry_date is not a string or does not match YYYY-MM-DD (a non-string, "2026-1-1", ""), returning the earliest well-formed row among the rest', () => {
+    const entries = [
+      null,
+      42,
+      'nope',
+      {},
+      { entry_date: 123 },
+      { entry_date: '2026-1-1' },
+      { entry_date: '' },
+      { entry_date: '2025-05-05' },
+      { entry_date: '2024-12-01' },
+    ];
+    assert.equal(historyFrom(entries), '2024-12-01');
+  });
+
+  it('when the row that would be earliest is malformed, the earliest WELL-FORMED row is returned instead', () => {
+    const entries = [
+      { entry_date: '2020-1-1' }, // conceptually earliest, but malformed (not zero-padded) — must be skipped
+      { entry_date: '2021-05-05' },
+      { entry_date: '2022-07-07' },
+    ];
+    assert.equal(historyFrom(entries), '2021-05-05');
+  });
+
+  it('never throws over a hostile-input sweep', () => {
+    const hostileInputs = [
+      null,
+      undefined,
+      [],
+      'not-an-array',
+      123,
+      {},
+      [null, undefined, 42, 'x', {}, [], true, Symbol('x')],
+      [{ entry_date: undefined }, { entry_date: NaN }, { entry_date: {} }, { entry_date: [] }],
+      [{}, { entry_date: '2026-13-40' }],
+    ];
+    for (const input of hostileInputs) {
+      assert.doesNotThrow(() => historyFrom(input));
+    }
+  });
+});
+
+// ===========================================================================
+// calendarFrom(entries, today) (Step D.6b follow-up, CONTRACT-D.6b.md §2.1/
+// §2.5, revised after the first full-suite run) — the calendar's actual
+// `from`. A trackable with zero or very recent entries must still be able to
+// navigate back roughly 3 months, exactly as it could before D.6b's
+// "whole-history load" changed historyFrom() to reach all the way back to
+// the earliest entry (which, for a near-empty trackable, could be "no
+// entries at all" -> no back-navigation whatsoever without this floor).
+// calendarFrom is the earlier of historyFrom(entries) and a floor of
+// CALENDAR_FLOOR_DAYS (90) days back from `today`; never null.
+// ===========================================================================
+
+describe('CALENDAR_FLOOR_DAYS (contract §2.1)', () => {
+  it('equals 90', () => {
+    assert.equal(CALENDAR_FLOOR_DAYS, 90);
+  });
+});
+
+describe('calendarFrom(entries, today) — Step D.6b follow-up (contract §2.1/§2.5)', () => {
+  // Fixed 'today' so the floor is a hardcodable, independently-verified
+  // value rather than a moving target — recomputed via the REAL
+  // addDays(today, -89) before being hardcoded here (2026-09-04 -> 89 days
+  // back is 2026-06-07), and also cross-checked against
+  // addDays(TODAY, -(CALENDAR_FLOOR_DAYS - 1)) inline below rather than
+  // trusted from memory.
+  const TODAY = '2026-09-04';
+  const FLOOR = '2026-06-07';
+
+  it('the floor is addDays(today, -89), independently recomputed via the real js/dates.js', () => {
+    assert.equal(addDays(TODAY, -89), FLOOR);
+    assert.equal(addDays(TODAY, -(CALENDAR_FLOOR_DAYS - 1)), FLOOR);
+  });
+
+  it('an empty array returns the floor', () => {
+    assert.equal(calendarFrom([], TODAY), FLOOR);
+  });
+
+  it('null returns the floor', () => {
+    assert.equal(calendarFrom(null, TODAY), FLOOR);
+  });
+
+  it('undefined returns the floor', () => {
+    assert.equal(calendarFrom(undefined, TODAY), FLOOR);
+  });
+
+  const nonArrayInputs = ['nope', 42, {}, true];
+  for (const v of nonArrayInputs) {
+    it(`non-array input ${JSON.stringify(v)} returns the floor`, () => {
+      assert.equal(calendarFrom(v, TODAY), FLOOR);
+    });
+  }
+
+  it('an earliest entry BEFORE the floor returns that entry\'s date, not the floor', () => {
+    const entries = [{ entry_date: '2024-03-01' }, { entry_date: '2025-01-01' }];
+    assert.equal(calendarFrom(entries, TODAY), '2024-03-01');
+  });
+
+  it('an earliest entry AFTER the floor returns the floor, not the entry date', () => {
+    const entries = [{ entry_date: '2026-08-01' }, { entry_date: '2026-08-15' }];
+    assert.equal(calendarFrom(entries, TODAY), FLOOR);
+  });
+
+  it('an entry exactly ON the floor date returns the floor', () => {
+    const entries = [{ entry_date: FLOOR }];
+    assert.equal(calendarFrom(entries, TODAY), FLOOR);
+  });
+
+  it('malformed rows are ignored the same way historyFrom ignores them (mixed with a well-formed row before the floor)', () => {
+    const entries = [
+      null,
+      42,
+      'nope',
+      {},
+      { entry_date: 123 },
+      { entry_date: '2026-1-1' },
+      { entry_date: '' },
+      { entry_date: '2020-12-01' },
+    ];
+    assert.equal(calendarFrom(entries, TODAY), '2020-12-01');
+  });
+
+  it('malformed rows only (nothing well-formed) falls back to the floor, not null', () => {
+    const entries = [null, 42, 'nope', {}, { entry_date: 123 }, { entry_date: '2026-1-1' }];
+    assert.equal(calendarFrom(entries, TODAY), FLOOR);
+  });
+
+  it('never throws over a hostile-input sweep for entries, and the result is never null', () => {
+    const hostileEntries = [
+      null,
+      undefined,
+      [],
+      'not-an-array',
+      123,
+      {},
+      [null, undefined, 42, 'x', {}, [], true, Symbol('x')],
+      [{ entry_date: undefined }, { entry_date: NaN }, { entry_date: {} }, { entry_date: [] }],
+      [{}, { entry_date: '2026-13-40' }],
+    ];
+    for (const input of hostileEntries) {
+      let result;
+      assert.doesNotThrow(() => {
+        result = calendarFrom(input, TODAY);
+      });
+      assert.notEqual(result, null, `calendarFrom must never return null for ${JSON.stringify(input)}`);
     }
   });
 });

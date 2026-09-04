@@ -710,12 +710,16 @@ test('C15 — the Daily cap: clicking Daily disables 6M/1Y/All and forces the ra
   const countBeforeDaily = getRequests.length;
   await page.locator('.trend-period[data-period="day"]').click();
 
-  // Range-window change (1y -> 3m) genuinely changes the query window, so
-  // per contract §4.3 this is the one case allowed to reload — wait for the
-  // real network-level proof, not just the click resolving or an attribute
-  // flipping optimistically.
-  await expect.poll(() => getRequests.length).toBe(countBeforeDaily + 1);
+  // Step D.6b: the range control is now a pure in-memory filter over the
+  // whole history loaded once on mount (CONTRACT-D.6b.md §2.4) — even the
+  // Daily cap's forced range-window change (1y -> 3m) no longer reloads.
+  // This used to be "the one case allowed to reload"; it no longer is. Wait
+  // for the real DOM-level proof the range actually changed, then assert
+  // ZERO new requests, not just that the click resolved.
+  await expect(page.locator('section.detail')).toHaveAttribute('data-range', '3m');
   await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await page.waitForTimeout(300);
+  expect(getRequests.length).toBe(countBeforeDaily);
 
   await expect(page.locator('.trend-period[data-period="day"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('section.detail')).toHaveAttribute('data-range', '3m');
