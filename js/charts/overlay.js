@@ -1,32 +1,37 @@
-// Correlation marker overlay (Step 3.4). Chart type 4a: discrete events
-// from OTHER trackables (gym days, smoking days) drawn as markers on the
-// Range chart (js/charts/bounds.js), so the user can visually connect
-// habit logs to a bounded metric's movement. See CONTRACT-3.4.md §0 for
-// the settled design decisions this module encodes — do not re-derive
-// them from first principles while reading this file.
+// Correlation overlay (Step 3.4, redesigned in Step 3.4b after the device
+// check). CONTRACT-3.4b.md is a DELTA over CONTRACT-3.4.md — read both
+// before touching this file; CONTRACT-3.4.md's §0 design decisions about
+// candidates/selection storage still hold, only the marker shape changed.
 //
-// Same split as js/charts/bounds.js and js/charts/weekly.js: everything
-// except renderOverlayPicker() runs with no DOM at all — no `fetch`, no
-// `document`, no `window`. Only renderOverlayPicker() touches `document`.
-// This module issues ZERO network requests, ever — the caller
-// (js/views/detail.js) is the one place that loads entries through the
-// store and localStorage through the injected `storage` argument below.
+// What changed and why (CONTRACT-3.4b.md §0): 3.4 drew a fixed-row marker
+// meaning "at least one logged day in the bucket" — on the device that was
+// a Workout triangle on every single week, true and useless. The
+// redesign: the overlay is the OTHER trackable's own trend series (exactly
+// what its Weekly-trend chart would show — same rollup, same target, same
+// good/bad verdicts) drawn as bars on a second, visible y-axis, one
+// overlay at a time. This makes the overlay answer "did Workout hit ITS
+// OWN target this week", not "was there any Workout entry at all".
 //
-// Allowed imports, and only these (CONTRACT-3.4.md §1):
+// Same split as js/charts/bounds.js/weekly.js: everything except
+// renderOverlayPicker() runs with no DOM at all. Only renderOverlayPicker()
+// touches `document`. This module issues ZERO network requests, ever.
+//
+// Allowed imports, and only these (CONTRACT-3.4b.md §1):
 import { isoWeekKey } from '../dates.js';
+import { rollup, fillSeries } from '../aggregate.js';
+// §0(b)-style discipline (weekly.js's own words): rollup()/fillSeries() and
+// weekly.js's own target/verdict/fill helpers are the SINGLE implementation
+// of "what does this trackable's trend look like" — this module reuses
+// them rather than encoding a second, parallel notion of a trend series.
+import { seriesAggregationFor, fillValueFor, targetFor, weekVerdict } from './weekly.js';
 
-// --- §1 constants ----------------------------------------------------------
+// --- §1 constants ------------------------------------------------------
 
 export const OVERLAY_STORAGE_KEY = 'daily.detail.overlay.v1';
-export const MAX_OVERLAYS = 3;
-// §0 rule 3 — the "rug": each overlay is drawn on a fixed, hidden y-axis
-// row rather than at the metric's own value that day, so the marker never
-// depends on the metric's scale/bounds and never collides with another
-// overlay's row.
-export const OVERLAY_ROW_BASE = 0.06;
-export const OVERLAY_ROW_STEP = 0.08;
-export const OVERLAY_POINT_STYLES = ['triangle', 'rect', 'rectRot'];
-export const OVERLAY_POINT_RADIUS = 5;
+// Step 3.4b §0 rule 1: one overlay at a time — two independent trend
+// series sharing one right-hand axis read as noise, not correlation.
+export const MAX_OVERLAYS = 1;
+export const OVERLAY_BAR_ALPHA = 0.55;
 
 const DATE_STR_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -38,13 +43,29 @@ function isFiniteNumber(v) {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-// --- §1 isOverlayCandidate ---------------------------------------------
+// A regex-shape match ('YYYY-MM-DD') is not the same as a real calendar
+// date ('2024-02-30' matches the shape but isn't a day that exists), and
+// rollup()'s internal bucketKeyFor() throws on exactly that class of
+// garbage via isoWeekKey (found in weekly.js/bounds.js already) — reusing
+// isoWeekKey()'s own validation here rather than a second hand-rolled
+// calendar checker is the same move both of those modules make.
+function isRealDateStr(str) {
+  if (typeof str !== 'string' || !DATE_STR_RE.test(str)) return false;
+  try {
+    isoWeekKey(str);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-// §0 rule 2 — candidates are trackables whose logged days are discrete
-// EVENTS: boolean rows, or numeric rows whose aggregation is 'count' or
-// 'sum'. 'average'/'last' numerics (calories, weight) are continuous
-// readings, not events — that is what Step 3.5's comparison chart is for,
-// never this one. Never throws.
+// --- §1 isOverlayCandidate (unchanged from CONTRACT-3.4) -----------------
+
+// Candidates are trackables whose logged days are discrete EVENTS: boolean
+// rows, or numeric rows whose aggregation is 'count' or 'sum'.
+// 'average'/'last' numerics (calories, weight) are continuous readings,
+// not events — Step 3.5's comparison chart is for those, never this one.
+// Never throws.
 export function isOverlayCandidate(trackable) {
   if (!isPlainObject(trackable)) return false;
   if (trackable.archived === true) return false;
@@ -55,13 +76,12 @@ export function isOverlayCandidate(trackable) {
   return false;
 }
 
-// --- §1 overlayCandidates ------------------------------------------------
+// --- §1 overlayCandidates (unchanged) -------------------------------
 
 // Filters `trackables` to overlay candidates, excluding the metric itself
 // (compared as strings, since ids may be numbers on the wire and strings
-// once round-tripped through localStorage — §0 rule 6). Input order is
-// preserved; the caller passes visibleTrackables(list), which is already
-// sorted the way the rest of the detail screen expects. Never throws.
+// once round-tripped through localStorage). Input order is preserved.
+// Never throws.
 export function overlayCandidates(trackables, metricId) {
   if (!Array.isArray(trackables)) return [];
   const metricIdStr = String(metricId);
@@ -70,7 +90,7 @@ export function overlayCandidates(trackables, metricId) {
   );
 }
 
-// --- §1 readOverlaySelection / writeOverlaySelection ----------------------
+// --- §1 readOverlaySelection / writeOverlaySelection (unchanged) ---------
 
 // Reads the raw { [metricId]: string[] } blob out of `storage`, tolerating
 // every way it can be missing or malformed. Never throws, regardless of
@@ -103,10 +123,9 @@ export function readOverlaySelection(storage, metricId) {
 
 // Merges { [String(metricId)]: ids.map(String) } into whatever else is
 // already stored, so writing one metric's selection never clobbers
-// another's (CONTRACT-3.4.md §1). An unreadable existing value is treated
-// as {} (readRawSelectionMap already does this). Storage errors —
-// including setItem throwing, e.g. iOS private mode — are swallowed.
-// Never throws.
+// another's. An unreadable existing value is treated as {}
+// (readRawSelectionMap already does this). Storage errors — including
+// setItem throwing, e.g. iOS private mode — are swallowed. Never throws.
 export function writeOverlaySelection(storage, metricId, ids) {
   if (!storage) return;
   try {
@@ -123,12 +142,12 @@ export function writeOverlaySelection(storage, metricId, ids) {
   }
 }
 
-// --- §1 sanitizeSelection --------------------------------------------------
+// --- §1 sanitizeSelection (unchanged code; cap is now MAX_OVERLAYS = 1) --
 
 // Coerces to strings, drops ids that are not current candidates, dedupes
-// (first occurrence wins), and caps at MAX_OVERLAYS — all while KEEPING
-// SELECTION ORDER (not candidate order), because selection order is what
-// decides each overlay's row/point-style index (§0 rule 3). Never throws.
+// (first occurrence wins), and caps at MAX_OVERLAYS (now 1 — Step 3.4b §0
+// rule 1) — all while KEEPING SELECTION ORDER (not candidate order).
+// Never throws.
 export function sanitizeSelection(ids, candidates) {
   if (!Array.isArray(ids)) return [];
   const candidateList = Array.isArray(candidates) ? candidates : [];
@@ -149,40 +168,14 @@ export function sanitizeSelection(ids, candidates) {
   return out;
 }
 
-// --- §1 overlayBucketKey ---------------------------------------------------
+// --- §1 overlayModel (Step 3.4b — replaces the 3.4 shape entirely) -------
 
-// Bucket key for one entry_date under `period`, matching whatever lens the
-// Range chart itself is using (boundsModel().period) — §0 rule 5, so
-// marker k lines up with the metric's own point k. A malformed date (not
-// matching the 'YYYY-MM-DD' shape, or not a real calendar date) is null,
-// never a throw.
-export function overlayBucketKey(dateStr, period) {
-  if (typeof dateStr !== 'string' || !DATE_STR_RE.test(dateStr)) return null;
-  try {
-    if (period === 'week') return isoWeekKey(dateStr);
-    if (period === 'month') return dateStr.slice(0, 7);
-    // Unknown period, and 'day' itself, both use the date string as-is.
-    return dateStr;
-  } catch {
-    // isoWeekKey() throws on a shape-valid-but-not-real date (e.g.
-    // 2024-02-30) — this module's contract is "never throws", so that
-    // becomes null here, same as any other malformed date.
-    return null;
-  }
-}
-
-// --- §1 overlayModel ---------------------------------------------------
-
-// The per-overlay model plotted against `keys` (boundsModel().dates, in
-// order). §0 rule 4: a day counts as "logged" iff its entry has a finite
-// numeric value > 0 — a boolean row's stored 1 qualifies, a numeric count
-// of 0 does not. Duplicate entry_date rows are deduped FIRST WINS before
-// the logged check, exactly as js/charts/bounds.js#boundsSeries dedupes —
-// one implementation of that rule would be nice, but the two modules
-// don't share an import path for it (bounds.js dedupes for 'average'
-// rollup, this dedupes for "was this calendar day an event at all"), so
-// it is intentionally re-stated here rather than stretched into a shared
-// helper that would blur two different questions. Never throws.
+// The per-overlay model, aligned to the METRIC's own bucket keys
+// (boundsModel().dates) — this is exactly js/charts/weekly.js#trendModel,
+// except it never invents its own keys: the caller (the Range chart) owns
+// the x-axis, and bar k must sit under the metric's point k even on the
+// 'All' range where the two trackables' histories start on different
+// dates. Never throws.
 export function overlayModel({ trackable, entries, keys, period } = {}) {
   const id = isPlainObject(trackable) ? String(trackable.id) : '';
   const name =
@@ -193,94 +186,219 @@ export function overlayModel({ trackable, entries, keys, period } = {}) {
     isPlainObject(trackable) && typeof trackable.color === 'string' && trackable.color !== ''
       ? trackable.color
       : null;
+  const unit =
+    isPlainObject(trackable) && typeof trackable.unit === 'string' && trackable.unit !== ''
+      ? trackable.unit
+      : null;
+  const aggregation = seriesAggregationFor(trackable);
+  const direction = isPlainObject(trackable) && trackable.direction === 'break' ? 'break' : 'build';
 
+  const per = period === 'week' || period === 'month' ? period : 'day';
   const keyList = Array.isArray(keys) ? keys : [];
-  const counts = new Array(keyList.length).fill(0);
 
-  // First key wins for a repeated key too, though boundsModel() never
-  // actually produces duplicate keys — this just keeps the lookup total.
-  const keyIndex = new Map();
-  keyList.forEach((k, i) => {
-    if (!keyIndex.has(k)) keyIndex.set(k, i);
-  });
-
+  // Filter to plain objects with a REAL calendar entry_date and a finite
+  // numeric value, then dedupe by entry_date FIRST WINS — exactly
+  // js/charts/bounds.js#boundsSeries's own rule, restated here rather than
+  // imported because bounds.js's dedupe is private to that module's
+  // 'average' rollup and this module answers a different question (was
+  // there a value at all, for any aggregation).
   const list = Array.isArray(entries) ? entries : [];
   const byDate = new Map();
   for (const e of list) {
     if (!isPlainObject(e)) continue;
-    const d = e.entry_date;
-    if (typeof d !== 'string' || !DATE_STR_RE.test(d)) continue;
-    if (!byDate.has(d)) byDate.set(d, e);
+    if (!isRealDateStr(e.entry_date)) continue;
+    if (!isFiniteNumber(e.value)) continue;
+    if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, e);
+  }
+  const deduped = [...byDate.values()];
+
+  // seriesAggregationFor() only ever returns one of rollup's four legal
+  // aggregations, and `per` is always one of rollup's three legal periods
+  // — so rollup()'s own validation throws are unreachable from here, same
+  // reasoning as weekly.js#trendModel's comment on this exact call.
+  const buckets = rollup(deduped, per, aggregation);
+  const filled = fillSeries(buckets, keyList, fillValueFor(aggregation));
+
+  const target = targetFor(trackable, per);
+
+  const values = filled.map((f) => f.value);
+  const verdicts = values.map((v) => weekVerdict(v, target, direction));
+  const total = values.reduce((sum, v) => sum + (isFiniteNumber(v) ? v : 0), 0);
+
+  return { id, name, color, unit, aggregation, direction, values, verdicts, target, total };
+}
+
+// --- §1 withAlpha --------------------------------------------------------
+
+const HEX_SHORT_RE = /^#([0-9a-fA-F]{3})$/;
+const HEX_LONG_RE = /^#([0-9a-fA-F]{6})$/;
+
+// '#rgb'/'#rrggbb' -> 'rgba(r, g, b, alpha)'; any other string (e.g.
+// 'rgb(1,2,3)', a CSS variable) is returned unchanged, since this module
+// has no way to parse arbitrary CSS colour syntax; non-string -> black at
+// the given alpha, a safe visible fallback. Never throws.
+export function withAlpha(color, alpha) {
+  if (typeof color !== 'string') return `rgba(0, 0, 0, ${alpha})`;
+
+  const shortMatch = HEX_SHORT_RE.exec(color);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].split('').map((c) => parseInt(c + c, 16));
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  for (const [dateStr, entry] of byDate) {
-    if (!isFiniteNumber(entry.value) || entry.value <= 0) continue; // not "logged"
-    const bucketKey = overlayBucketKey(dateStr, period);
-    if (bucketKey === null) continue;
-    const idx = keyIndex.get(bucketKey);
-    if (idx === undefined) continue; // outside the plotted range
-    counts[idx] += 1;
+  const longMatch = HEX_LONG_RE.exec(color);
+  if (longMatch) {
+    const hex = longMatch[1];
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
-  const total = counts.reduce((a, b) => a + b, 0);
-  return { id, name, color, counts, total };
+  return color;
 }
 
-// --- §1 overlayRowY / overlayPointStyle -----------------------------------
+// --- §1 overlayAxisFor -----------------------------------------------
 
-export function overlayRowY(index) {
-  return OVERLAY_ROW_BASE + index * OVERLAY_ROW_STEP;
+// The right-hand axis window. Always framed from 0 (these are counts/
+// sums, never a level like weight — see weekly.js#axisBoundsFor's
+// beginAtZero rule for 'sum'/'count'), and padded 15% above the larger of
+// the data or the target line, so neither sits on the axis border. Rounds
+// UP (never inward, which could clip the very point the padding protects)
+// — to a whole number for a 'count' series or an all-integer series, else
+// to one decimal. Never throws.
+export function overlayAxisFor(model) {
+  const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : [];
+  const finite = values.filter(isFiniteNumber);
+
+  const target = isPlainObject(model) ? model.target : null;
+  const hasTarget = isPlainObject(target) && isFiniteNumber(target.value);
+
+  const candidates = finite.slice();
+  if (hasTarget) candidates.push(target.value);
+  candidates.push(1); // floor: a lone `1` still gets a visible window
+  const rawMax = Math.max(...candidates) * 1.15;
+
+  // Vacuously true when `finite` is empty — matches the "no data, no
+  // target" case rounding to a whole number too (there is nothing
+  // fractional to preserve).
+  const allInts = finite.every(Number.isInteger) && (!hasTarget || Number.isInteger(target.value));
+  const aggregation = isPlainObject(model) ? model.aggregation : undefined;
+
+  const suggestedMax =
+    aggregation === 'count' || allInts ? Math.ceil(rawMax) : Math.ceil(rawMax * 10) / 10;
+
+  return { min: 0, suggestedMax };
 }
 
-export function overlayPointStyle(index) {
-  return OVERLAY_POINT_STYLES[index % OVERLAY_POINT_STYLES.length];
+// --- §1 overlayAxisTitle -------------------------------------------------
+
+// The right axis needs its own title (§0 rule 5) — without one, a bar
+// chart of "3" on an unlabelled axis answers nothing. `unit` wins when the
+// trackable has one (e.g. 'cigarettes'); a bare count trackable with no
+// unit reads as 'days' (it's a days-logged count); anything else has no
+// natural noun and falls back to 'per <period>'. Never throws.
+export function overlayAxisTitle(model, period) {
+  const unit = isPlainObject(model) && typeof model.unit === 'string' && model.unit !== '' ? model.unit : null;
+  const aggregation = isPlainObject(model) ? model.aggregation : undefined;
+  const base = unit !== null ? unit : aggregation === 'count' ? 'days' : '';
+
+  if (period !== 'week' && period !== 'month') return base;
+  if (base === '') return `per ${period}`;
+  return `${base} / ${period}`;
 }
 
-// --- §1 overlayTooltipLabel ------------------------------------------------
+// --- §1 overlayTooltipLabel (Step 3.4b — new shape, no `period` arg) -----
 
-// At 'day' one marker means "logged that day" — the name says it all. At
-// 'week'/'month' a marker means "at least one logged day in the bucket",
-// so the tooltip must carry the count or it reads as a single event that
-// may actually be three. Never throws.
-export function overlayTooltipLabel(model, index, period) {
+// Tooltip line for bucket `index`. Carries the target when there is one
+// ('4 of 3') so the tooltip alone answers "did this bucket hit its own
+// target" without cross-referencing the dashed line. Never throws.
+export function overlayTooltipLabel(model, index) {
   const name = isPlainObject(model) && typeof model.name === 'string' ? model.name : '';
-  const counts = isPlainObject(model) && Array.isArray(model.counts) ? model.counts : null;
+  const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : null;
 
-  if (period !== 'week' && period !== 'month') return name;
-  if (counts === null || !Number.isInteger(index) || index < 0 || index >= counts.length) {
-    return name;
+  if (values === null || !Number.isInteger(index) || index < 0 || index >= values.length) {
+    return `${name} · —`;
   }
-  const n = counts[index];
-  return `${name} · ${n} ${n === 1 ? 'day' : 'days'}`;
+
+  const value = values[index];
+  if (!isFiniteNumber(value)) return `${name} · —`;
+
+  const target = isPlainObject(model) ? model.target : null;
+  if (!isPlainObject(target) || !isFiniteNumber(target.value)) return `${name} · ${value}`;
+
+  const t = Math.round(target.value * 10) / 10;
+  return `${name} · ${value} of ${t}`;
 }
 
-// --- §1 overlayDatasets --------------------------------------------------
+// --- §1 overlayTargetAnnotation ------------------------------------------
 
-// PURE Chart.js dataset configs, one per model, in selection order — index
-// `i` here is what overlayRowY()/overlayPointStyle() key off, so it MUST
-// be the model's position in `models`, not anything derived from the
-// model itself. `showLine: false` + a hidden linear axis (wired up by the
-// caller, js/charts/bounds.js) is what turns this into a rug of marker
-// dots rather than a second line. Never throws.
-export function overlayDatasets(models, fallbackColor) {
-  const list = Array.isArray(models) ? models : [];
-  return list.map((model, i) => {
-    const counts = isPlainObject(model) && Array.isArray(model.counts) ? model.counts : [];
-    const name = isPlainObject(model) && typeof model.name === 'string' ? model.name : '';
-    const color = (isPlainObject(model) && model.color) || fallbackColor;
-    return {
-      type: 'line',
-      label: name,
-      showLine: false,
-      yAxisID: 'yOverlay',
-      data: counts.map((c) => (c > 0 ? overlayRowY(i) : null)),
-      pointStyle: overlayPointStyle(i),
-      pointRadius: OVERLAY_POINT_RADIUS,
-      pointHoverRadius: OVERLAY_POINT_RADIUS + 1,
+// The overlay's own target, drawn as a dashed line ON THE RIGHT AXIS
+// (scaleID: 'yOverlay') — a target line with no scaleID would default to
+// the chart's first/left y-axis and land at the wrong height entirely,
+// since the two axes have unrelated ranges. null when there is no target
+// (targetFor() already returns null for 'day' and untargeted trackables).
+// Never throws.
+export function overlayTargetAnnotation(model, fallbackColor) {
+  const target = isPlainObject(model) ? model.target : null;
+  if (!isPlainObject(target) || !isFiniteNumber(target.value)) return null;
+
+  const name = isPlainObject(model) && typeof model.name === 'string' ? model.name : '';
+  const color = (isPlainObject(model) && model.color) || fallbackColor;
+  const t = Math.round(target.value * 10) / 10;
+
+  return {
+    type: 'line',
+    scaleID: 'yOverlay',
+    value: target.value,
+    borderColor: color,
+    borderWidth: 1,
+    borderDash: [4, 4],
+    label: {
+      display: true,
+      content: `${name} ${t}`,
+      position: 'end',
       backgroundColor: color,
-      borderColor: color,
+    },
+  };
+}
+
+// --- §1 overlayDatasets (Step 3.4b — bars, not rug markers) --------------
+
+// PURE Chart.js bar dataset configs, one per model. Per-bucket colour by
+// verdict (good/bad/neutral), semi-transparent fill so the bars read as a
+// secondary series without competing with the metric's own line —
+// `order: 2` keeps the bars drawn behind/after the line in Chart.js's
+// default draw order. `colors` is `{ good, bad, fallback }` — plain
+// strings, resolved by the caller (js/charts/bounds.js) from CSS custom
+// properties, since this module never touches `document`. Non-array
+// `models` -> []. Never throws.
+export function overlayDatasets(models, colors) {
+  const list = Array.isArray(models) ? models : [];
+  const palette = isPlainObject(colors) ? colors : {};
+  const good = typeof palette.good === 'string' ? palette.good : '#34c759';
+  const bad = typeof palette.bad === 'string' ? palette.bad : '#ff6b6b';
+  const fallback = typeof palette.fallback === 'string' ? palette.fallback : '#3478f6';
+
+  return list.map((model) => {
+    const name = isPlainObject(model) && typeof model.name === 'string' ? model.name : '';
+    const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : [];
+    const verdicts = isPlainObject(model) && Array.isArray(model.verdicts) ? model.verdicts : [];
+    const modelColor = (isPlainObject(model) && model.color) || fallback;
+
+    const solidColors = verdicts.map((v) => (v === 'good' ? good : v === 'bad' ? bad : modelColor));
+
+    return {
+      type: 'bar',
+      label: name,
+      yAxisID: 'yOverlay',
+      data: values,
+      backgroundColor: solidColors.map((c) => withAlpha(c, OVERLAY_BAR_ALPHA)),
+      borderColor: solidColors,
       borderWidth: 1,
-      spanGaps: false,
+      barPercentage: 0.7,
+      categoryPercentage: 0.8,
+      order: 2,
     };
   });
 }
@@ -290,10 +408,10 @@ export function overlayDatasets(models, fallbackColor) {
 // =============================================================================
 
 // The 'overlay' chart slot's content: NOT a chart, but the picker that
-// adds/removes marker rows on the Range chart above (§0 rule 1). Builds
-// with createElement/textContent only — no innerHTML, no listeners
-// (js/views/detail.js owns the single delegated click listener that reads
-// button.overlay-chip[data-overlay-id]).
+// picks the ONE trackable drawn on the Range chart's right axis (§0 rule
+// 1). Builds with createElement/textContent only — no innerHTML, no
+// listeners (js/views/detail.js owns the single delegated click listener
+// that reads button.overlay-chip[data-overlay-id]).
 export function renderOverlayPicker({ candidates, selected, disabled } = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   const selectedIds = Array.isArray(selected) ? selected.map(String) : [];
@@ -306,13 +424,13 @@ export function renderOverlayPicker({ candidates, selected, disabled } = {}) {
   if (list.length === 0) {
     hint.textContent = 'Nothing to overlay yet — add a yes/no or count trackable.';
   } else if (selectedIds.length === 0) {
-    hint.textContent = 'Pick up to 3 to mark their logged days on the Range chart above.';
+    hint.textContent = 'Pick one to draw it on the Range chart above, on its own axis.';
   } else {
-    hint.textContent = 'Marked on the Range chart above.';
+    hint.textContent = 'Drawn on the Range chart above, right axis. Tap another to swap.';
   }
   root.appendChild(hint);
 
-  // No candidates -> the chips group is omitted entirely (§1), not just
+  // No candidates -> the chips group is omitted entirely, not just
   // rendered empty — there is nothing to group.
   if (list.length === 0) return root;
 
@@ -339,9 +457,11 @@ export function renderOverlayPicker({ candidates, selected, disabled } = {}) {
         : null;
     if (color) btn.style.setProperty('--chip-color', color);
 
-    // Disabled when the caller says so (a load is in flight), or when this
-    // chip isn't already selected and the cap is reached (§0 rule 6).
-    btn.disabled = disabled === true || (!isSelected && selectedIds.length >= MAX_OVERLAYS);
+    // Step 3.4b §1: no cap-disable — tapping another chip while one is
+    // already selected REPLACES it (js/views/detail.js#handleOverlayToggle),
+    // it never needs to be blocked. Disabled only while the caller says a
+    // load is in flight.
+    btn.disabled = disabled === true;
 
     chips.appendChild(btn);
   }

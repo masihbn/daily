@@ -38,7 +38,6 @@ import {
   writeOverlaySelection,
   sanitizeSelection,
   overlayModel,
-  MAX_OVERLAYS,
 } from '../charts/overlay.js';
 
 // =============================================================================
@@ -711,7 +710,11 @@ export function createDetailView({ id, store, api, today } = {}) {
             return overlayModel({ trackable: t, entries: overlayEntriesFor(oid), keys: bm.dates, period: bm.period });
           })
           .filter(Boolean);
-        slotSection.appendChild(renderBounds({ ...bm, overlays }));
+        // Step 3.4b (CONTRACT-3.4b.md §3): `name` is the METRIC trackable's
+        // own name — bounds.js's main dataset uses it as the legend label
+        // once an overlay is drawn (the overlay's own name comes from
+        // overlayModel(), inside `overlays`).
+        slotSection.appendChild(renderBounds({ ...bm, overlays, name: trackable.name }));
       } else if (slot === 'overlay') {
         // Step 3.4: the picker itself. chartsPending's placeholder (above)
         // is shown first on the very first load, same as every other slot.
@@ -1018,11 +1021,17 @@ export function createDetailView({ id, store, api, today } = {}) {
     render();
   }
 
-  // Step 3.4 (CONTRACT-3.4.md §3). Toggling ON writes the selection and
-  // renders immediately (the picker/chart reflect the new pick right
-  // away), THEN fires off its history load — fire-and-forget, since
+  // Step 3.4b (CONTRACT-3.4b.md §3): one overlay at a time now
+  // (MAX_OVERLAYS === 1), so there is no cap check left — tapping a chip
+  // while a DIFFERENT one is already selected REPLACES the selection
+  // outright, it is never disabled (overlay.js#renderOverlayPicker no
+  // longer disables on a cap either). Tapping the ALREADY-selected chip
+  // still just clears it. Toggling ON writes the selection and renders
+  // immediately (the picker/chart reflect the new pick right away), THEN
+  // fires off its history load — fire-and-forget, since
   // loadOverlayHistories() renders again itself once that settles.
-  // Toggling OFF is purely local: no network request, ever (§0 rule 7).
+  // Toggling OFF (or replacing) is otherwise purely local: no network
+  // request for the CLEARED id, ever.
   function handleOverlayToggle(oid) {
     if (entriesLoading || overlayLoading) return;
 
@@ -1031,14 +1040,13 @@ export function createDetailView({ id, store, api, today } = {}) {
     if (!isCandidate) return;
 
     if (overlayIds.includes(oidStr)) {
-      overlayIds = overlayIds.filter((x) => x !== oidStr);
+      overlayIds = [];
       writeOverlaySelection(overlayStorage(), idStr, overlayIds);
       render();
       return;
     }
 
-    if (overlayIds.length >= MAX_OVERLAYS) return;
-    overlayIds = [...overlayIds, oidStr];
+    overlayIds = [oidStr];
     writeOverlaySelection(overlayStorage(), idStr, overlayIds);
     render();
     loadOverlayHistories([oidStr]);

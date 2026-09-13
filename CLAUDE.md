@@ -57,7 +57,7 @@ what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3841 tests as of Step 3.4** (3622 unit, 54 integration, 165 e2e). See
+**3859 tests as of Step 3.4b** (3640 unit, 54 integration, 165 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -161,9 +161,10 @@ js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       signin.js (email + password, Show/Hide toggle).
 js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
-                      builders over Chart.js; overlay.js (3.4) — marker
-                      rows for other trackables' logged days on the
-                      bounds chart, plus the picker.
+                      builders over Chart.js; overlay.js (3.4/3.4b) —
+                      one other trackable's per-bucket count as bars on
+                      the bounds chart's right axis, with its own
+                      target and verdicts, plus the picker.
 js/dates.js          PURE local-calendar date math (Step 1.2): todayLocal,
                       parseLocal, formatLocal, addDays, isoWeekKey,
                       startOfIsoWeek, isoWeeksInRange, rangeDays,

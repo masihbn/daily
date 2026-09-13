@@ -29,10 +29,17 @@ import { rangeDays, addDays, isoWeeksInRange, monthsInRange, isoWeekKey } from '
 // implementation per concept is this codebase's governing discipline.
 // weekly.js does not import this module, so there is no cycle.
 import { PERIODS } from './weekly.js';
-// Step 3.4 (CONTRACT-3.4.md §2): only these two — the marker dataset
-// shapes and their tooltip text are owned by overlay.js, this module just
-// wires them onto the Range chart's own scales/legend/tooltip.
-import { overlayDatasets, overlayTooltipLabel } from './overlay.js';
+// Step 3.4b (CONTRACT-3.4b.md §2): the overlay's own trend-series shape,
+// axis window/title, tooltip text and target line are all owned by
+// overlay.js — this module just wires them onto the Range chart's own
+// scales/legend/tooltip.
+import {
+  overlayDatasets,
+  overlayTooltipLabel,
+  overlayAxisFor,
+  overlayAxisTitle,
+  overlayTargetAnnotation,
+} from './overlay.js';
 
 // --- §2.1 constants ------------------------------------------------------
 
@@ -744,11 +751,14 @@ export function renderBounds(model) {
   wrap.appendChild(canvas);
   root.appendChild(wrap);
 
-  // Step 3.4 (CONTRACT-3.4.md §2): `model.overlays` is OPTIONAL — absent,
-  // non-array or empty must reproduce today's exact output (§0 rule 9), so
-  // every branch below keys off `overlays.length`, never off the field's
-  // mere presence.
+  // Step 3.4b (CONTRACT-3.4b.md §2): `model.overlays` is OPTIONAL — absent,
+  // non-array or empty must reproduce today's exact output (CONTRACT-3.4.md
+  // §0 rule 9's byte-for-byte requirement still stands), so every branch
+  // below keys off `overlay` (singular — only the FIRST element is ever
+  // drawn; one overlay at a time, CONTRACT-3.4b.md §0 rule 1), never off
+  // the field's mere presence.
   const overlays = Array.isArray(model.overlays) ? model.overlays : [];
+  const overlay = overlays.length > 0 ? overlays[0] : null;
 
   const lineColor = model.identityColor || cssVar('--accent', '#3478f6');
   const goodColor = cssVar('--good', '#34c759');
@@ -805,18 +815,25 @@ export function renderBounds(model) {
       borderColor: (ctx) => (visibility[ctx.p0DataIndex] ? lineColor : transparent),
     },
   };
+  // Step 3.4b (CONTRACT-3.4b.md §2): the main dataset only needs a `label`
+  // once there's a second series in the legend to distinguish it from —
+  // added here rather than unconditionally, so the zero-overlay dataset
+  // config stays byte-for-byte its pre-3.4 shape. detail.js passes
+  // `model.name` (the METRIC trackable's own name); the unit/'value'
+  // fallback covers a caller that omits it.
+  if (overlay !== null) {
+    dataset.label =
+      typeof model.name === 'string' && model.name !== '' ? model.name : model.unit || 'value';
+  }
 
-  // Step 3.4 (CONTRACT-3.4.md §2): legend stays `{ display: false }` with
-  // zero overlays (§0 rule 9's byte-for-byte requirement) and only lists
-  // the overlays when at least one is drawn — `filter` drops datasetIndex
-  // 0, the metric line itself, which is not what "legend" means here (§0
-  // rule 8). `usePointStyle: true` is what makes each entry show its own
-  // marker shape instead of a generic line swatch.
+  // Step 3.4b (CONTRACT-3.4b.md §2): legend stays `{ display: false }` with
+  // no overlay (CONTRACT-3.4.md §0 rule 9's byte-for-byte requirement) and
+  // lists BOTH series once one is drawn — no `filter` this time (3.4's rug
+  // markers hid the metric line from the legend; 3.4b's bars are a real
+  // second series worth naming), and `usePointStyle: false` since a bar
+  // swatch, not a point marker, is what a bar dataset actually draws.
   const plugins = {
-    legend:
-      overlays.length > 0
-        ? { display: true, labels: { usePointStyle: true, filter: (item) => item.datasetIndex > 0 } }
-        : { display: false },
+    legend: overlay !== null ? { display: true, labels: { usePointStyle: false } } : { display: false },
     tooltip: {
       callbacks: {
         // The tooltip title is the full 'YYYY-MM-DD' date, not the short
@@ -825,13 +842,15 @@ export function renderBounds(model) {
           if (!items || items.length === 0) return '';
           return (Array.isArray(model.dates) && model.dates[items[0].dataIndex]) || '';
         },
-        // Only added when overlays exist — with none, the tooltip keeps
-        // Chart.js's own default point label, exactly as before this step.
-        ...(overlays.length > 0
+        // Only added when an overlay is drawn — with none, the tooltip
+        // keeps Chart.js's own default point label, exactly as before 3.4.
+        ...(overlay !== null
           ? {
               label(item) {
-                if (item.datasetIndex === 0) return String(model.values[item.dataIndex]);
-                return overlayTooltipLabel(overlays[item.datasetIndex - 1], item.dataIndex, model.period);
+                if (item.datasetIndex === 0) {
+                  return `${model.values[item.dataIndex]}${model.unit ? ' ' + model.unit : ''}`;
+                }
+                return overlayTooltipLabel(overlay, item.dataIndex);
               },
             }
           : {}),
@@ -896,6 +915,18 @@ export function renderBounds(model) {
         },
       },
     };
+
+    // Step 3.4b (CONTRACT-3.4b.md §2): the overlay's own target, drawn on
+    // the RIGHT axis (overlayTargetAnnotation() sets scaleID: 'yOverlay') —
+    // null when there is no overlay, or the overlay trackable has no
+    // target, or the target doesn't apply at this period (targetFor()
+    // returns null for weekly_count at 'day' — see weekly.js).
+    if (overlay !== null) {
+      const overlayTarget = overlayTargetAnnotation(overlay, lineColor);
+      if (overlayTarget !== null) {
+        plugins.annotation.annotations.overlayTarget = overlayTarget;
+      }
+    }
   }
 
   // §3 y-axis: boundsAxisFor() is the single source of the y-axis window
@@ -909,15 +940,33 @@ export function renderBounds(model) {
       suggestedMax: axis.suggestedMax,
     },
   };
-  // Step 3.4 (CONTRACT-3.4.md §2): a SEPARATE, hidden 0..1 axis for the
-  // marker rows, added only when there is at least one overlay — this is
-  // what lets overlayDatasets()' fixed row positions (§0 rule 3) sit
-  // underneath the metric line without ever perturbing its own `y` scale.
-  if (overlays.length > 0) {
-    scales.yOverlay = { type: 'linear', min: 0, max: 1, display: false, position: 'right' };
+  // Step 3.4b (CONTRACT-3.4b.md §2): both axes get a title once an overlay
+  // is drawn — left: the metric's own unit (so a reader can tell which
+  // axis is which at a glance without the legend); right: whatever
+  // overlayAxisTitle() derives for the overlay trackable/period. A REAL,
+  // visible second axis this time (unlike 3.4's hidden 0..1 rug axis) —
+  // `grid: { drawOnChartArea: false }` keeps its ticks from drawing a
+  // second grid over the metric's own. Neither title/axis is added with no
+  // overlay, keeping the zero-overlay scales config byte-for-byte its
+  // pre-3.4 shape.
+  if (overlay !== null) {
+    scales.y.title = { display: true, text: model.unit || '' };
+    const overlayAxis = overlayAxisFor(overlay);
+    scales.yOverlay = {
+      type: 'linear',
+      position: 'right',
+      min: 0,
+      suggestedMax: overlayAxis.suggestedMax,
+      grid: { drawOnChartArea: false },
+      ticks: { precision: 0 },
+      title: { display: true, text: overlayAxisTitle(overlay, model.period) },
+    };
   }
 
-  const datasets = overlays.length > 0 ? [dataset, ...overlayDatasets(overlays, lineColor)] : [dataset];
+  const datasets =
+    overlay !== null
+      ? [dataset, ...overlayDatasets([overlay], { good: goodColor, bad: badColor, fallback: lineColor })]
+      : [dataset];
 
   try {
     chartInstance = new window.Chart(canvas, {
@@ -937,11 +986,12 @@ export function renderBounds(model) {
         plugins,
       },
     });
-    // Only set once construction actually succeeds — §2's rule that
+    // Only set once construction actually succeeds — the rule that
     // data-overlays is 0 "whenever no canvas is drawn" includes a
     // construction failure, which falls through to the catch below and
-    // never reaches this line.
-    root.dataset.overlays = String(overlays.length);
+    // never reaches this line. Only one overlay is ever drawn (§0 rule 1),
+    // so this is '1' or '0', never a larger count.
+    root.dataset.overlays = overlay !== null ? '1' : '0';
   } catch {
     // A construction failure must not break the whole detail screen —
     // degrade to the same offline-style message rather than throwing out

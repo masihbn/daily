@@ -4619,14 +4619,22 @@ the build parked.**
 
 ## Step 3.4 — Correlation marker overlay
 
-**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
-check** (first time markers run on the phone; per the standing
-preference the user looks before the next step stacks on top). Started
-the same day the Phase D gate passed, because the user ended the park:
-"there's no reason for us to stop things". Executed under the
-ORCHESTRATION.md loop: Implementer + Test Author in parallel from
-`CONTRACT-3.4.md`, one contract amendment (caught by the Test Author),
-suite green on the first run. `sw.js` `CACHE` → `daily-v30`.
+**Status:** DONE (2026-09-13), **redesigned the same day as 3.4b after
+the device check** — suite-verified, awaiting the second device check.
+Started the day the Phase D gate passed, because the user ended the
+park: "there's no reason for us to stop things". Executed under the
+ORCHESTRATION.md loop twice: 3.4 (`CONTRACT-3.4.md`, markers) then 3.4b
+(`CONTRACT-3.4b.md`, bars on a right axis) with the same Implementer,
+Test Author and Runner resumed. `sw.js` `CACHE` → `daily-v31`.
+
+**3.4b, why.** The user's verdict on 3.4 on the phone: "I am seeing
+workout triangles on every single week … it doesn't make any sense."
+A marker meaning "at least one logged day in the bucket" is true of
+every week for a habit you keep, so it carries no information. The
+user's redesign: each series is a number on the y axis over the same x
+— left axis the metric and its band, right axis the overlay and its
+own target — and "whether we were within the balance of what we wanted
+to achieve" for both at the same x. One overlay at a time for now.
 
 **Goal.** Chart type 4a. Discrete events from other trackables (gym
 days) drawn as markers on a bounded metric's chart.
@@ -4729,7 +4737,60 @@ GET.
 *Not verifiable from this machine (device check):* whether the marker
 rows read clearly under the line at 390px, whether the chip colours
 match the markers well enough to skip reading the legend, and whether
-three overlays at once are still legible.
+three overlays at once are still legible. **Device verdict 2026-09-13:
+the mechanics worked, the meaning did not — see 3.4b below.**
+
+**Test Subjects, 3.4b (2026-09-13).** Suite **3859 green** — 3640 unit
+(+18 net: the overlay unit file went from 53 to 71 cases), 54
+integration, 165 e2e (same count: the 12 overlay cases were rewritten,
+not added). `CACHE` → `daily-v31`.
+
+*What changed.* The overlay is now the overlay trackable's OWN trend
+series — `rollup` with `seriesAggregationFor` (days-per-bucket for a
+boolean like Workout, the sum for a numeric count), `fillValueFor` for
+empty buckets — aligned to the metric's bucket keys so bar k sits under
+point k even on `All`, where the two histories start on different
+dates. Its target comes from `targetFor(trackable, period)` (3 a week
+scales to ~13 a month; null at Daily) and each bucket's verdict from
+`weekVerdict`, direction `break` flipping it (Smoking is green when
+under). Drawn as semi-transparent bars on a visible right axis with its
+own title (`days / week`, `cigarettes / month`), coloured good/bad per
+bucket, with a dashed target line on that axis; the left axis gets the
+metric's unit as a title, the legend lists both series by name, the
+tooltip shows both values (`Workout · 4 of 3`). `MAX_OVERLAYS` is 1 and
+tapping another chip swaps. The zero-overlay chart is still
+byte-for-byte the pre-3.4 output. Removed from `overlay.js`: the row
+geometry and point-style exports of 3.4.
+
+*The one fix cycle.* Two e2e failures (O5, O12) on the first run: the
+tests looked up a bucket by searching `chart.data.labels` for a raw
+`'2026-W33'` key, but those labels are the formatted `'10 Aug'` axis
+labels from Step 3.3. The Runner reproduced the model in Node and
+showed the chart's values and verdicts were right. Orchestrator ruling:
+test wrong, expectation right — the lookup now recovers raw keys
+through the chart's own tooltip-title callback, and the assertions are
+untouched.
+
+*Unit (71 cases):* the 3.4 candidate/selection/sanitize cases (cap now
+1); model alignment to caller keys with count fill 0 and average fill
+null; sum vs average vs `weekly_average` override; target and verdicts
+at week/month/day for build and break; degenerate inputs; `withAlpha`
+for #rgb/#rrggbb/other/non-string; right-axis window (ceil of 1.15 ×
+max(value, target, 1)); axis titles; tooltip text incl. the rounded
+month target; the annotation shape (`scaleID: 'yOverlay'`); the bar
+dataset shape with per-bucket colours.
+
+*E2E (12 cases):* picker and single GET; select → bar dataset on the
+right axis, axis titles, 2-item legend, storage; persisted selection;
+clear; Weekly good/bad partition against the target line derived from
+`isoWeekKey`, then Daily with no target line, zero GETs; swap replaces;
+500 resilience and retry; non-ok bounds status; stale id; lifecycle;
+range change; tooltip callbacks for both datasets.
+
+*Not verifiable from this machine:* whether the bars behind the line
+read as "the other thing" at a glance, whether green/red bars under a
+green/red-dotted line is too much colour, and whether the right-axis
+title fits at 390px.
 
 ---
 
@@ -5160,3 +5221,12 @@ unwind than to ask about.
   after the Test Author flagged a contradiction: only overlays whose
   history loaded are drawn. Suite 3841 green on the first run;
   `CACHE` → `daily-v30`. Device check pending.
+- **2026-09-13** — **Step 3.4b: overlay redesigned after the device
+  check.** User verdict on 3.4's markers: a triangle on every week
+  "doesn't make any sense". New design (the user's): the overlay is a
+  number on its own right-hand axis over the same x — its per-bucket
+  count as bars, coloured met/missed against its own target, with a
+  target line — next to the metric's line and band on the left; one
+  overlay at a time. Both 3.4 test files rewritten (orchestrator
+  decision — same step, changed behaviour). Suite 3859 green after one
+  test-lookup fix. `CACHE` → `daily-v31`. Device check pending.
