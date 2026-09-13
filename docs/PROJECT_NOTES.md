@@ -312,6 +312,31 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 13 — 2026-09-13, Phase D gate: the park is formal
+
+**Verdict: passed** (user: "it seems like we're good to move forward").
+
+- Real entry on the phone, kill-and-relaunch, backup contains it: all
+  shown during D.7's device check earlier the same day (Attempt 12).
+- Imported history in calendar and charts: seen at D.6b (2026-09-04).
+- **Auto-bounds, first time on a device.** The user switched `Calories`
+  from Manual (1500–2199) to Auto and got **1670–4440**, and asked what
+  that was supposed to mean. Checked against the backup dump: the last
+  90 days (2026-06-15 → 2026-09-12, 90 readings) have p10 = 1670,
+  median = 1916, p90 = 4440, max = 6354 — the band is exactly
+  `deriveBounds` (p10/p90 of the rolling window) doing its job on a
+  noisy three months. So the mechanism is verified; the surprise was
+  about meaning, not correctness. **Lesson for the UI, for whenever 4.1
+  or a chart step touches this:** Auto is *descriptive* ("where 80% of
+  your recent days fell"), Manual is *prescriptive* (a goal). Nothing on
+  the form says that. A one-line hint next to the Auto option, and the
+  window length shown on the chart, would have pre-empted the question.
+  Advised: Calories back to Manual.
+- The user then asked whether the window length (90 vs 30 days) would
+  become editable — Step 4.1. Offered to pull 4.1 forward to right
+  after this gate; the user did not decide ("whatever"), so the order
+  stands until they say otherwise.
+
 ### Attempt 12 — 2026-09-13, Step D.7: sign-in on the phone and the RLS flip
 
 **Context**: the D.7 client (sign-in gate, token-bearing `api.js`) had
@@ -880,12 +905,10 @@ the thing tested here is the placeholder tap-counter, which Step 0.3 of
 Rewritten at Step D.8 (2026-09-13); the Phase 0 version is in git
 history.
 
-- [ ] **Phase D gate verdict from the user** (checklist handed over
-      2026-09-13: a real entry survives kill-and-relaunch, the backup
-      repo has it, the imported history renders, auto-bounds on
-      Calories). Reason: `ORCHESTRATION.md` §7 — a gate is a hard stop,
-      and the app is not formally "in use" until the user says so.
-      Record the verdict as a Test log entry above.
+- [x] **Phase D gate verdict from the user.** **PASSED 2026-09-13** —
+      see Test log, Attempt 13. Reason it mattered: `ORCHESTRATION.md`
+      §7 — a gate is a hard stop, and the app was not formally "in use"
+      until the user said so.
 - [ ] **~4 weeks (2026-10-11) and ~8 weeks (2026-11-08): the user checks
       the backup repo's newest commit is from that day and its run is
       green, and the Supabase dashboard shows the project active.**

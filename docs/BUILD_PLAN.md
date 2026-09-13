@@ -4594,14 +4594,20 @@ device check is written after the user's verdict, not before it.
 
 ## ⛔ PHASE D GATE — hard stop
 
-**Status:** OPEN — checklist handed to the user 2026-09-13; waiting for
-their verdict. Evidence already in hand from D.7's device check
-(`PROJECT_NOTES.md`, Attempt 12): a real entry logged on the phone
-survived a full close and reopen, and the `2026-09-13T14:08Z` backup
-contains it. The imported history was seen on the device at D.6b
-(2026-09-04). The one check with no evidence yet is the **auto-bounds**
-path carried here from Step 3.3 (`Calories` has only ever used manual
-bounds; auto needs 12+ readings, and the import supplied ~980).
+**Status:** PASSED — 2026-09-13, user verdict "we're good to move
+forward". Evidence: a real entry logged on the phone survived a full
+close and reopen (Attempt 12) and the `2026-09-13T14:08Z` backup
+contains it; the imported history was seen on the device at D.6b
+(2026-09-04); the **auto-bounds** path, unexercised since Step 3.3, ran
+on the device for the first time — `Calories` on Auto showed a
+1670–4440 band, which matches p10/p90 of the last 90 days computed from
+the backup dump. The user found the band surprising; the answer (Auto
+describes the last 90 days, Manual is for a goal) is in
+`PROJECT_NOTES.md`, Attempt 13, and the user was advised to switch
+Calories back to Manual. The park is now formal: **the app is in use,
+resume at Step 3.4 when the user says so.** The user also asked whether
+the rolling window would become editable — that is Step 4.1; pulling it
+forward to just after this gate was offered, no decision taken.
 
 The user logs a real entry, on the phone, in normal daily use, and it
 survives a kill-and-relaunch. Then: confirm the backup repo has a commit
