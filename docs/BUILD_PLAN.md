@@ -4364,7 +4364,16 @@ there's no way for me to see before June."
 
 ## Step D.7 — RLS hardening + single-user Supabase Auth (moved from 5.3)
 
-**Status:** TODO
+**Status:** DONE — 2026-09-13 (built 2026-09-05, device-verified and
+flipped on production 2026-09-13). Executed under the ORCHESTRATION.md
+loop: Implementer + Test Author in parallel from `CONTRACT-D.7.md`,
+two review fixes, one e2e-caught product defect, one device-feedback
+feature. User decision: **email + password** (magic links open in
+Safari, not the installed PWA, and the built-in mailer is rate-limited).
+Orchestrator decision: production was flipped in **two migrations with a
+device check between** — the client + `0009` (additive) first, then
+`0010` (the lock) only after the user had signed in on the phone,
+relaunched, and logged a value.
 
 **Goal.** Close the tracked security gap: real auth-scoped policies
 replacing `using (true)`.
@@ -4403,9 +4412,95 @@ project first).
 - Run `mcp__supabase__get_advisors` afterwards. Baseline is clean today,
   so the goal is: still clean, with the permissive policies gone.
 
-**Test Subjects.**
+**Test Subjects** (all green 2026-09-13: 3569 unit, 54 integration,
+153 e2e — 3776 total).
 
-_(To be filled in by the executing session.)_
+*What shipped.* `js/auth.js` (GoTrue REST via raw fetch: sign-in, silent
+single-flight refresh, session in `localStorage` under `daily.auth.v1`,
+offline-relaunch safe — a refresh that fails with a *network* error keeps
+the session, only a server rejection clears it); `js/errors.js` (the three
+error classes moved out of `api.js` so `auth.js` can share them without an
+import cycle, plus `AuthError`); `js/views/signin.js` (the gate, with a
+Show/Hide password toggle added after the first device attempt);
+`js/main.js` (gate, Settings sign-out that refuses while the outbox is
+non-empty, re-render only on a signed-in *flip*); `js/api.js` (bearer =
+session token, `apikey` always anon, one-shot 401 → refresh → retry);
+`js/outbox-sync.js` (`canFlush` so a signed-out flush can never drop a
+queued write); migrations `0009_user_id.sql` and `0010_owner_policies.sql`;
+`scripts/restore.mjs --user-id` for cross-project restores; the test tiers
+sign in as the test project's own user (`DAILY_TEST_EMAIL/_PASSWORD` in
+`.env.test`). `CACHE` → `daily-v29`.
+
+- **Unit, `tests/unit/auth.test.mjs`** (73) — JWT decoding without
+  verification; hydrate/corrupt-storage cases; sign-in request shape and
+  both GoTrue error shapes; `getAccessToken` fresh / at the margin / refresh
+  / network-failure-keeps-session / 4xx-clears-session; single-flight
+  refresh; rotation; sign-out best-effort; `handleUnauthorized`.
+- **Unit, `tests/unit/api.test.mjs`** (+10) — signed-out headers unchanged;
+  session bearer; 401 → refresh → retry (3 fetches, not 4 as the contract
+  first said — the Test Author caught the arithmetic); refresh 4xx →
+  `AuthError` retryable; no retry loop; re-exported classes are `===`.
+- **Unit** — `outbox-sync` `canFlush` (+5), `restore --user-id` /
+  `remapUserId` / cross-project guard (+15), `resolveTestCredentials`
+  fail-closed (+8).
+- **Integration, `tests/integration/rls.test.mjs`** (test project) — anon
+  key: trackables/entries GET and POST → 401/403, `counter` read → 200 (the
+  keepalive contract), `counter` PATCH → denied, `daily_resync_identity`
+  RPC → denied; signed in: rows carry `user_id = auth.uid()` and the RPC
+  works. Every other integration file gained `before(ensureSignedIn)`.
+- **E2E, `tests/e2e/auth.test.mjs`** (A1–A15) — gate with zero requests;
+  hash preserved while gated; sign-in POST shape; wrong password; offline;
+  empty fields; expired token → exactly one refresh *before* the first REST
+  GET; 401 → refresh → retry order; refresh 400 → gate + storage cleared;
+  Settings email + Sign out (logout POST, session and cache keys removed);
+  sign-out refused with a non-empty outbox; reload keeps the session with
+  no auth request; Show/Hide toggle; typed values survive a failed attempt.
+  Every existing e2e file seeds a session and guards `/auth/v1/`.
+
+*Two defects caught before they shipped.* (1) Review: `main.js` re-rendered
+on **every** session change, so a routine token refresh would have
+unmounted a loading view and issued a second entries load — changed to
+re-render only when the signed-in state flips. (2) E2E A1: `#nav` carried
+`hidden` but stayed visible, because its explicit `display: flex` beats the
+user-agent `[hidden]` rule — fixed with `#nav[hidden] { display: none }`.
+
+*Verified on production after the flip (2026-09-13).* Anon key →
+trackables/entries/app_settings **401**, `counter` **200**; policies are the
+twelve owner-scoped ones plus `anon can read counter`; anon has no grants
+on the three data tables; `get_advisors` shows no RLS findings (one new
+WARN: "leaked password protection disabled", a dashboard toggle). The
+backup workflow ran green on the new secret key immediately afterwards —
+`taken_at 2026-09-13T14:08Z`, 4 / 2048 / 1 rows, every row carrying
+`user_id` — and the keepalive workflow ran green.
+
+*One thing the backfill cost, recorded honestly.* `0009`'s `UPDATE …
+SET user_id` fired the `set_updated_at` trigger on every row, so **every
+entry's `updated_at` now reads the migration time** (2026-09-13 ~13:5x
+UTC). Nothing in the app reads `updated_at`, but migration `0006`'s undo
+query for the D.5 import was scoped by it, and that distinction is gone.
+The pre-migration values survive in the backup repo's history (the
+`03:17 UTC` backup of 2026-09-13, one commit before the 14:08 one). Lesson
+for any future backfill: disable the trigger for the statement, or make
+the trigger ignore updates that touch only bookkeeping columns.
+
+*Left as-is, noted for a later tidy.* Supabase's default grants still give
+`anon` INSERT/DELETE/TRUNCATE/REFERENCES/TRIGGER on `counter` and
+`authenticated` TRUNCATE/REFERENCES/TRIGGER on the data tables. RLS blocks
+the anon writes (no policy = denied) and PostgREST exposes no TRUNCATE, so
+this is theoretical; a one-line `revoke` migration closes it whenever the
+next schema change happens.
+
+*Device sequence, as it actually went.* First sign-in failed twice with
+"Invalid login credentials" (confirmed from the auth logs, so the client
+was fine — the user was unsure of the password they had typed blind). Two
+consequences: the Show/Hide toggle (`daily-v29`), and the account was
+deleted and re-created before `0009` ran, which is exactly why `0009`
+insists on being applied *after* the account exists. Then: sign in →
+relaunch → still signed in → log a value → `0009` → log → `0010` → log →
+backup → advisors. The migrations were pasted into the SQL editor by the
+user because the session's permission classifier refused
+`apply_migration` against production; the files in `supabase/migrations/`
+are byte-identical to what was pasted.
 
 ---
 
@@ -4884,3 +4979,11 @@ unwind than to ask about.
   (Fable 5.1 orchestrated this step). After the device check the user
   asked for the range control to move below the calendar, above the
   charts it governs — done the same day (`daily-v27`).
+- **2026-09-13** — **Step D.7 executed** (built 2026-09-05). User chose
+  **email + password**. Production flipped in two migrations with a
+  device check between (`0009` additive → sign in / relaunch / log →
+  `0010` lock). The backup workflow's `SUPABASE_KEY` is now a secret
+  key; the keepalive keeps its anon read on `counter`. The `0009`
+  backfill clobbered every entry's `updated_at` (trigger fired);
+  recorded in D.7's Test Subjects, pre-migration values are in the
+  backup repo's history. `CACHE` → `daily-v29`.

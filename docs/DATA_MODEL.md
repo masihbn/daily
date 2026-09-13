@@ -243,18 +243,33 @@ singleton (`check (id = 1)`) — so it needed no change.
 
 ## Security status (see also docs/PROJECT_NOTES.md → "Security posture")
 
-`trackables`, `entries`, and `app_settings` each currently have a
-single permissive RLS policy (`for all using (true) with check
-(true)`) — the anon/publishable key embedded in the client can read,
-insert, update, and delete anything in any of them. This mirrors the
-original `counter` table's pattern and is being carried forward *as a
-known, tracked gap*, not an oversight:
+**Closed by Step D.7 (2026-09-13; migrations `0009` and `0010`).**
 
-- Fine for now: single user, unlisted URL, no sign-in flow exists yet.
-- **Must change before this app stores anything the user would mind
-  being exposed if the URL/key leaked** — the fix is Supabase Auth (even
-  a single-user email/password or magic-link setup) plus a `user_id`
-  column + RLS policies scoped to `auth.uid()`, replacing the `using
-  (true)` policies here. Not implemented yet — do this (Step 5.3)
-  before adding more sensitive trackables (health specifics,
-  journal-style notes) or before ever sharing the URL with anyone else.
+- `trackables`, `entries` and `app_settings` each have
+  `user_id uuid not null references auth.users(id) on delete restrict
+  default auth.uid()`. The app never sends it — the default stamps the
+  signed-in user. `on delete restrict` is deliberate: deleting the auth
+  user must fail while data exists, not cascade the history away.
+- Policies: four per table (select / insert / update / delete), all
+  `to authenticated` with `(select auth.uid()) = user_id` (the subquery
+  form so Postgres evaluates it once per statement). The old
+  `using (true)` policies are dropped, and `anon` has **no grants** on
+  the three tables, so a signed-out request fails with 401 rather than
+  returning an empty list that looks like "no data".
+- `counter` keeps `anon can read counter` (select only). The keepalive
+  workflow pings it with the anon key; if that ever fails the free
+  project auto-pauses about a week later with no other symptom.
+- `daily_resync_identity()` is executable by `authenticated` and
+  `service_role` only.
+- Single user by construction: one row in `auth.users`, and `0009`
+  refuses to run unless there is exactly one. Sign-up should stay
+  disabled in the dashboard; even if it were not, a second account
+  would see nothing.
+- **A scar from the backfill**: `0009`'s `UPDATE … SET user_id` fired
+  `set_updated_at` on every row, so every pre-2026-09-13 entry's
+  `updated_at` reads the migration time. The app does not read the
+  column; the import-undo query in migration `0006` did. Pre-migration
+  values are in the backup repo's history (2026-09-13 03:17 UTC).
+- Reads and writes from outside the app (backups, restores, one-off
+  scripts) need the project's **secret key**, which bypasses RLS. It
+  lives only in the private backup repo's Actions secrets.

@@ -22,7 +22,9 @@ Step 3.4. Phase D is backups, moving the test suite off the production
 database, entry provenance, the CSV import, outbox durability, reaching
 the imported history in the UI (D.6b, done 2026-09-04 — `listEntries`
 now pages past the 1,000-row PostgREST cap and the detail screen loads a
-trackable's whole history once), and RLS hardening. **When feature work resumes, resume at Step 3.4** — nothing in
+trackable's whole history once), and RLS hardening (D.7, done
+2026-09-13 — the app now signs in with email + password, every table
+is owner-scoped, and the anon key can read only `counter`). **When feature work resumes, resume at Step 3.4** — nothing in
 Phase D changes what 3.4 onward need to do.
 
 **Two things that will bite an unwary session during the park:**
@@ -41,7 +43,7 @@ Phase D changes what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3641 tests as of Step D.6b** (3455 unit, 48 integration, 138 e2e). See
+**3776 tests as of Step D.7** (3569 unit, 54 integration, 153 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -199,13 +201,17 @@ Live on the Supabase project as of 2026-08-22 (migration `0003`). The old
   drop it**: the keepalive workflow pings it, and dropping it silently
   auto-pauses the free project about a week later.
 
-**Known gap, deliberate and scheduled**: every table uses the wide-open
-`using (true)` RLS pattern, gated only by the public anon key. This is a
-recorded v1 tradeoff (`docs/APP_CONCEPT.md`), closed in **Step 5.3** —
-do not "helpfully" harden it early, that breaks every step in between.
-It does mean anyone with the anon key can read/write until then, so
-don't add sensitive fields (health specifics, journal-style notes)
-without revisiting that decision first.
+**Security, since Step D.7 (2026-09-13)**: Supabase Auth, single user,
+email + password. `trackables`, `entries` and `app_settings` carry a
+`user_id` (default `auth.uid()`, the app never sends it) and every
+policy is `(select auth.uid()) = user_id` for the `authenticated` role.
+The anon key can read exactly one thing: `counter`, for the keepalive.
+`js/auth.js` is the only module that may call `/auth/v1/`; `js/api.js`
+attaches the session bearer and retries a 401 once after a refresh.
+The test tiers sign in as the test project's own user
+(`DAILY_TEST_EMAIL` / `DAILY_TEST_PASSWORD` in the gitignored
+`.env.test`). The backup workflow uses a secret key stored only in the
+private backup repo; never put one in this repo.
 
 ## Conventions worth knowing before editing
 

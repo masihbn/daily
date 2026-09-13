@@ -208,7 +208,19 @@ happens, and is also runnable on demand (`workflow_dispatch`).
 
 ## Security posture (current — read before adding anything sensitive)
 
-The current setup is intentionally wide open, appropriate for a
+**Since Step D.7 (2026-09-13) the app is locked to one Supabase Auth
+account** (email + password; sign-up disabled in the dashboard). Every
+data table is owner-scoped by RLS on `user_id`; the anon key embedded in
+the page can read only `counter`. The secret key exists only as the
+private backup repo's `SUPABASE_KEY` secret. Sessions live in
+`localStorage` (`daily.auth.v1`) and survive relaunches; Settings has
+Sign out. The password can be reset from the dashboard (Authentication →
+Users). Details: `docs/DATA_MODEL.md` → "Security status".
+
+Everything below this line describes the state **before** D.7 and is
+kept as history:
+
+The original setup was intentionally wide open, appropriate for a
 throwaway counter but **not appropriate once the app stores anything
 personal**:
 
@@ -314,6 +326,45 @@ personal**:
   Code's own global ignore rules, no action needed.
 
 ## Test log
+
+### Attempt 12 — 2026-09-13, Step D.7: sign-in on the phone and the RLS flip
+
+**Context**: the D.7 client (sign-in gate, token-bearing `api.js`) had
+been built and tested on 2026-09-05 but not deployed; the user created
+the production account and the test project's account in the dashboard
+on 2026-09-13, pasted migrations `0009`+`0010` into the test project,
+and replaced the backup repo's `SUPABASE_KEY` with a secret key.
+
+**Sequence on the device** (iPhone, installed PWA):
+
+1. Deployed `daily-v28`. Sign-in screen appeared after one full
+   close/reopen. **Two sign-in attempts failed** — the auth logs showed
+   `400 Invalid login credentials`, so the client was fine; the user
+   could not see what they had typed. Added a Show/Hide toggle
+   (`daily-v29`); the user deleted and re-created the account with a
+   known password. Third attempt: `200`.
+2. Fully closed and reopened: opened straight to Today, no prompt (the
+   relaunch case the plan singled out). Logged a value — write landed
+   (`updated_at 13:56 UTC`).
+3. `0009` pasted into production's SQL editor (the session's permission
+   classifier refused `apply_migration` for production). Verified: 4 /
+   2049 / 1 rows all with the one owner, column `not null`, default
+   `auth.uid()`. Logged a value — fine.
+4. `0010` pasted. Verified from this machine with the anon key:
+   trackables, entries, app_settings → **401**; `counter` → **200**.
+   Logged a value — fine. `get_advisors`: no RLS findings.
+5. Dispatched the backup workflow: green on the secret key, dump
+   `2026-09-13T14:08Z`, 4 / 2048 / 1 rows, `user_id` present on every
+   row. Dispatched the keepalive: green.
+6. Full suite: 3569 unit, 54 integration, 153 e2e — 3776 green.
+
+**Found along the way**: the `0009` backfill fired the `updated_at`
+trigger on every entry (see `docs/DATA_MODEL.md` → Security status); the
+advisor now warns that leaked-password protection is off (dashboard
+toggle, Authentication → Sign In / Providers → Email); the secret key was
+pasted into the chat once by mistake and should be rotated (Project
+Settings → API Keys → Secret keys → create new, update the backup repo's
+secret, delete the old one).
 
 ### Attempt 11 — 2026-09-04, Step D.5: three years of history imported from CSV
 
@@ -740,12 +791,9 @@ later the same day — see **Attempt 5** below.
 - **The app itself is still not built.** Everything shipped so far is
   plumbing (a tap counter proving hosting + backend + installability).
   This is the actual remaining work — see `docs/BUILD_PLAN.md`.
-- **RLS/security hardening is not done.** Deliberately deferred to
-  `BUILD_PLAN.md` Step 5.3, after the v1 feature set stabilizes — this
-  is a recorded, accepted tradeoff (`APP_CONCEPT.md` → "RLS/auth
-  hardening timing"), not an oversight. It still must happen before the
-  app is shared, exposed more broadly, or treated as finished. See
-  Security posture above.
+- ~~**RLS/security hardening is not done.**~~ **DONE 2026-09-13** as
+  Step D.7 (pulled forward from 5.3 on 2026-08-25). See Security posture
+  above and Test log, Attempt 12.
 - ~~**Project structure is still a single flat `index.html`.**~~
   **RESOLVED 2026-08-21** — reorganized into folders in Attempt 4 (see
   `CLAUDE.md` for the map). The JS will split further into ES modules
