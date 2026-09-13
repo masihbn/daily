@@ -29,6 +29,10 @@ import { rangeDays, addDays, isoWeeksInRange, monthsInRange, isoWeekKey } from '
 // implementation per concept is this codebase's governing discipline.
 // weekly.js does not import this module, so there is no cycle.
 import { PERIODS } from './weekly.js';
+// Step 3.4 (CONTRACT-3.4.md §2): only these two — the marker dataset
+// shapes and their tooltip text are owned by overlay.js, this module just
+// wires them onto the Range chart's own scales/legend/tooltip.
+import { overlayDatasets, overlayTooltipLabel } from './overlay.js';
 
 // --- §2.1 constants ------------------------------------------------------
 
@@ -670,6 +674,12 @@ export function renderBounds(model) {
 
   const root = document.createElement('div');
   root.className = 'bounds';
+  // Step 3.4 (CONTRACT-3.4.md §2): ALWAYS present, whatever `status` turns
+  // out to be — 0 is the default and stays put on every early-return path
+  // below (no canvas drawn at all); it is only overwritten, right before
+  // the final `return root`, once the Chart.js instance carrying the
+  // overlay datasets has actually been constructed.
+  root.dataset.overlays = '0';
 
   const zone = model && typeof model === 'object' && typeof model.todayZone === 'string' ? model.todayZone : 'unknown';
   const summary = document.createElement('p');
@@ -734,6 +744,12 @@ export function renderBounds(model) {
   wrap.appendChild(canvas);
   root.appendChild(wrap);
 
+  // Step 3.4 (CONTRACT-3.4.md §2): `model.overlays` is OPTIONAL — absent,
+  // non-array or empty must reproduce today's exact output (§0 rule 9), so
+  // every branch below keys off `overlays.length`, never off the field's
+  // mere presence.
+  const overlays = Array.isArray(model.overlays) ? model.overlays : [];
+
   const lineColor = model.identityColor || cssVar('--accent', '#3478f6');
   const goodColor = cssVar('--good', '#34c759');
   const badColor = cssVar('--bad', '#ff6b6b');
@@ -790,8 +806,17 @@ export function renderBounds(model) {
     },
   };
 
+  // Step 3.4 (CONTRACT-3.4.md §2): legend stays `{ display: false }` with
+  // zero overlays (§0 rule 9's byte-for-byte requirement) and only lists
+  // the overlays when at least one is drawn — `filter` drops datasetIndex
+  // 0, the metric line itself, which is not what "legend" means here (§0
+  // rule 8). `usePointStyle: true` is what makes each entry show its own
+  // marker shape instead of a generic line swatch.
   const plugins = {
-    legend: { display: false },
+    legend:
+      overlays.length > 0
+        ? { display: true, labels: { usePointStyle: true, filter: (item) => item.datasetIndex > 0 } }
+        : { display: false },
     tooltip: {
       callbacks: {
         // The tooltip title is the full 'YYYY-MM-DD' date, not the short
@@ -800,6 +825,16 @@ export function renderBounds(model) {
           if (!items || items.length === 0) return '';
           return (Array.isArray(model.dates) && model.dates[items[0].dataIndex]) || '';
         },
+        // Only added when overlays exist — with none, the tooltip keeps
+        // Chart.js's own default point label, exactly as before this step.
+        ...(overlays.length > 0
+          ? {
+              label(item) {
+                if (item.datasetIndex === 0) return String(model.values[item.dataIndex]);
+                return overlayTooltipLabel(overlays[item.datasetIndex - 1], item.dataIndex, model.period);
+              },
+            }
+          : {}),
       },
     },
   };
@@ -874,13 +909,22 @@ export function renderBounds(model) {
       suggestedMax: axis.suggestedMax,
     },
   };
+  // Step 3.4 (CONTRACT-3.4.md §2): a SEPARATE, hidden 0..1 axis for the
+  // marker rows, added only when there is at least one overlay — this is
+  // what lets overlayDatasets()' fixed row positions (§0 rule 3) sit
+  // underneath the metric line without ever perturbing its own `y` scale.
+  if (overlays.length > 0) {
+    scales.yOverlay = { type: 'linear', min: 0, max: 1, display: false, position: 'right' };
+  }
+
+  const datasets = overlays.length > 0 ? [dataset, ...overlayDatasets(overlays, lineColor)] : [dataset];
 
   try {
     chartInstance = new window.Chart(canvas, {
       type: 'line',
       data: {
         labels: model.labels,
-        datasets: [dataset],
+        datasets,
       },
       options: {
         responsive: true,
@@ -893,6 +937,11 @@ export function renderBounds(model) {
         plugins,
       },
     });
+    // Only set once construction actually succeeds — §2's rule that
+    // data-overlays is 0 "whenever no canvas is drawn" includes a
+    // construction failure, which falls through to the catch below and
+    // never reaches this line.
+    root.dataset.overlays = String(overlays.length);
   } catch {
     // A construction failure must not break the whole detail screen —
     // degrade to the same offline-style message rather than throwing out

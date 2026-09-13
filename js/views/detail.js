@@ -26,6 +26,20 @@ import { iconSvg, hasIcon } from '../icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
 import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/weekly.js';
 import { renderBounds, destroyBounds, boundsModel } from '../charts/bounds.js';
+// Step 3.4 (CONTRACT-3.4.md §3): the overlay picker and its pure selection/
+// bucketing helpers. This view owns the localStorage access (via the
+// injected-storage pattern below), the network load, and the render-time
+// per-overlay bucketing — overlay.js itself never touches the network or
+// the store.
+import {
+  renderOverlayPicker,
+  overlayCandidates,
+  readOverlaySelection,
+  writeOverlaySelection,
+  sanitizeSelection,
+  overlayModel,
+  MAX_OVERLAYS,
+} from '../charts/overlay.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -227,6 +241,20 @@ function writeStoredBoundsPeriod(key) {
   }
 }
 
+// Step 3.4 (CONTRACT-3.4.md §3): a storage ACCESSOR, not a bare constant
+// like RANGE_STORAGE_KEY's helpers above — overlay.js's read/write
+// functions take an injected storage object (so they're unit-testable
+// with a fake one), and `window.localStorage` itself can throw just by
+// being referenced in iOS private mode, so the read must be guarded here
+// too, not just at each getItem/setItem call site.
+function overlayStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export function createDetailView({ id, store, api, today } = {}) {
   const st = store || getStore();
   // `api` is accepted per CONTRACT-2.3.md §3, for interface symmetry
@@ -291,6 +319,18 @@ export function createDetailView({ id, store, api, today } = {}) {
   // both charts, so capping it from here would couple two independent
   // lenses. Do not "align" these.
   let boundsPeriodKey = 'day';
+
+  // Step 3.4 (CONTRACT-3.4.md §3): the overlay picker's own state.
+  // overlayIds is in SELECTION order (not candidate order) — that order is
+  // what decides each overlay's row/point-style index (overlay.js's §0
+  // rule 3). overlayLoadedIds tracks which ids' whole history has
+  // successfully loaded at least once, so a range/period change never
+  // re-fetches (§0 rule 7) and a FAILED load is not marked loaded, so
+  // toggling that overlay off and back on retries it (see loadOverlayHistories()).
+  let overlayIds = [];
+  let overlayLoading = false;
+  let lastOverlayError = null;
+  const overlayLoadedIds = new Set();
 
   // Step 3.1: calendar heatmap state. The heatmap module itself is
   // stateless (js/charts/heatmap.js) — the displayed month and the
@@ -374,6 +414,51 @@ export function createDetailView({ id, store, api, today } = {}) {
     lastEntriesError = result.error;
     applyRangeFilter();
     clampMonthState();
+  }
+
+  // Step 3.4 (CONTRACT-3.4.md §3): the current set of candidate trackables
+  // for the overlay picker — recomputed on every call (visibleTrackables()
+  // and overlayCandidates() are both pure/cheap), never cached, so a
+  // trackable that gets archived or edited elsewhere is reflected without
+  // this view needing its own invalidation logic.
+  function overlayCandidateList() {
+    return overlayCandidates(visibleTrackables(st.getTrackables()), idStr);
+  }
+
+  // Step 3.4. Same range window and "omit `from` when null" rule as
+  // applyRangeFilter() — an overlay is bucketed to the SAME Range-chart
+  // window as the metric itself, or its marker days would not line up
+  // with the metric's own points. st.getEntries() is synchronous and
+  // issues no request; this is a cache read.
+  function overlayEntriesFor(oid) {
+    const { from, to } = resolveRange(rangeKey, day);
+    const filters = { trackableIds: [oid], to };
+    if (from !== null) filters.from = from;
+    return st.getEntries(filters);
+  }
+
+  // Step 3.4 (CONTRACT-3.4.md §3): loads the WHOLE history of every id in
+  // `ids` that hasn't already loaded successfully, in ONE request — never
+  // one request per overlay. An id whose load errors is deliberately left
+  // out of overlayLoadedIds, so a later toggle-off/toggle-on retries it
+  // rather than silently staying stuck on stale/missing data forever.
+  async function loadOverlayHistories(ids) {
+    const list = Array.isArray(ids) ? ids : [];
+    const remaining = list.filter((oid) => !overlayLoadedIds.has(oid));
+    if (remaining.length === 0) return;
+
+    overlayLoading = true;
+    render();
+
+    const result = await st.loadEntries({ trackableIds: remaining });
+    if (disposed) return;
+
+    overlayLoading = false;
+    lastOverlayError = result.error;
+    if (result.error === null) {
+      for (const oid of remaining) overlayLoadedIds.add(oid);
+    }
+    render();
   }
 
   // Keeps monthStr inside the months the calendar allows navigating to.
@@ -600,27 +685,54 @@ export function createDetailView({ id, store, api, today } = {}) {
         );
       } else if (slot === 'bounds') {
         const { from, to } = resolveRange(rangeKey, day);
+        const bm = boundsModel({ trackable, entries: entriesForRange, from, to, period: boundsPeriodKey });
+        // Step 3.4 (CONTRACT-3.4.md §3): each selected overlay is rebuilt
+        // from ALREADY-LOADED entries (overlayEntriesFor() is a synchronous
+        // cache read) and bucketed to bm.dates/bm.period — the SAME lens
+        // the Range chart itself is using — so marker k lines up with the
+        // metric's own point k regardless of range/granularity. An id
+        // whose trackable no longer exists/qualifies as a candidate (e.g.
+        // just got archived) is silently dropped here, not just at load
+        // time.
+        // Orchestrator amendment to CONTRACT-3.4.md §3 (post-implementation):
+        // only draw an overlay whose whole history has actually loaded
+        // WITHOUT error (overlayLoadedIds) — a selected-but-not-yet-loaded
+        // or failed id must produce no dataset/legend entry, or an
+        // all-null marker row reads as "no logged days", which is not what
+        // happened (and contradicts §6 O7's "1 dataset after a failed
+        // overlay GET"). The picker still shows the chip pressed; only the
+        // chart's dataset list is gated here.
+        const overlayCandidatesNow = overlayCandidateList();
+        const overlays = overlayIds
+          .filter((oid) => overlayLoadedIds.has(oid))
+          .map((oid) => {
+            const t = overlayCandidatesNow.find((c) => c && String(c.id) === oid);
+            if (!t) return null;
+            return overlayModel({ trackable: t, entries: overlayEntriesFor(oid), keys: bm.dates, period: bm.period });
+          })
+          .filter(Boolean);
+        slotSection.appendChild(renderBounds({ ...bm, overlays }));
+      } else if (slot === 'overlay') {
+        // Step 3.4: the picker itself. chartsPending's placeholder (above)
+        // is shown first on the very first load, same as every other slot.
         slotSection.appendChild(
-          renderBounds(
-            boundsModel({ trackable, entries: entriesForRange, from, to, period: boundsPeriodKey })
-          )
+          renderOverlayPicker({
+            candidates: overlayCandidateList(),
+            selected: overlayIds,
+            disabled: entriesLoading || overlayLoading,
+          })
         );
-      } else {
-        // overlay keeps its existing placeholder — Step 3.4.
-        const placeholder = document.createElement('p');
-        placeholder.className = 'chart-slot-placeholder';
-        placeholder.textContent = 'Chart arrives in Phase 3.';
-        slotSection.appendChild(placeholder);
       }
 
       section.appendChild(slotSection);
     }
 
-    // Offline banner: present iff the most recent trackables or entries
-    // load returned a non-null error while we still have data (the
-    // trackable itself, and whatever entries are cached) to show —
-    // mirrors home.js's identical showOffline rule.
-    if (lastTrackablesError !== null || lastEntriesError !== null) {
+    // Offline banner: present iff the most recent trackables, entries or
+    // overlay-history load returned a non-null error while we still have
+    // data (the trackable itself, and whatever entries are cached) to show
+    // — mirrors home.js's identical showOffline rule, extended in Step 3.4
+    // to cover a failed overlay load too.
+    if (lastTrackablesError !== null || lastEntriesError !== null || lastOverlayError !== null) {
       const offlineP = document.createElement('p');
       offlineP.className = 'detail-offline';
       offlineP.textContent = 'You appear to be offline — showing the last saved data.';
@@ -906,6 +1018,32 @@ export function createDetailView({ id, store, api, today } = {}) {
     render();
   }
 
+  // Step 3.4 (CONTRACT-3.4.md §3). Toggling ON writes the selection and
+  // renders immediately (the picker/chart reflect the new pick right
+  // away), THEN fires off its history load — fire-and-forget, since
+  // loadOverlayHistories() renders again itself once that settles.
+  // Toggling OFF is purely local: no network request, ever (§0 rule 7).
+  function handleOverlayToggle(oid) {
+    if (entriesLoading || overlayLoading) return;
+
+    const oidStr = String(oid);
+    const isCandidate = overlayCandidateList().some((c) => c && String(c.id) === oidStr);
+    if (!isCandidate) return;
+
+    if (overlayIds.includes(oidStr)) {
+      overlayIds = overlayIds.filter((x) => x !== oidStr);
+      writeOverlaySelection(overlayStorage(), idStr, overlayIds);
+      render();
+      return;
+    }
+
+    if (overlayIds.length >= MAX_OVERLAYS) return;
+    overlayIds = [...overlayIds, oidStr];
+    writeOverlaySelection(overlayStorage(), idStr, overlayIds);
+    render();
+    loadOverlayHistories([oidStr]);
+  }
+
   function handleClick(event) {
     try {
       const target = event.target;
@@ -948,6 +1086,15 @@ export function createDetailView({ id, store, api, today } = {}) {
       if (cellBtn && sectionEl.contains(cellBtn)) {
         if (entriesLoading || dayInFlight) return;
         openDayEditor(cellBtn.dataset.date);
+        return;
+      }
+
+      // Step 3.4 (CONTRACT-3.4.md §3): placed before the data-action branch
+      // below, per the contract — the two never overlap (this button has
+      // no data-action attribute) so order only matters for readability.
+      const overlayChip = target.closest('button.overlay-chip[data-overlay-id]');
+      if (overlayChip && sectionEl.contains(overlayChip)) {
+        handleOverlayToggle(overlayChip.dataset.overlayId);
         return;
       }
 
@@ -1029,6 +1176,24 @@ export function createDetailView({ id, store, api, today } = {}) {
       await loadAllEntries();
       if (disposed) return;
 
+      // Step 3.4 (CONTRACT-3.4.md §3): restore the persisted overlay
+      // selection, dropping any id that is no longer a valid candidate
+      // (sanitizeSelection()) — and write back if that dropped anything,
+      // so a stale id does not keep reappearing in storage forever. Then
+      // load every surviving id's whole history in exactly ONE request
+      // (loadOverlayHistories renders on its own; nothing else here needs
+      // to await it beyond this line).
+      const storedOverlaySelection = readOverlaySelection(overlayStorage(), idStr);
+      overlayIds = sanitizeSelection(storedOverlaySelection, overlayCandidateList());
+      if (
+        overlayIds.length !== storedOverlaySelection.length ||
+        overlayIds.some((v, i) => v !== storedOverlaySelection[i])
+      ) {
+        writeOverlaySelection(overlayStorage(), idStr, overlayIds);
+      }
+      await loadOverlayHistories(overlayIds);
+      if (disposed) return;
+
       // Step 4: final render.
       render();
     } catch (err) {
@@ -1073,6 +1238,13 @@ export function createDetailView({ id, store, api, today } = {}) {
     dayFocusMode = null;
     periodKey = 'week';
     boundsPeriodKey = 'day';
+    // Step 3.4 (CONTRACT-3.4.md §3): reset so a later mount() (e.g.
+    // navigating away and back) starts from a clean read of storage rather
+    // than carrying over this instance's in-memory selection/load state.
+    overlayIds = [];
+    overlayLoading = false;
+    lastOverlayError = null;
+    overlayLoadedIds.clear();
   }
 
   return { mount, unmount };

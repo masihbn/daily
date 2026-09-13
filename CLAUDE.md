@@ -6,13 +6,16 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-**THE BUILD IS PARKED. The app is in daily use. Read this before
-assuming the plan stalled.** Feature work stopped deliberately at Step
-3.3b on 2026-08-25 so the user could use the app for real for about
-three months. Phase D (daily-use readiness) then ran 2026-08-25 →
-2026-09-13 and is complete. **The database holds real, irreplaceable
-data**: three years of history imported from CSV on 2026-09-04 (about
-2,000 rows) plus everything logged on the phone since 2026-08-25.
+**The app is in daily use AND the build continues — read this before
+touching anything.** Feature work paused at Step 3.3b on 2026-08-25 so
+the user could start using the app for real; Phase D (daily-use
+readiness) ran 2026-08-25 → 2026-09-13 and is complete; the Phase D
+gate passed 2026-09-13 and the user chose to keep building the same
+day, so feature work resumed at Step 3.4 (done 2026-09-13). **The
+database holds real, irreplaceable data**: three years of history
+imported from CSV on 2026-09-04 (about 2,000 rows) plus everything
+logged on the phone since 2026-08-25. Every step from here on ships
+into an app the user opens every day.
 
 What is built and device-verified: Phases 0, 1 and 2; Phase 3 through
 Step 3.3b (calendar heatmap, weekly trend chart with target line,
@@ -25,11 +28,9 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**When feature work resumes, resume at Step 3.4** (the first step not
-`DONE` in `BUILD_PLAN.md`, after the Phase D gate). Nothing in Phase D
-changes what 3.4 onward need to do. The user decides when the park
-ends; do not resume on your own initiative. The Phase D gate's status
-line in `BUILD_PLAN.md` says whether the gate itself has been passed.
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 3.5
+as of 2026-09-13, then the Phase 3 gate). Nothing in Phase D changed
+what 3.4 onward need to do.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -56,7 +57,7 @@ line in `BUILD_PLAN.md` says whether the gate itself has been passed.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3776 tests as of Step D.7** (3569 unit, 54 integration, 153 e2e). See
+**3841 tests as of Step 3.4** (3622 unit, 54 integration, 165 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -160,7 +161,9 @@ js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       signin.js (email + password, Show/Hide toggle).
 js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
-                      builders over Chart.js.
+                      builders over Chart.js; overlay.js (3.4) — marker
+                      rows for other trackables' logged days on the
+                      bounds chart, plus the picker.
 js/dates.js          PURE local-calendar date math (Step 1.2): todayLocal,
                       parseLocal, formatLocal, addDays, isoWeekKey,
                       startOfIsoWeek, isoWeeksInRange, rangeDays,

@@ -952,6 +952,13 @@ button {
   min-height: 200px;
 }
 
+/* Step 3.4: the overlay picker is a row of chips, much shorter than a
+   chart canvas — a tall shared min-height here would leave a big empty
+   gap on first load. */
+.chart-slot[data-slot="overlay"] .chart-slot-loading {
+  min-height: 60px;
+}
+
 .detail-offline {
   margin: 0 0 12px;
   color: var(--fg-muted);
@@ -1306,6 +1313,65 @@ button.hm-cell {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--fg-muted);
+}
+
+/* Correlation overlay picker (Step 3.4) -----------------------------------
+   Rendered in the 'overlay' chart slot (js/views/detail.js) — this is NOT
+   a chart, it's the control that adds/removes marker rows on the Range
+   chart above. .overlay-chip reuses the .trend-period/.bounds-period pill
+   idiom (same border/background/pressed treatment) so every button group
+   on this screen reads as one family; the ::before dot is the one thing
+   unique to this control — it lets a chip carry its own trackable's
+   colour, matching the marker colour drawn on the chart. */
+
+.overlay-picker {
+  width: 100%;
+}
+
+.overlay-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.overlay-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overlay-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 13px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.overlay-chip::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chip-color, var(--fg-muted));
+}
+
+.overlay-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.overlay-chip:disabled {
+  opacity: 0.4;
 }
 
 /* Sign-in gate (Step D.7) -------------------------------------------------

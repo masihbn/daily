@@ -4619,7 +4619,14 @@ the build parked.**
 
 ## Step 3.4 — Correlation marker overlay
 
-**Status:** TODO
+**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
+check** (first time markers run on the phone; per the standing
+preference the user looks before the next step stacks on top). Started
+the same day the Phase D gate passed, because the user ended the park:
+"there's no reason for us to stop things". Executed under the
+ORCHESTRATION.md loop: Implementer + Test Author in parallel from
+`CONTRACT-3.4.md`, one contract amendment (caught by the Test Author),
+suite green on the first run. `sw.js` `CACHE` → `daily-v30`.
 
 **Goal.** Chart type 4a. Discrete events from other trackables (gym
 days) drawn as markers on a bounded metric's chart.
@@ -4643,7 +4650,86 @@ days) drawn as markers on a bounded metric's chart.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **3841 green** — 3622 unit (+53), 54 integration,
+165 e2e (+12). New files: `js/charts/overlay.js`,
+`tests/unit/overlay.test.mjs`, `tests/e2e/overlay.test.mjs`; changed:
+`js/charts/bounds.js`, `js/views/detail.js`, `css/styles.css`, `sw.js`.
+
+*Design decisions taken at execution time (the plan left them open):*
+
+- **Markers go on the existing Range chart**, not a new one. The
+  `overlay` slot that `visibleSlots()` has emitted since Step 2.3
+  becomes the **picker**: one toggle chip per candidate, sitting
+  directly under the chart it controls.
+- **Candidates** are trackables whose logged days are discrete events:
+  `value_shape` boolean, or numeric with `aggregation` `count`/`sum`.
+  `average`/`last` numerics (Calories, Weight) are never offered — that
+  is Step 3.5's job. Archived trackables and the metric itself are
+  excluded. For the user's data this offers Workout and Smoking on the
+  Calories chart.
+- **Placement: fixed rows, not on the metric line.** Markers sit on a
+  hidden second y-axis (`yOverlay`, 0..1) at `0.06 + 0.08·i` in
+  selection order, with point styles triangle / rect / rectRot and the
+  trackable's own colour. This never depends on the metric's scale or
+  bounds, still shows a gym day when there is no weigh-in that day, and
+  keeps up to three overlays from colliding. `MAX_OVERLAYS = 3`.
+- **A day is "logged" iff its value is a finite number > 0.** At
+  Weekly/Monthly a marker means "at least one logged day in the bucket"
+  and the tooltip carries the count (`Workout · 3 days`). Bucketing
+  uses the Range chart's own keys (`boundsModel().dates`), so marker k
+  is always under point k.
+- **Selection is a per-device view preference** in localStorage
+  (`daily.detail.overlay.v1`, an object keyed by metric id). Stale ids
+  are dropped and written back on load.
+- **Loading follows D.6b's rule**: selecting an overlay loads its whole
+  history once; on mount every persisted id loads in ONE request after
+  the metric's own load; range and granularity changes issue zero
+  requests. A failed load leaves the chip pressed, shows the offline
+  banner, draws nothing for that id, and retries on the next toggle.
+- **Legend** appears only with at least one overlay and lists only the
+  overlays (the metric line is filtered out), `usePointStyle` so each
+  entry shows its marker shape. With no overlays `renderBounds()` output
+  is byte-for-byte what it was, so every Step 3.3/3.3b test still
+  passes unchanged.
+
+*The contract amendment.* My §3 pseudocode drew an overlay dataset for
+every selected id, while §6 O7 required exactly one dataset after a
+failed overlay load. The Test Author flagged the contradiction rather
+than resolving it. Decision: the chart draws only overlays whose
+history loaded without error — an all-null marker row with a legend
+entry would read as "no logged days", which is a lie. One-line guard in
+`detail.js`'s render; the test stood as written.
+
+*Unit (53 cases, U1–U12):* candidate rule for every shape/aggregation
+combination and for archived/null/garbage; candidate list ordering and
+metric exclusion with mixed number/string ids; selection read/write
+round-trip, every malformed-storage shape, throwing storage, null
+storage, cross-metric merge; sanitize (dedupe first-wins, selection
+order kept, cap at 3, coercion); bucket keys including the ISO
+year-boundary case (2025-12-29 → `2026-W01`, derived from `isoWeekKey`,
+not hardcoded); the model at day/week/month with value 0 / null / NaN /
+string not counting, duplicate dates counting once, out-of-range and
+malformed dates ignored; row y / point style cycling; tooltip singular/
+plural; dataset shape and colour fallback.
+
+*E2E (12 cases, O1–O12, all with intercepted PostgREST and zero real
+network calls):* initial picker state and exactly one entries GET;
+select → second dataset on `yOverlay`, one extra GET naming only the
+overlay id, storage written; persisted selection loads both ids on
+mount with no tap; deselect is local (no GET); Weekly then Daily
+re-buckets with zero GETs and the expected distinct-week count; the
+cap disables a fourth chip and re-enables on deselect; a 500 on the
+overlay GET keeps the chip pressed, draws one dataset, shows the
+offline banner, and a re-toggle issues a fresh GET; a non-`ok` bounds
+status keeps the picker and `data-overlays="0"`; a stale stored id is
+dropped and storage rewritten; legend display and item count; Chart
+instance count returns to 0 on navigation; a range change issues no
+GET.
+
+*Not verifiable from this machine (device check):* whether the marker
+rows read clearly under the line at 390px, whether the chip colours
+match the markers well enough to skip reading the legend, and whether
+three overlays at once are still legible.
 
 ---
 
@@ -5059,3 +5145,18 @@ unwind than to ask about.
   accepted. `CLAUDE.md` rewritten for a cold session. The Phase D gate
   checklist went to the user; the gate stays OPEN until their verdict,
   and feature work resumes at 3.4 only when the user ends the park.
+- **2026-09-13** — **The park ended the day it began.** After the Phase
+  D gate passed, the user said to keep building while they use the app:
+  "there's no reason for us to stop things". So the ~3-month pause is
+  off; the build continues at Step 3.4 in plan order (the user was
+  offered 4.1 pulled forward and did not take it). The silence-problem
+  mitigations from D.8 stay in place — they cost nothing and the next
+  quiet stretch will come. `CLAUDE.md`'s "parked" wording is to be
+  updated when 3.4 lands.
+- **2026-09-13** — **Step 3.4 executed.** Markers on the existing Range
+  chart, picker chips in the `overlay` slot, fixed marker rows on a
+  hidden axis (not on the metric line), candidates = boolean or
+  count/sum numerics, max 3, selection per device. Contract amendment
+  after the Test Author flagged a contradiction: only overlays whose
+  history loaded are drawn. Suite 3841 green on the first run;
+  `CACHE` → `daily-v30`. Device check pending.
