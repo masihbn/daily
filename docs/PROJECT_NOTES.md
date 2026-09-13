@@ -204,7 +204,24 @@ happens, and is also runnable on demand (`workflow_dispatch`).
   1) if the response is >= 400.
 - **Nothing else to maintain here** unless the Supabase project URL/key
   ever changes (e.g. project recreated) — if so, update both repo
-  secrets and `index.html`'s constants together.
+  secrets and `js/config.js`'s constants together.
+
+**The silence problem (Step D.8, 2026-09-13).** GitHub disables a
+*public* repo's scheduled workflows after ~60 days without a push.
+`masihbn/daily` is public and was last pushed 2026-09-13, so this
+workflow is expected to be switched off around **2026-11-12** while the
+build is parked. That is accepted rather than fought: the private
+backup repo `masihbn/daily-backups` commits every day (`--allow-empty`),
+so GitHub never disables its schedule, and its `backup.yml` now has a
+second `keepalive` job that reads `counter` with the anon key (read out
+of this repo's `js/config.js` at run time — the key is public by design,
+and the session's permission classifier refuses `gh secret set`).
+Verified green 2026-09-13T14:23Z, HTTP 200. So the project's activity
+no longer depends on this repo. If the app fails one morning with no
+code change, the free project has auto-paused: look at the backup
+repo's Actions tab first, then the Supabase dashboard. When the build
+resumes, re-enable this workflow from the Actions tab (GitHub shows a
+banner with the button).
 
 ## Security posture (current — read before adding anything sensitive)
 
@@ -282,48 +299,16 @@ personal**:
 
 ## Current repo state
 
-**Is now a real git repository**, initialized 2026-08-21, default branch
-`main`, pushed to `github.com/masihbn/memory-test-pwa`. Reorganized
-2026-08-21 (Attempt 4 below) from a flat root into folders — see
-`CLAUDE.md` for the folder map. Tracked files:
+**Parked, in daily use, since 2026-09-13.** The authoritative
+description of what is in the repo is `CLAUDE.md`'s folder map; the
+authoritative record of what is built is the Status line of each step
+in `docs/BUILD_PLAN.md` (everything through Phase D is `DONE`; resume at
+Step 3.4 when the user ends the park). What follows this section is the
+test log, newest first — the project's evidence trail for anything that
+had to be checked on the real phone.
 
-- `index.html` — entry point, still the placeholder tap-counter UI (the
-  real skill-tracker UI hasn't been built yet). Links `css/styles.css`
-  and `js/app.js` instead of inline `<style>`/`<script>`.
-- `css/styles.css`, `js/app.js` — extracted from what used to be inline
-  in `index.html`. `app.js` has the `SUPABASE_URL`/`SUPABASE_ANON_KEY`
-  constants, **filled in and live** (see GitHub & deployment blueprint
-  above for the values), reads/writes the `counter` table, and falls
-  back to a `localStorage` cache (`lastKnownCount`) only if the Supabase
-  fetch fails.
-- `manifest.json` — PWA manifest, icons now point at `icons/`.
-- `sw.js` — network-first-with-cache-fallback service worker; `CACHE`
-  bumped to `memtest-v2` after the folder reorg changed its `ASSETS`
-  list. **Bump `CACHE` again on any future asset change** — see deploy
-  pipeline above.
-- `icons/icon-192.png`, `icons/icon-512.png` — solid blue-square
-  placeholder icons (hand-rolled PNG encoder, no text/logo yet).
-- `supabase/migrations/0001_init_counter.sql` — the original `counter`
-  table + RLS (renamed from the old root-level `supabase-schema.sql`).
-- `supabase/migrations/0002_skills_tracker.sql` — the `skills` +
-  `skill_entries` tables for the real app concept (see Attempt 4 below
-  and `docs/DATA_MODEL.md` for the full design). Applied live.
-- `CLAUDE.md` — new, auto-loaded high-level project reference.
-- `docs/DATA_MODEL.md` — new, full schema reference and rationale.
-- `.github/workflows/supabase-keepalive.yml` — see keepalive section
-  above. Live and verified working. (Still pings `counter` specifically
-  — harmless, its only job is to generate DB activity, doesn't need to
-  target the "real" tables.)
-- `.gitignore` — excludes `.mcp.json` (local Claude Code MCP connector
-  config, not app code, not needed to build/run/deploy the app).
-- `docs/PROJECT_NOTES.md` — this file.
-
-**Not tracked / not present in the repo:**
-- `.mcp.json` exists locally (points the Supabase MCP server at project
-  `okwzgmvnsdlheuolcthn`) but is gitignored on purpose — it's
-  machine/session config, not part of the deployed app.
-- `.claude/settings.local.json` — excluded automatically by Claude
-  Code's own global ignore rules, no action needed.
+The version of this section that described the Phase 0 tap counter was
+removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
@@ -788,9 +773,9 @@ later the same day — see **Attempt 5** below.
   `docs/APP_CONCEPT.md` (product name "Daily"; generic trackables,
   re-log semantics, four chart types, bounded metrics), and broken into
   an ordered build plan in `docs/BUILD_PLAN.md`.
-- **The app itself is still not built.** Everything shipped so far is
-  plumbing (a tap counter proving hosting + backend + installability).
-  This is the actual remaining work — see `docs/BUILD_PLAN.md`.
+- ~~**The app itself is still not built.**~~ **Built and in daily use
+  since 2026-09-13** through Step 3.3b plus all of Phase D; parked there
+  on purpose. See `CLAUDE.md` and `docs/BUILD_PLAN.md`.
 - ~~**RLS/security hardening is not done.**~~ **DONE 2026-09-13** as
   Step D.7 (pulled forward from 5.3 on 2026-08-25). See Security posture
   above and Test log, Attempt 12.
@@ -892,26 +877,22 @@ the thing tested here is the placeholder tap-counter, which Step 0.3 of
 
 ## Next steps (in order)
 
-- [x] **User opens https://masihbn.github.io/memory-test-pwa/ on the
-      iPhone** (Safari, Add to Home Screen, standalone launch, tap +1,
-      kill and reopen). **DONE 2026-08-21 — see Test log, Attempt 5.**
-      Reason it mattered: it was the one remaining unverified link in
-      the chain — everything else about the deployment had already been
-      independently confirmed from this machine (Test log Attempts 2–3),
-      but Safari-specific service worker behavior, home-screen icon
-      rendering and standalone launch needed the real device. All
-      confirmed working.
-- [ ] **Build the actual "Daily" app** per **`docs/BUILD_PLAN.md`** —
-      that file is now the ordered, step-by-step execution plan (18
-      steps, 5 phases), superseding this one-line item. Start at the
-      first step not marked `DONE`. Reason: the concept is resolved
-      (`docs/APP_CONCEPT.md`), the plumbing is fully verified as of
-      Attempt 5, and everything built so far is scaffolding rather than
-      the product itself.
-- [ ] **Harden Supabase RLS (or add auth) before adding more sensitive
-      skills.** Reason: `skills`/`skill_entries` currently carry forward
-      the same wide-open `using (true)` policy as the test counter —
-      acceptable for the current placeholder data, but should be fixed
-      before logging anything (health specifics, journal-style notes)
-      the user would mind being exposed if the URL/key leaked. See
-      `docs/DATA_MODEL.md` → Security status.
+Rewritten at Step D.8 (2026-09-13); the Phase 0 version is in git
+history.
+
+- [ ] **Phase D gate verdict from the user** (checklist handed over
+      2026-09-13: a real entry survives kill-and-relaunch, the backup
+      repo has it, the imported history renders, auto-bounds on
+      Calories). Reason: `ORCHESTRATION.md` §7 — a gate is a hard stop,
+      and the app is not formally "in use" until the user says so.
+      Record the verdict as a Test log entry above.
+- [ ] **~4 weeks (2026-10-11) and ~8 weeks (2026-11-08): the user checks
+      the backup repo's newest commit is from that day and its run is
+      green, and the Supabase dashboard shows the project active.**
+      Reason: the only symptom of a paused project is the app failing
+      one morning; see "The silence problem" under the keepalive section.
+- [ ] **When the user ends the park (~December 2026): resume at Step
+      3.4.** Reason: it is the first step not `DONE` in `BUILD_PLAN.md`,
+      and nothing in Phase D changed what 3.4 onward need to do. First
+      re-enable this repo's keepalive workflow from the Actions tab, then
+      run `npm test` (it targets the test project, never production).

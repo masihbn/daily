@@ -7,6 +7,15 @@ this schema implements; this file has the schema detail.
 Applied to the live Supabase project (`okwzgmvnsdlheuolcthn`):
 - `supabase/migrations/0002_skills_tracker.sql` (2026-08-21) — original
   `skills` / `skill_entries` tables.
+- `supabase/migrations/0010_owner_policies.sql` (2026-09-13) — dropped
+  the `using (true)` policies; owner-scoped policies for `authenticated`
+  on the three data tables; all `anon` grants on them revoked; `counter`
+  keeps its anon read (Step D.7). See "Security status" below.
+- `supabase/migrations/0009_user_id.sql` (2026-09-13) — added `user_id`
+  (`references auth.users`, default `auth.uid()`, not null) to
+  `trackables`, `entries` and `app_settings`, backfilled to the single
+  auth user (Step D.7). Its backfill fired the `updated_at` trigger on
+  every entry — see "Security status".
 - `supabase/migrations/0008_restorable_identity.sql` (2026-08-25) — made
   `trackables.id` / `entries.id` `GENERATED **BY DEFAULT**` and added
   `daily_resync_identity()` (Step D.3). See "Restorability" below.
@@ -256,9 +265,12 @@ singleton (`check (id = 1)`) — so it needed no change.
   `using (true)` policies are dropped, and `anon` has **no grants** on
   the three tables, so a signed-out request fails with 401 rather than
   returning an empty list that looks like "no data".
-- `counter` keeps `anon can read counter` (select only). The keepalive
-  workflow pings it with the anon key; if that ever fails the free
-  project auto-pauses about a week later with no other symptom.
+- `counter` keeps `anon can read counter` (select only). Two keepalive
+  jobs read it with the anon key: this repo's workflow (expected to be
+  auto-disabled by GitHub ~2026-11-12 while the build is parked) and,
+  since Step D.8, a job in the private backup repo's daily workflow.
+  If both ever fail the free project auto-pauses about a week later
+  with no other symptom.
 - `daily_resync_identity()` is executable by `authenticated` and
   `service_role` only.
 - Single user by construction: one row in `auth.users`, and `0009`

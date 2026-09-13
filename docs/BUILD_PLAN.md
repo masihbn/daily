@@ -4506,7 +4506,14 @@ are byte-identical to what was pasted.
 
 ## Step D.8 — Park the build: docs, markers, and the silence problem
 
-**Status:** TODO
+**Status:** DONE — 2026-09-13, same session as D.7's production flip.
+Docs-only in this repo (no code change; suite re-run for the record,
+**3776 green**: 3569 unit, 54 integration, 153 e2e). One operational
+change outside this repo: the private backup repo's workflow gained a
+second `keepalive` job, so the silence problem is mitigated rather than
+merely scheduled for a reminder — see Test Subjects. The Phase D gate
+checklist was handed to the user at the end of this step; the gate is
+recorded below as OPEN until their verdict.
 
 **Goal.** A cold session opening this repo in November knows the build was
 parked deliberately, where to resume, and what has been running unattended
@@ -4539,11 +4546,62 @@ history renders" is only meaningful once the calendar can reach it).
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+*What a cold session now reads first.* `CLAUDE.md`'s status section
+was rewritten from "the user is about to start using it" to the parked
+state: real data in the database since 2026-08-25 (phone) and
+2026-09-04 (import), Phase D complete, resume at Step 3.4 only when the
+user says so. Its folder map caught up with everything Phase D added
+(`errors.js`, `auth.js`, `outbox-sync.js`, `icons.js`, `views/`,
+`charts/`, `scripts/`, migrations through `0010`); the two stale "not
+yet imported by any view" notes on `api.js` / `store.js` are gone. The
+"two things that will bite" list became three: the silence problem
+with its expected date, the `updated_at` trigger on bulk backfills, and
+the two permission gates a session hits when touching production.
+
+*The silence problem — what was actually done.* GitHub's 60-day rule
+applies to **public** repos; `masihbn/daily` is public and its last
+push is 2026-09-13, so its keepalive is expected to be disabled around
+**2026-11-12**. The private backup repo commits every day with
+`--allow-empty`, so its schedule never stops. Its `backup.yml` gained a
+separate `keepalive` job (commit `f8a570d` in `masihbn/daily-backups`)
+that reads `counter` with the anon key. The key is read out of the
+checked-out app repo's `js/config.js` rather than stored as a secret:
+it is public by design, and `gh secret set` on that repo is refused by
+the session's permission classifier ("Secret-Store Writes") anyway.
+Two dispatches failed on the extraction — `SUPABASE_URL =` and its
+literal sit on different lines in `config.js`, so a same-line grep
+matched nothing — and the third was green: keepalive **HTTP 200**,
+backup 4 / 2048 / 1 rows, `2026-09-13T14:23Z`. Net effect: the
+project's activity no longer depends on the public repo at all, and
+even a broken secret key leaves one working ping.
+
+*Reminders.* The user was handed a two-line check for ~4 weeks
+(2026-10-11) and ~8 weeks (2026-11-08): the backup repo's newest commit
+is from today and its last run is green; the Supabase dashboard shows
+the project active. The public repo's keepalive state is worth a glance
+but is no longer load-bearing.
+
+*Other docs.* `PROJECT_NOTES.md`: the keepalive section gained the
+silence paragraph; "Current repo state" and "Next steps", both frozen
+at the Phase 0 tap counter, were replaced with pointers to the parked
+state. `DATA_MODEL.md`: the applied-migrations list gained `0009` and
+`0010`; the `counter` bullet names both keepalives.
+
+*Deliberately not done here.* The test-log entry for the Phase D gate
+device check is written after the user's verdict, not before it.
 
 ---
 
 ## ⛔ PHASE D GATE — hard stop
+
+**Status:** OPEN — checklist handed to the user 2026-09-13; waiting for
+their verdict. Evidence already in hand from D.7's device check
+(`PROJECT_NOTES.md`, Attempt 12): a real entry logged on the phone
+survived a full close and reopen, and the `2026-09-13T14:08Z` backup
+contains it. The imported history was seen on the device at D.6b
+(2026-09-04). The one check with no evidence yet is the **auto-bounds**
+path carried here from Step 3.3 (`Calories` has only ever used manual
+bounds; auto needs 12+ readings, and the import supplied ~980).
 
 The user logs a real entry, on the phone, in normal daily use, and it
 survives a kill-and-relaunch. Then: confirm the backup repo has a commit
@@ -4987,3 +5045,11 @@ unwind than to ask about.
   backfill clobbered every entry's `updated_at` (trigger fired);
   recorded in D.7's Test Subjects, pre-migration values are in the
   backup repo's history. `CACHE` → `daily-v29`.
+- **2026-09-13** — **Step D.8 executed; the build is parked.** The
+  silence problem is mitigated, not just scheduled: the private backup
+  repo (daily `--allow-empty` commits, so GitHub never disables its
+  schedule) runs a second keepalive job of its own; the public repo's
+  keepalive is expected to be auto-disabled ~2026-11-12 and that is
+  accepted. `CLAUDE.md` rewritten for a cold session. The Phase D gate
+  checklist went to the user; the gate stays OPEN until their verdict,
+  and feature work resumes at 3.4 only when the user ends the park.

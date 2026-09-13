@@ -6,40 +6,53 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-**Feature work is PARKED at Step 3.3b as of 2026-08-25 — read this before
-assuming the plan stalled.** Phases 0, 1 and 2 are complete and
-device-verified. Phase 3 is built through Step 3.3b (calendar heatmap,
-weekly trend chart with target line, selectable Daily/Weekly/Monthly
-granularity, two-bars threshold chart). The app is real and usable: a
-hash router (`#/`, `#/t/:id`, `#/new`, `#/compare`, `#/settings`), a
-trackable list with quick-log, create/edit forms, and per-trackable
-charts, all wired to `js/api.js` / `js/store.js`.
+**THE BUILD IS PARKED. The app is in daily use. Read this before
+assuming the plan stalled.** Feature work stopped deliberately at Step
+3.3b on 2026-08-25 so the user could use the app for real for about
+three months. Phase D (daily-use readiness) then ran 2026-08-25 →
+2026-09-13 and is complete. **The database holds real, irreplaceable
+data**: three years of history imported from CSV on 2026-09-04 (about
+2,000 rows) plus everything logged on the phone since 2026-08-25.
 
-**The user is about to start using it for real, for ~3 months, with
-historical data imported from CSV.** That is why the next work is
-**Phase D — Daily-use readiness**, inserted in `BUILD_PLAN.md` *before*
-Step 3.4. Phase D is backups, moving the test suite off the production
-database, entry provenance, the CSV import, outbox durability, reaching
-the imported history in the UI (D.6b, done 2026-09-04 — `listEntries`
-now pages past the 1,000-row PostgREST cap and the detail screen loads a
-trackable's whole history once), and RLS hardening (D.7, done
-2026-09-13 — the app now signs in with email + password, every table
-is owner-scoped, and the anon key can read only `counter`). **When feature work resumes, resume at Step 3.4** — nothing in
-Phase D changes what 3.4 onward need to do.
+What is built and device-verified: Phases 0, 1 and 2; Phase 3 through
+Step 3.3b (calendar heatmap, weekly trend chart with target line,
+selectable Daily/Weekly/Monthly granularity, two-bars threshold chart);
+all of Phase D — daily off-site backups with a verified restore, the
+test suite on a second Supabase project, entry provenance, the CSV
+import, outbox durability, paged history, and single-user Supabase Auth
+with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
+`#/new`, `#/compare`, `#/settings`), a trackable list with quick-log,
+create/edit forms, per-trackable charts, and a sign-in screen, all
+wired to `js/api.js` / `js/store.js`.
 
-**Two things that will bite an unwary session during the park:**
+**When feature work resumes, resume at Step 3.4** (the first step not
+`DONE` in `BUILD_PLAN.md`, after the Phase D gate). Nothing in Phase D
+changes what 3.4 onward need to do. The user decides when the park
+ends; do not resume on your own initiative. The Phase D gate's status
+line in `BUILD_PLAN.md` says whether the gate itself has been passed.
 
-1. **`npm test` currently writes to the LIVE database** — the integration
-   tier creates, PATCHes and DELETEs `__test__` rows in the same project
-   that holds the user's only copy of their data. The guard in
-   `tests/helpers/supabase.mjs` is strong (it was rewritten after a real
-   data-loss bug), but **Step D.4 moves the tier to a second Supabase
-   project.** Until D.4 lands, think before running the full suite.
-2. **GitHub disables scheduled workflows after ~60 days of repository
-   inactivity.** A three-month park crosses that line, which stops the
-   Supabase keepalive, which auto-pauses the free project about a week
-   later — and the only symptom is the app failing one morning. See
-   Step D.8.
+**Three things that will bite an unwary session during the park:**
+
+1. **The silence problem.** GitHub disables a public repo's scheduled
+   workflows after ~60 days without a push. `masihbn/daily` is public
+   and its last push was 2026-09-13, so its keepalive is expected to be
+   switched off around **2026-11-12**. That is tolerated, not a fault:
+   the private backup repo commits every day (its workflow uses
+   `--allow-empty`), so it never goes quiet, and since 2026-09-13 it
+   runs a second keepalive job of its own. If the app ever fails one
+   morning with no code change, the free Supabase project has
+   auto-paused: check the backup repo's Actions tab first, then the
+   Supabase dashboard. Re-enable the public repo's keepalive from its
+   Actions tab when the build resumes.
+2. **Any migration that bulk-updates `entries` fires the `updated_at`
+   trigger.** Migration `0009` did exactly that on every row. Disable
+   the trigger around a backfill (`alter table entries disable trigger
+   set_updated_at`) and re-enable it after.
+3. **Production writes from this machine are gated twice.** The
+   auto-mode permission classifier refuses `apply_migration` against
+   the production project; the user pastes migration SQL into the
+   dashboard SQL editor instead. Secret-store writes (`gh secret set`)
+   are refused too. Plan for both rather than retrying.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
@@ -122,16 +135,32 @@ js/config.js         SUPABASE_URL / SUPABASE_ANON_KEY — single source of
                       truth, imported by the app AND by tests/helpers/.
                       (js/app.js, the old tap-counter, was deleted in 0.3.)
 js/api.js            PostgREST client (Step 1.1). The ONLY module allowed
-                      to fetch() Supabase. Nine named operations, three
-                      typed errors (ValidationError/NetworkError/ApiError)
-                      split by a `retryable` flag. Not yet imported by any
-                      view.
+                      to fetch() /rest/v1/. Named operations, typed
+                      errors re-exported from errors.js, split by a
+                      `retryable` flag. Attaches the session bearer and
+                      retries a 401 once after a token refresh (D.7).
+                      listEntries pages past the 1,000-row cap (D.6b).
+js/errors.js         ValidationError / NetworkError / ApiError / AuthError
+                      and isRetryable. Split out of api.js in D.7 so
+                      auth.js can throw them without an import cycle.
+js/auth.js           Supabase Auth over raw fetch (D.7). The ONLY module
+                      allowed to call /auth/v1/. Session in localStorage
+                      (`daily.auth.v1`), single-flight refresh, offline
+                      relaunch keeps the session. getAuth() singleton.
 js/store.js          In-memory cache + localStorage mirror + an outbox
                       that queues writes made offline and replays them
                       (Step 1.1). Network is the source of truth; the
                       cache never overwrites a server value. Injectable
                       via createStore({api, storage, now}); getStore() is
-                      the app-facing singleton. Not yet imported.
+                      the app-facing singleton.
+js/outbox-sync.js    Replays the outbox on reconnect / visibility /
+                      interval (D.6). Flushes are gated on isSignedIn().
+js/icons.js          Icon set for trackables (Step 2.5).
+js/views/            home.js (+ home-model.js), trackable.js (create/
+                      edit form), detail.js (calendar + charts + range),
+                      signin.js (email + password, Show/Hide toggle).
+js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
+                      builders over Chart.js.
 js/dates.js          PURE local-calendar date math (Step 1.2): todayLocal,
                       parseLocal, formatLocal, addDays, isoWeekKey,
                       startOfIsoWeek, isoWeeksInRange, rangeDays,
@@ -143,7 +172,12 @@ js/aggregate.js      PURE rollup/normalization/bound math (Step 1.2):
                       model. Imports only dates.js.
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
-                      (numbered, e.g. 0001_..., 0003_...) — see docs/DATA_MODEL.md
+                      (0001 … 0010 as of D.7) — see docs/DATA_MODEL.md
+scripts/             NOT deployed. backup.mjs / restore.mjs (D.3; the
+                      private backup repo checks this repo out and runs
+                      backup.mjs daily), import-csv.mjs (D.5, one-off),
+                      bootstrap-test-project.sql (D.4; recreates the
+                      test project's schema, migrations 0002–0010).
 tests/               test-only, never deployed (see ORCHESTRATION.md)
   unit/                node --test, pure functions, zero dependencies
   integration/         real PostgREST calls against __test__* rows
@@ -170,7 +204,9 @@ docs/                 all notes/reference docs live here (see below)
                         (gh auth mechanics, Pages setup, keepalive workflow,
                         security posture) — read before touching CI/deploy/git
 .github/workflows/   supabase-keepalive.yml — pings the DB every ~5 days
-                      so the free Supabase project doesn't auto-pause
+                      so the free Supabase project doesn't auto-pause.
+                      Expected to be auto-disabled ~2026-11-12 (see the
+                      silence problem above); the backup repo covers it.
 ```
 
 **Convention: all notes/reference `.md` files live in `docs/`.** `CLAUDE.md`
@@ -210,8 +246,11 @@ The anon key can read exactly one thing: `counter`, for the keepalive.
 attaches the session bearer and retries a 401 once after a refresh.
 The test tiers sign in as the test project's own user
 (`DAILY_TEST_EMAIL` / `DAILY_TEST_PASSWORD` in the gitignored
-`.env.test`). The backup workflow uses a secret key stored only in the
-private backup repo; never put one in this repo.
+`.env.test`, which also holds the test project's URL and anon key; the
+test project is `dftqrsngiroitugbwtaz` and holds no real data). The
+backup workflow uses a secret key stored only in the private backup
+repo `masihbn/daily-backups`; never put one in this repo. The
+production password is the user's alone: never ask for it.
 
 ## Conventions worth knowing before editing
 
