@@ -493,3 +493,110 @@ test('A13 — a fresh (1h) seeded session: booting the app makes zero /auth/v1/ 
   // simply proves nothing UNEXPECTED slipped through either.
   expect(unexpected).toEqual([]);
 });
+
+// ===========================================================================
+// A14 (2026-09-13, device feedback) — the password Show/Hide toggle
+// ===========================================================================
+
+// Returns the document-order position, among form.signin-form's direct
+// children, of the password field's label, the toggle, and the submit
+// button — "between" (contract §6) is a document-order claim, not
+// necessarily an immediate-sibling one, so this checks relative order
+// rather than assuming a specific parent/child shape beyond what §6's DOM
+// block actually draws (all three as direct children of form.signin-form).
+async function toggleDomOrder(page) {
+  const order = await page.evaluate(() => {
+    const form = document.querySelector('form.signin-form');
+    return Array.from(form.children).map((el) => {
+      if (el.tagName === 'LABEL' && el.querySelector('input[name="password"]')) return 'password-field';
+      if (el.classList.contains('signin-toggle')) return 'toggle';
+      if (el.classList.contains('signin-submit')) return 'submit';
+      return el.tagName;
+    });
+  });
+  return { passwordIdx: order.indexOf('password-field'), toggleIdx: order.indexOf('toggle'), submitIdx: order.indexOf('submit') };
+}
+
+test('A14 — the Show/Hide toggle: position, attributes, flips the input type without touching its value, and never submits', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.signin')).toBeVisible();
+
+  // Position: between the password field and the submit button.
+  const { passwordIdx, toggleIdx, submitIdx } = await toggleDomOrder(page);
+  expect(passwordIdx).toBeGreaterThanOrEqual(0);
+  expect(toggleIdx).toBeGreaterThan(passwordIdx);
+  expect(toggleIdx).toBeLessThan(submitIdx);
+
+  const toggle = page.locator('button.signin-toggle');
+  const passwordInput = page.locator('input[name="password"]');
+
+  // Initial state.
+  await expect(toggle).toHaveAttribute('type', 'button');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(toggle).toHaveText('Show');
+  await expect(passwordInput).toHaveAttribute('type', 'password');
+
+  await passwordInput.fill('hunter2');
+
+  // First click: reveal.
+  await toggle.click();
+  await expect(passwordInput).toHaveAttribute('type', 'text');
+  await expect(toggle).toHaveText('Hide');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  expect(await passwordInput.inputValue()).toBe('hunter2');
+
+  // Second click: hide again, value still untouched.
+  await toggle.click();
+  await expect(passwordInput).toHaveAttribute('type', 'password');
+  await expect(toggle).toHaveText('Show');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(await passwordInput.inputValue()).toBe('hunter2');
+
+  // Never submits: still gated, zero REST/auth requests through the guards.
+  await expect(page.locator('#app')).toHaveAttribute('data-auth', 'signed-out');
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// A15 (2026-09-13) — typed values and toggle state survive an error re-render
+// ===========================================================================
+
+test('A15 — after a mocked 400 sign-in failure, the typed values and a "Hide" toggle state both survive the re-render', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeAuthToken(page, {
+    grantType: 'password',
+    response: { status: 400, body: { error_code: 'invalid_credentials', msg: 'Invalid login credentials' } },
+  });
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+  await page.locator('input[name="email"]').fill('me@example.com');
+  await page.locator('input[name="password"]').fill('wrong-password');
+
+  // Set the toggle to "Hide" BEFORE submitting.
+  await page.locator('button.signin-toggle').click();
+  await expect(page.locator('button.signin-toggle')).toHaveText('Hide');
+
+  await page.locator('button.signin-submit').click();
+  await expect(page.locator('section.signin')).toHaveAttribute('data-state', 'error');
+  await expect(page.locator('.signin-error')).toHaveText('Wrong email or password.');
+
+  // The whole point of this case: the re-render from busy -> error must not
+  // have wiped the form back to a blank/default one.
+  expect(await page.locator('input[name="email"]').inputValue()).toBe('me@example.com');
+  expect(await page.locator('input[name="password"]').inputValue()).toBe('wrong-password');
+
+  const toggle = page.locator('button.signin-toggle');
+  await expect(toggle).toHaveText('Hide');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('input[name="password"]')).toHaveAttribute('type', 'text');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

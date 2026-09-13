@@ -7,13 +7,17 @@
 //
 // Same view lifecycle discipline as every other view in js/views/ (see
 // home.js's header): idempotent mount, synchronous unmount, exactly one
-// delegated listener, and no exception may ever escape a handler.
+// delegated listener per event type, and no exception may ever escape a
+// handler.
 //
 // PASSWORD HANDLING: the password field's value is read once, at submit,
 // straight into the fetch call inside auth.js. It is never assigned to a
 // module-level variable, never logged, never persisted to storage, and
 // never appears in a URL — only the resulting session (access/refresh
-// tokens) is ever stored, by js/auth.js.
+// tokens) is ever stored, by js/auth.js. The Show/Hide toggle added
+// 2026-09-13 only flips the input's `type` attribute between `password`
+// and `text` so the browser renders it in cleartext; it never reads,
+// copies, or otherwise touches the value itself.
 
 import { getAuth } from '../auth.js';
 import { NetworkError, AuthError } from '../errors.js';
@@ -23,30 +27,32 @@ export function createSignInView({ auth, onSignedIn } = {}) {
 
   let container = null;
   let sectionEl = null;
+  let formEl = null;
+  let emailInput = null;
+  let passwordInput = null;
+  let toggleBtn = null;
+  let submitBtn = null;
+  let errorP = null;
   let disposed = true;
 
   // 'idle' | 'busy' | 'error' — mirrored onto section[data-state].
   let state = 'idle';
   let errorMessage = '';
+  // Show/Hide toggle state (2026-09-13, device feedback: the user could
+  // not tell what they had typed). Independent of `state` — surviving a
+  // busy/error re-render is the whole point of tracking it separately.
+  let showPassword = false;
 
-  function ensureSection() {
-    if (sectionEl) return sectionEl;
-    sectionEl = document.createElement('section');
-    sectionEl.className = 'signin';
-    // Exactly one listener, delegated on this root, attached once here and
-    // removed in unmount() — same rule as every other view.
-    sectionEl.addEventListener('submit', handleSubmit);
-    container.appendChild(sectionEl);
-    return sectionEl;
-  }
-
-  function render() {
-    if (disposed || !container) return;
-
-    const section = ensureSection();
-    section.setAttribute('data-state', state);
-    section.innerHTML = '';
-
+  // Builds the form ONCE per mounted instance. Before 2026-09-13, render()
+  // rebuilt the whole form on every call (`section.innerHTML = ''`), which
+  // wiped whatever the user had typed the moment a submit failed — exactly
+  // the busy -> error transition every real sign-in attempt goes through,
+  // and it would have wiped the new Show/Hide toggle's state too. Building
+  // the DOM once here and having render() below only flip attributes/text
+  // on the elements captured here (never emailInput.value /
+  // passwordInput.value) is what makes the typed values and the toggle's
+  // shown/hidden choice survive a re-render (CONTRACT-D.7.md §6, A15).
+  function buildForm(section) {
     const form = document.createElement('form');
     form.className = 'signin-form';
     form.setAttribute('novalidate', '');
@@ -54,7 +60,7 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     const emailLabel = document.createElement('label');
     emailLabel.className = 'signin-field';
     emailLabel.appendChild(document.createTextNode('Email'));
-    const emailInput = document.createElement('input');
+    emailInput = document.createElement('input');
     emailInput.type = 'email';
     emailInput.name = 'email';
     emailInput.autocomplete = 'username';
@@ -67,7 +73,7 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     const passwordLabel = document.createElement('label');
     passwordLabel.className = 'signin-field';
     passwordLabel.appendChild(document.createTextNode('Password'));
-    const passwordInput = document.createElement('input');
+    passwordInput = document.createElement('input');
     passwordInput.type = 'password';
     passwordInput.name = 'password';
     passwordInput.autocomplete = 'current-password';
@@ -75,24 +81,71 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     passwordLabel.appendChild(passwordInput);
     form.appendChild(passwordLabel);
 
-    const submitBtn = document.createElement('button');
+    // Show/Hide toggle (2026-09-13). Sits directly after the password
+    // field, before the submit button. type="button" so a tap on it can
+    // never submit the form (no preventDefault needed for that — a
+    // type="button" button never triggers submission); handleClick()
+    // below is the only thing it does.
+    toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'signin-toggle';
+    toggleBtn.setAttribute('aria-pressed', 'false');
+    toggleBtn.textContent = 'Show';
+    form.appendChild(toggleBtn);
+
+    submitBtn = document.createElement('button');
     submitBtn.type = 'submit';
     submitBtn.className = 'signin-submit';
-    submitBtn.disabled = state === 'busy';
     submitBtn.textContent = 'Sign in';
     form.appendChild(submitBtn);
 
     // Present always (never re-created only on error) so its role="alert"
     // element exists in the DOM from the first render, and `hidden` is
     // the only thing that changes when an error appears.
-    const errorP = document.createElement('p');
+    errorP = document.createElement('p');
     errorP.className = 'signin-error';
     errorP.setAttribute('role', 'alert');
-    errorP.hidden = state !== 'error';
-    errorP.textContent = state === 'error' ? errorMessage : '';
+    errorP.hidden = true;
     form.appendChild(errorP);
 
     section.appendChild(form);
+    formEl = form;
+  }
+
+  function ensureSection() {
+    if (sectionEl) return sectionEl;
+    sectionEl = document.createElement('section');
+    sectionEl.className = 'signin';
+    // Exactly one listener per event type, delegated on this root,
+    // attached once here and removed in unmount() — same rule as every
+    // other view.
+    sectionEl.addEventListener('submit', handleSubmit);
+    sectionEl.addEventListener('click', handleClick);
+    container.appendChild(sectionEl);
+    buildForm(sectionEl);
+    return sectionEl;
+  }
+
+  // Applies `state` / `errorMessage` / `showPassword` onto the elements
+  // buildForm() created once above: section[data-state], the submit
+  // button's disabled flag, the error paragraph, and the toggle's
+  // text/aria-pressed (which also drives the password input's `type`).
+  // Deliberately never touches emailInput.value or passwordInput.value —
+  // see buildForm()'s header comment for why that matters.
+  function render() {
+    if (disposed || !container) return;
+
+    const section = ensureSection();
+    section.setAttribute('data-state', state);
+
+    submitBtn.disabled = state === 'busy';
+
+    errorP.hidden = state !== 'error';
+    errorP.textContent = state === 'error' ? errorMessage : '';
+
+    toggleBtn.textContent = showPassword ? 'Hide' : 'Show';
+    toggleBtn.setAttribute('aria-pressed', String(showPassword));
+    passwordInput.type = showPassword ? 'text' : 'password';
   }
 
   // Maps a thrown error to the exact user-facing message per CONTRACT-D.7
@@ -109,15 +162,30 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     return 'Could not sign in. Try again in a moment.';
   }
 
+  // Show/Hide toggle click. The typed value is untouched — only the
+  // input's `type` attribute (and this button's own text/aria-pressed)
+  // change, via render()'s toggle-sync lines above.
+  function handleClick(event) {
+    try {
+      const btn = event.target && event.target.closest ? event.target.closest('button.signin-toggle') : null;
+      if (!btn || !sectionEl || !sectionEl.contains(btn)) return;
+      showPassword = !showPassword;
+      render();
+    } catch {
+      // No handler may ever let an exception escape.
+    }
+  }
+
   function handleSubmit(event) {
     try {
       const form = event.target && event.target.closest ? event.target.closest('form.signin-form') : null;
-      if (!form) return;
+      if (!form || form !== formEl) return;
       event.preventDefault();
       if (state === 'busy') return;
 
-      const emailInput = form.querySelector('input[name="email"]');
-      const passwordInput = form.querySelector('input[name="password"]');
+      // Read straight from the live inputs — submitting always sends
+      // whatever is currently typed, regardless of the Show/Hide choice
+      // (toggling `type` between password/text never changes `.value`).
       const email = emailInput ? emailInput.value : '';
       const password = passwordInput ? passwordInput.value : '';
 
@@ -132,7 +200,7 @@ export function createSignInView({ auth, onSignedIn } = {}) {
             try {
               onSignedIn();
             } catch {
-              // The caller's follow-up (flush + re-render) is not this
+              // The caller's follow-up (flushing the outbox) is not this
               // view's responsibility to protect beyond not crashing here.
             }
           }
@@ -150,9 +218,10 @@ export function createSignInView({ auth, onSignedIn } = {}) {
 
   function mount(el) {
     // Idempotent: calling mount() again on an already-mounted instance
-    // must not double-bind the submit listener. ensureSection() only
-    // creates (and only ever attaches the listener to) sectionEl once per
-    // instance, so a second mount() just re-renders the existing section.
+    // must not double-bind listeners or rebuild the form. ensureSection()
+    // only creates (and only ever attaches listeners to, and only ever
+    // calls buildForm() for) sectionEl once per instance, so a second
+    // mount() just re-applies the current state to the existing elements.
     container = el;
     disposed = false;
     render();
@@ -163,11 +232,18 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     disposed = true;
     if (sectionEl) {
       sectionEl.removeEventListener('submit', handleSubmit);
+      sectionEl.removeEventListener('click', handleClick);
     }
     if (container) {
       container.innerHTML = '';
     }
     sectionEl = null;
+    formEl = null;
+    emailInput = null;
+    passwordInput = null;
+    toggleBtn = null;
+    submitBtn = null;
+    errorP = null;
     container = null;
   }
 

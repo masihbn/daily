@@ -1348,6 +1348,18 @@ button.hm-cell {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Show/Hide toggle (2026-09-13, device feedback) — sits under the password
+   field, before the submit button (see js/views/signin.js). Secondary
+   look, same treatment as .signout below, so it reads as an auxiliary
+   action rather than competing with .signin-submit. */
+.signin-toggle {
+  width: 100%;
+  min-height: 44px;
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--fg-muted);
+}
+
 .signin-submit {
   width: 100%;
   min-height: 44px;
