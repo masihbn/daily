@@ -17,7 +17,7 @@
 // tests/integration/api.test.mjs. Entries have no name of their own and
 // cascade-delete with their parent trackable.
 
-import { describe, it, after } from 'node:test';
+import { describe, it, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { listEntries } from '../../js/api.js';
 import {
@@ -25,6 +25,7 @@ import {
   upsertTestEntries,
   cleanupTestRows,
   restGet,
+  ensureSignedIn,
 } from '../helpers/supabase.mjs';
 import { addDays } from '../../js/dates.js';
 
@@ -34,6 +35,10 @@ import { addDays } from '../../js/dates.js';
 // which itself pages twice), well within a 120s budget on a live network.
 const TEST_TIMEOUT_MS = 120000;
 const CLEANUP_TIMEOUT_MS = 30000;
+
+// Step D.7: the policies are owner-scoped now — every request in this file
+// needs a real session, not the anon bearer.
+before(ensureSignedIn, { timeout: TEST_TIMEOUT_MS });
 
 const ROW_COUNT = 1001;
 const END_DATE = '2026-09-01';

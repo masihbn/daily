@@ -10,11 +10,15 @@
 // so every test here sets a generous explicit timeout rather than relying on
 // the runner default.
 
-import { describe, it } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { restGet, sweepStaleTestRows, cleanupTestRows } from '../helpers/supabase.mjs';
+import { restGet, sweepStaleTestRows, cleanupTestRows, ensureSignedIn } from '../helpers/supabase.mjs';
 
 const NETWORK_TIMEOUT_MS = 15000;
+
+// Step D.7: the policies are owner-scoped now — even the read-only
+// connectivity checks below need a real session.
+before(ensureSignedIn, { timeout: NETWORK_TIMEOUT_MS });
 
 describe('connectivity', () => {
   it(

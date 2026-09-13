@@ -17,6 +17,7 @@
 // verified per-test via installGuard().
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 import { addDays } from '../../js/dates.js';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
@@ -28,6 +29,13 @@ import { addDays } from '../../js/dates.js';
 // hits the LIVE Supabase database instead. Blocking service workers entirely
 // sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures -----------------------------------------------------------
 
@@ -297,6 +305,7 @@ test('D1 — #/t/366 renders section.detail[data-detail-state="ready"] with name
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   await routeEntries(page, { getFixture: [] });
 
@@ -311,6 +320,7 @@ test('D1 — #/t/366 renders section.detail[data-detail-state="ready"] with name
   await expect(edit).toHaveAttribute('href', '#/t/366/edit');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -321,6 +331,7 @@ test('D2 — a boolean trackable shows exactly two .chart-slots (heatmap, weekly
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, { getFixture: [] });
 
@@ -332,6 +343,7 @@ test('D2 — a boolean trackable shows exactly two .chart-slots (heatmap, weekly
   assertOrder(keys, ['heatmap', 'weekly']);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 function assertOrder(actual, expected) {
@@ -346,6 +358,7 @@ test('D3 — a numeric trackable with bounds_enabled:true and other trackables p
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER, T_ARCHIVED_OTHER]);
   await routeEntries(page, { getFixture: [] });
 
@@ -357,6 +370,7 @@ test('D3 — a numeric trackable with bounds_enabled:true and other trackables p
   assertOrder(keys, ['heatmap', 'weekly', 'bounds', 'overlay']);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -367,6 +381,7 @@ test('D4 — the same bounds-enabled numeric trackable as the ONLY trackable sho
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // Only T_NUM_BOUNDS itself — otherTrackableCount must be 0.
   await routeTrackables(page, [T_NUM_BOUNDS]);
   await routeEntries(page, { getFixture: [] });
@@ -380,6 +395,7 @@ test('D4 — the same bounds-enabled numeric trackable as the ONLY trackable sho
   expect(keys).not.toContain('overlay');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -391,6 +407,7 @@ test('D5 — the default range is 3m: aria-pressed="true" on that button only, a
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -420,6 +437,7 @@ test('D5 — the default range is 3m: aria-pressed="true" on that button only, a
   expect(url).not.toMatch(/entry_date=lte\./);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -434,6 +452,7 @@ test('D6 — with four slots visible, exactly ONE GET to /rest/v1/entries is iss
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // T_NUM_BOUNDS + T_OTHER => bounds_enabled numeric with otherTrackableCount
   // > 0 => all four slots (heatmap, weekly, bounds, overlay). If any slot
   // fetched its own copy of the entries range, this test would see multiple
@@ -463,6 +482,7 @@ test('D6 — with four slots visible, exactly ONE GET to /rest/v1/entries is iss
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -475,6 +495,7 @@ test('D7 — range changes never fetch: clicking 6m, then 1y, then all each upda
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -492,6 +513,7 @@ test('D7 — range changes never fetch: clicking 6m, then 1y, then all each upda
   }
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -502,6 +524,7 @@ test('D8 — selecting 6m, navigating to #/ and back to #/t/366 shows data-range
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   await routeEntries(page, { getFixture: [] });
 
@@ -524,6 +547,7 @@ test('D8 — selecting 6m, navigating to #/ and back to #/t/366 shows data-range
   await expect(page.locator('.detail-range[data-range="3m"]')).toHaveAttribute('aria-pressed', 'false');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -532,6 +556,7 @@ test('D8 — selecting 6m, navigating to #/ and back to #/t/366 shows data-range
 
 test('D9 — #/t/99999 renders data-detail-state="notfound" with a link back to #/', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   // Whether or not the implementation issues an entries request for a
   // trackable id that turns out not to exist is unspecified by the
@@ -548,6 +573,7 @@ test('D9 — #/t/99999 renders data-detail-state="notfound" with a link back to 
   await expect(page.locator('.chart-slot')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -558,6 +584,7 @@ test('D10 — .detail-count reads "1 entry in range" for one entry and "3 entrie
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_NUM_BOUNDS, T_OTHER]);
   await routeEntriesByTrackable(page, {
     1: [{ id: 501, trackable_id: 1, entry_date: TODAY, value: 1, note: null }],
@@ -577,6 +604,7 @@ test('D10 — .detail-count reads "1 entry in range" for one entry and "3 entrie
   await expect(page.locator('.detail-count')).toHaveText('3 entries in range');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -592,6 +620,7 @@ test('ICON-DETAIL1 — the detail header renders .detail-icon[data-icon="dumbbel
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const trackableWithIcon = { ...T_NUM_BOUNDS, icon: 'dumbbell' };
   await routeTrackables(page, [trackableWithIcon, T_OTHER]);
   await routeEntries(page, { getFixture: [] });
@@ -609,6 +638,7 @@ test('ICON-DETAIL1 — the detail header renders .detail-icon[data-icon="dumbbel
   await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -622,6 +652,7 @@ test('D11 — no uncaught page errors, documentElement.scrollWidth <= 390, and e
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // Four slots visible — the busiest layout this screen can render.
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   await routeEntries(page, { getFixture: [] });
@@ -642,6 +673,7 @@ test('D11 — no uncaught page errors, documentElement.scrollWidth <= 390, and e
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -653,6 +685,7 @@ test('D12 — the calendar reaches the earliest entry regardless of the 3M range
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [
@@ -690,6 +723,7 @@ test('D12 — the calendar reaches the earliest entry regardless of the 3M range
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -702,6 +736,7 @@ test('D13 — the calendar ignores the Daily cap: forcing the trend chart to Dai
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [
@@ -729,6 +764,7 @@ test('D13 — the calendar ignores the Daily cap: forcing the trend chart to Dai
 
   expect(getRequests.length).toBe(1);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -740,6 +776,7 @@ test('D13 — the calendar ignores the Daily cap: forcing the trend chart to Dai
 
 test('D14 — a history longer than one page is fetched in full', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS]);
 
   // Page 1: 1,000 consecutive days ending at PAST_DATE (a short-ish window
@@ -786,6 +823,7 @@ test('D14 — a history longer than one page is fetched in full', async ({ page 
   expect(getRequests.length).toBe(2);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -799,6 +837,7 @@ test('D15 — tapping a day the calendar reaches but the 3M range excludes opens
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [
@@ -830,6 +869,7 @@ test('D15 — tapping a day the calendar reaches but the 3M range excludes opens
   await expect(page.locator('.day-editor')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -846,6 +886,7 @@ test('D16 — a trackable with ZERO entries can navigate the calendar back to th
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -864,6 +905,7 @@ test('D16 — a trackable with ZERO entries can navigate the calendar back to th
 
   expect(getRequests.length).toBe(1);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -878,6 +920,7 @@ test('D17 — the range control sits between the calendar and the trend chart: s
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // T_NUM_BOUNDS + T_OTHER => bounds_enabled numeric with otherTrackableCount
   // > 0 => all four slots (heatmap, weekly, bounds, overlay), same fixture
   // pairing as D3/D6, so every slot named in the contract's sequence is
@@ -911,6 +954,7 @@ test('D17 — the range control sits between the calendar and the trend chart: s
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -923,6 +967,7 @@ test('D17 — the range control sits between the calendar and the trend chart: s
 
 test('D18 — the same order holds while the charts are still loading', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
   // Delayed entries response (same mechanic as weekly.test.mjs's B16,
   // copied locally rather than imported) — long enough to reliably observe
@@ -956,4 +1001,5 @@ test('D18 — the same order holds while the charts are still loading', async ({
   await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

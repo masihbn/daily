@@ -21,7 +21,7 @@
 // Network calls to Supabase can take a few seconds, so every test carries
 // an explicit generous timeout rather than relying on the runner default.
 
-import { describe, it, after } from 'node:test';
+import { describe, it, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   listTrackables,
@@ -34,10 +34,14 @@ import {
   getSettings,
   updateSettings,
 } from '../../js/api.js';
-import { cleanupTestRows } from '../helpers/supabase.mjs';
+import { cleanupTestRows, ensureSignedIn } from '../helpers/supabase.mjs';
 
 const NETWORK_TIMEOUT_MS = 15000;
 const CLEANUP_TIMEOUT_MS = 30000;
+
+// Step D.7: the policies are owner-scoped now — every request in this file
+// needs a real session, not the anon bearer.
+before(ensureSignedIn, { timeout: NETWORK_TIMEOUT_MS });
 
 // Every __test__ name any test in this file attempts to create. Populated
 // eagerly (before the create call, not after), so a failed/rejected create

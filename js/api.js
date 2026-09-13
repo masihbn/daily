@@ -16,6 +16,18 @@
 // re-reading that function's comment.
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+// Step D.7: getAuth() is resolved at call time inside the request path
+// (never captured into a module-level const) — see authHeaders() and
+// requestWithStatus() below. auth.js imports only config.js and errors.js,
+// so importing it here creates no cycle.
+import { getAuth } from './auth.js';
+// Step D.7: the three original error classes plus AuthError now live in
+// errors.js (a leaf module both this file and auth.js can import without a
+// cycle). Re-exported here, verbatim, so every existing `import {
+// ApiError } from './api.js'` keeps working and `instanceof` still holds —
+// these are the same class objects, not lookalikes.
+export { ValidationError, NetworkError, ApiError, AuthError, isRetryable } from './errors.js';
+import { ValidationError, NetworkError, ApiError, AuthError, isRetryable } from './errors.js';
 
 const ID_RE = /^\d+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -39,48 +51,6 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // therefore keeps its batch id. That is why migration 0006's undo query is
 // scoped by `updated_at` as well as by `source` — verified live, 2026-08-25.
 const ENTRY_KEYS = ['trackable_id', 'entry_date', 'value', 'note'];
-
-export class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'ValidationError';
-    this.code = 'VALIDATION';
-    this.retryable = false;
-  }
-}
-
-export class NetworkError extends Error {
-  constructor(message, cause) {
-    super(message);
-    this.name = 'NetworkError';
-    this.code = 'NETWORK';
-    this.retryable = true;
-    this.cause = cause;
-  }
-}
-
-export class ApiError extends Error {
-  constructor({ status, method, url, body }) {
-    const pgMessage = body && typeof body === 'object' ? body.message : null;
-    const message = pgMessage
-      ? `HTTP ${status}: ${pgMessage}`
-      : `HTTP ${status}`;
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = (body && typeof body === 'object' && body.code) || null;
-    this.details = (body && typeof body === 'object' && body.details) || null;
-    this.hint = (body && typeof body === 'object' && body.hint) || null;
-    this.body = body;
-    this.method = method;
-    this.url = url;
-    this.retryable = status >= 500 || status === 408 || status === 429;
-  }
-}
-
-export function isRetryable(err) {
-  return !!(err && err.retryable === true);
-}
 
 // --- validation helpers -----------------------------------------------
 
@@ -140,10 +110,22 @@ export function assertValidEntry(entry) {
 
 // --- internals -----------------------------------------------------------
 
-function baseHeaders() {
+// Step D.7: was a synchronous baseHeaders() returning a fixed anon bearer.
+// Now async because getting the right bearer may need a network round trip
+// (a near-expiry token gets refreshed first — see js/auth.js's
+// getAccessToken()). getAuth() is resolved here, at call time, never at
+// module load, matching this file's existing fetch-resolution rule.
+//
+// `apikey` is ALWAYS the anon key — it identifies the Supabase project to
+// PostgREST and is unrelated to who is signed in; only the bearer changes.
+// Signed out, getAccessToken() resolves null and this returns exactly
+// today's headers (Bearer <anon key>), so every pre-D.7 unit test that
+// asserts that header shape keeps passing with no session at all.
+async function authHeaders() {
+  const token = await getAuth().getAccessToken();
   return {
     apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${token ?? SUPABASE_ANON_KEY}`,
     Accept: 'application/json',
   };
 }
@@ -163,20 +145,60 @@ async function parseBody(res) {
 // body on any 2xx; callers that need the actual status too (e.g. to build
 // an EMPTY_RESPONSE/NOT_FOUND ApiError with the real HTTP status) use
 // requestWithStatus() below instead.
+//
+// Step D.7 401-retry: if a request carrying a SESSION bearer (not the anon
+// key — a signed-out request never retries) comes back 401, that means the
+// access token died between authHeaders() building it and the request
+// landing (or the policies rejected it outright). We ask auth.js to try a
+// refresh via handleUnauthorized(); on success we rebuild just the
+// Authorization header and send the exact same request ONCE more. A second
+// 401 (or a refresh that didn't succeed) becomes an AuthError, not an
+// infinite loop. A 401 sent with the anon bearer (i.e. signed out) is left
+// alone and falls through to the normal ApiError path below, unchanged
+// from pre-D.7 behaviour.
 async function requestWithStatus(method, url, { headers = {}, body } = {}) {
   const fetchFn = globalThis.fetch;
   if (typeof fetchFn !== 'function') {
     throw new NetworkError('globalThis.fetch is not available');
   }
 
-  let res;
-  try {
-    res = await fetchFn(url, { method, headers, body });
-  } catch (cause) {
-    throw new NetworkError(`fetch failed for ${method} ${url}: ${cause && cause.message}`, cause);
+  async function doFetch(hdrs) {
+    let res;
+    try {
+      res = await fetchFn(url, { method, headers: hdrs, body });
+    } catch (cause) {
+      throw new NetworkError(`fetch failed for ${method} ${url}: ${cause && cause.message}`, cause);
+    }
+    const parsed = await parseBody(res);
+    return { res, parsed };
   }
 
-  const parsed = await parseBody(res);
+  let { res, parsed } = await doFetch(headers);
+
+  if (res.status === 401) {
+    const sentWithSessionToken = headers.Authorization !== `Bearer ${SUPABASE_ANON_KEY}`;
+    if (sentWithSessionToken) {
+      let recovered = false;
+      try {
+        recovered = await getAuth().handleUnauthorized();
+      } catch {
+        // handleUnauthorized() is documented never to throw, but a request
+        // path that can die on an unexpected throw here is exactly the
+        // kind of thing that turns "session expired" into "app is broken".
+        recovered = false;
+      }
+
+      if (recovered) {
+        const newToken = await getAuth().getAccessToken();
+        const retryHeaders = { ...headers, Authorization: `Bearer ${newToken ?? SUPABASE_ANON_KEY}` };
+        ({ res, parsed } = await doFetch(retryHeaders));
+      }
+
+      if (res.status === 401) {
+        throw new AuthError('Session expired — sign in again', { reason: 'session_expired', status: 401 });
+      }
+    }
+  }
 
   if (!res.ok) {
     throw new ApiError({ status: res.status, method, url, body: parsed });
@@ -209,7 +231,7 @@ export async function listTrackables({ includeArchived = false } = {}) {
     ? 'select=*&order=sort_order.asc,id.asc'
     : 'select=*&archived=is.false&order=sort_order.asc,id.asc';
   const url = `${SUPABASE_URL}/rest/v1/trackables?${params}`;
-  const rows = await request('GET', url, { headers: baseHeaders() });
+  const rows = await request('GET', url, { headers: await authHeaders() });
   return Array.isArray(rows) ? rows : [];
 }
 
@@ -229,7 +251,7 @@ export async function createTrackable(fields) {
 
   const url = `${SUPABASE_URL}/rest/v1/trackables`;
   const { status, body: rows } = await requestWithStatus('POST', url, {
-    headers: { ...baseHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    headers: { ...await authHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify({ ...fields, name: fields.name.trim() }),
   });
   return requireNonEmptyRow(status, rows, 'POST', url);
@@ -249,7 +271,7 @@ export async function updateTrackable(id, patch) {
 
   const url = `${SUPABASE_URL}/rest/v1/trackables?id=eq.${idStr}`;
   const rows = await request('PATCH', url, {
-    headers: { ...baseHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    headers: { ...await authHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify(patch),
   });
   // PostgREST returns HTTP 200 with an empty array when the filter
@@ -319,7 +341,7 @@ export async function listEntries({ trackableIds, from, to } = {}) {
   const rows = [];
   for (let offset = 0; ; offset += ENTRIES_PAGE_SIZE) {
     const url = `${SUPABASE_URL}/rest/v1/entries?${base}&offset=${offset}&limit=${ENTRIES_PAGE_SIZE}`;
-    const page = await request('GET', url, { headers: baseHeaders() });
+    const page = await request('GET', url, { headers: await authHeaders() });
     const pageRows = Array.isArray(page) ? page : [];
     rows.push(...pageRows);
     // A short page (including empty) means there is no more data. A full
@@ -336,7 +358,7 @@ export async function upsertEntry(entry) {
   const url = `${SUPABASE_URL}/rest/v1/entries?on_conflict=trackable_id,entry_date`;
   const { status, body: rows } = await requestWithStatus('POST', url, {
     headers: {
-      ...baseHeaders(),
+      ...await authHeaders(),
       'Content-Type': 'application/json',
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
@@ -353,7 +375,7 @@ export async function deleteEntry(trackableId, entryDate) {
   // call site in the module, and it must always carry both filters.
   const url = `${SUPABASE_URL}/rest/v1/entries?trackable_id=eq.${idStr}&entry_date=eq.${dateStr}`;
   const rows = await request('DELETE', url, {
-    headers: { ...baseHeaders(), Prefer: 'return=representation' },
+    headers: { ...await authHeaders(), Prefer: 'return=representation' },
   });
   // Zero matched rows is a normal, non-error outcome (e.g. deleting an
   // entry that was never logged).
@@ -364,7 +386,7 @@ export async function deleteEntry(trackableId, entryDate) {
 
 export async function getSettings() {
   const url = `${SUPABASE_URL}/rest/v1/app_settings?select=*&id=eq.1`;
-  const rows = await request('GET', url, { headers: baseHeaders() });
+  const rows = await request('GET', url, { headers: await authHeaders() });
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new ApiError({
       status: 200,
@@ -389,7 +411,7 @@ export async function updateSettings(patch) {
 
   const url = `${SUPABASE_URL}/rest/v1/app_settings?id=eq.1`;
   const rows = await request('PATCH', url, {
-    headers: { ...baseHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    headers: { ...await authHeaders(), 'Content-Type': 'application/json', Prefer: 'return=representation' },
     body: JSON.stringify(patch),
   });
   if (!Array.isArray(rows) || rows.length === 0) {

@@ -23,6 +23,9 @@ import {
   PRODUCTION_REF,
   TEST_URL_VAR,
   TEST_KEY_VAR,
+  resolveTestCredentials,
+  TEST_EMAIL_VAR,
+  TEST_PASSWORD_VAR,
 } from '../../tests/helpers/test-target.mjs';
 
 const PROD = { productionUrl: `https://${PRODUCTION_REF}.supabase.co`, productionKey: 'prod-key' };
@@ -263,5 +266,84 @@ describe('D.4: js/config.js env override', () => {
     const src = readFileSync(new URL('../../js/config.js', import.meta.url), 'utf8');
     assert.ok(!/service_role/i.test(src.replace(/\/\/[^\n]*/g, '')), 'service_role key must never appear in config.js');
     assert.ok(!/\bsb_secret_/.test(src), 'a secret key must never appear in config.js');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step D.7 (CONTRACT-D.7.md §11.1, §12.6) — resolveTestCredentials.
+//
+// After 0010, the integration tier's policies are owner-scoped: every
+// destructive helper in tests/helpers/supabase.mjs must sign in first, which
+// means the tier needs a real email+password for the test project's one
+// auth user. This resolver fails closed exactly like resolveTestTarget does
+// for the URL/key pair above — same shape, same reasoning, so it is tested
+// the same way: every refusal case, and the one acceptance case.
+// ---------------------------------------------------------------------------
+
+describe('D.7: resolveTestCredentials', () => {
+  it('both set -> returned, email trimmed, password left as-is', () => {
+    const creds = resolveTestCredentials({
+      [TEST_EMAIL_VAR]: '  test@example.com  ',
+      [TEST_PASSWORD_VAR]: 'a throwaway pw',
+    });
+    assert.equal(creds.email, 'test@example.com');
+    assert.equal(creds.password, 'a throwaway pw');
+  });
+
+  it('throws naming BOTH variables when neither is set', () => {
+    assert.throws(() => resolveTestCredentials({}), (err) => {
+      assert.match(err.message, new RegExp(TEST_EMAIL_VAR));
+      assert.match(err.message, new RegExp(TEST_PASSWORD_VAR));
+      return true;
+    });
+  });
+
+  it('throws naming both variables when only the email is set', () => {
+    assert.throws(
+      () => resolveTestCredentials({ [TEST_EMAIL_VAR]: 'test@example.com' }),
+      (err) => {
+        assert.match(err.message, new RegExp(TEST_EMAIL_VAR));
+        assert.match(err.message, new RegExp(TEST_PASSWORD_VAR));
+        return true;
+      }
+    );
+  });
+
+  it('throws naming both variables when only the password is set', () => {
+    assert.throws(
+      () => resolveTestCredentials({ [TEST_PASSWORD_VAR]: 'pw' }),
+      (err) => {
+        assert.match(err.message, new RegExp(TEST_EMAIL_VAR));
+        assert.match(err.message, new RegExp(TEST_PASSWORD_VAR));
+        return true;
+      }
+    );
+  });
+
+  it('treats a blank/whitespace-only email as unset', () => {
+    assert.throws(
+      () => resolveTestCredentials({ [TEST_EMAIL_VAR]: '   ', [TEST_PASSWORD_VAR]: 'pw' }),
+      new RegExp(TEST_EMAIL_VAR)
+    );
+  });
+
+  it('treats a whitespace-only PASSWORD as unset too (not trimmed into the value, but blank still counts as unset)', () => {
+    assert.throws(
+      () => resolveTestCredentials({ [TEST_EMAIL_VAR]: 'test@example.com', [TEST_PASSWORD_VAR]: '   ' }),
+      new RegExp(TEST_PASSWORD_VAR)
+    );
+  });
+
+  it('mentions .env.test.example in the failure message', () => {
+    assert.throws(() => resolveTestCredentials({}), /\.env\.test\.example/);
+  });
+
+  it('.env.test.example ships all four variable names (URL/key from D.4, email/password from D.7)', () => {
+    const example = readFileSync(new URL('../../.env.test.example', import.meta.url), 'utf8');
+    const parsed = parseEnvFile(example);
+    assert.ok(TEST_URL_VAR in parsed, `${TEST_URL_VAR} missing from .env.test.example`);
+    assert.ok(TEST_KEY_VAR in parsed, `${TEST_KEY_VAR} missing from .env.test.example`);
+    assert.ok(TEST_EMAIL_VAR in parsed, `${TEST_EMAIL_VAR} missing from .env.test.example`);
+    assert.ok(TEST_PASSWORD_VAR in parsed, `${TEST_PASSWORD_VAR} missing from .env.test.example`);
   });
 });

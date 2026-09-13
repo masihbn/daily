@@ -43,7 +43,19 @@ export const SYNC_EVENTS = ['online', 'visibilitychange', 'pageshow', 'focus'];
 // Reliability here is worth more than tidiness — a missed flush costs the
 // user data, a redundant one costs nothing.
 
-export function createOutboxSync({ store, target, doc, onChange } = {}) {
+// Step D.7: `canFlush` lets main.js gate every flush attempt on
+// getAuth().isSignedIn(). WHY THIS MATTERS NOW AND DIDN'T BEFORE: pre-D.7,
+// a flush while "signed out" (there was no such state) still sent writes
+// with the anon key, which the permissive `using (true)` policies accepted.
+// After the owner-scoped policies land, that same flush sends queued
+// writes with the anon bearer, PostgREST returns 401, and js/store.js's
+// runFlush() treats a non-retryable ApiError as "this op can never
+// succeed" and DROPS it — silently destroying a logged value the user
+// believes is safely queued. Refusing to even attempt the flush while
+// signed out keeps the op in the outbox, where a sign-in's
+// canFlush()-gated retry (main.js calls flushNow() right after a
+// successful sign-in) can still send it.
+export function createOutboxSync({ store, target, doc, onChange, canFlush } = {}) {
   if (!store) throw new TypeError('createOutboxSync requires a store');
 
   let started = false;
@@ -77,6 +89,23 @@ export function createOutboxSync({ store, target, doc, onChange } = {}) {
   // could make one trigger less reliable than another.
   async function flushNow() {
     if (disposed) return { sent: 0, failed: 0, remaining: 0, skipped: true };
+
+    // Step D.7: a `canFlush` that throws is treated as false — a broken
+    // predicate must fail closed (skip the flush) rather than risk sending
+    // writes under conditions the caller meant to forbid.
+    let allowedToFlush = true;
+    if (typeof canFlush === 'function') {
+      try {
+        allowedToFlush = !!canFlush();
+      } catch {
+        allowedToFlush = false;
+      }
+    }
+    if (!allowedToFlush) {
+      const skippedResult = { sent: 0, failed: 0, remaining: pendingCount(), skipped: true };
+      notify();
+      return skippedResult;
+    }
 
     // Deliberately NOT gated on navigator.onLine. That property reports
     // true for a captive portal and for a connected-but-dead network, and

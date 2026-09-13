@@ -111,6 +111,23 @@ if (tier === 'integration') {
     process.env.DAILY_SUPABASE_KEY = target.key;
     console.log(`integration tier target: test project ${target.ref}`);
   }
+
+  // Step D.7: the target project's RLS is owner-scoped (migration 0010), so
+  // the integration tier must sign in — resolved and set on process.env here,
+  // same reasoning as DAILY_SUPABASE_URL/_KEY above, so the child test
+  // processes node:test spawns inherit it. Uses the SAME merged env (real
+  // process.env wins over .env.test) as the target resolution just above.
+  const { resolveTestCredentials } = await import('./test-target.mjs');
+  let credentials;
+  try {
+    credentials = resolveTestCredentials(env);
+  } catch (err) {
+    console.error(`\n${err.message}\n`);
+    process.exit(1);
+  }
+  process.env.DAILY_TEST_EMAIL = credentials.email;
+  process.env.DAILY_TEST_PASSWORD = credentials.password;
+  console.log(`integration tier will sign in as ${credentials.email}`);
 }
 
 let pass = 0;

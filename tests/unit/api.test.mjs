@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../js/config.js';
 import * as api from '../../js/api.js';
+import { getAuth } from '../../js/auth.js';
+import { ValidationError as ErrorsValidationError, NetworkError as ErrorsNetworkError, ApiError as ErrorsApiError, AuthError, isRetryable as errorsIsRetryable } from '../../js/errors.js';
 
 const {
   ValidationError,
@@ -1003,5 +1005,206 @@ describe('error class shapes', () => {
     assert.ok(ValidationError.prototype instanceof Error);
     assert.ok(NetworkError.prototype instanceof Error);
     assert.ok(ApiError.prototype instanceof Error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step D.7 (CONTRACT-D.7.md §4, §12.3) — auth headers and 401 retry.
+//
+// js/api.js resolves getAuth() AT CALL TIME (never at module load), so the
+// real singleton is used here rather than an injected fake — that is the
+// only way to exercise "the same getAuth() js/api.js actually calls".
+// Node has no localStorage, so the singleton's default storage falls back
+// to auth.js's private in-memory shim; nothing here touches disk or a real
+// network. getAuth().clearSession() after every test in this block keeps
+// state from leaking between cases (and away from every describe block
+// above, none of which ever signs in, so they are unaffected either way).
+// ---------------------------------------------------------------------------
+
+describe('auth headers and 401 retry (Step D.7)', () => {
+  afterEach(() => {
+    getAuth().clearSession();
+  });
+
+  // Signs the real singleton in via a throwaway fetch stub, independent of
+  // whatever the test installs afterwards for the request(s) under test.
+  async function signIn(bodyOverrides = {}) {
+    installFetch({
+      status: 200,
+      body: {
+        access_token: 'session-access-token',
+        refresh_token: 'session-refresh-token',
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        user: { id: 'u1', email: 'a@b.com' },
+        ...bodyOverrides,
+      },
+    });
+    await getAuth().signInWithPassword('a@b.com', 'pw');
+  }
+
+  it('signed out: headers are exactly as before (existing assertions above stay valid without a session)', async () => {
+    const calls = installFetch({ body: [] });
+    await listTrackables();
+    const h = lastCall(calls).headers;
+    assert.equal(h.apikey, SUPABASE_ANON_KEY);
+    assert.equal(h.Authorization, `Bearer ${SUPABASE_ANON_KEY}`);
+    assert.equal(h.Accept, 'application/json');
+  });
+
+  it('signed in: Authorization carries the session access token; apikey is still the anon key', async () => {
+    await signIn({ access_token: 'MY-SESSION-TOKEN' });
+    const calls = installFetch({ body: [] });
+    await listTrackables();
+    const h = lastCall(calls).headers;
+    assert.equal(h.apikey, SUPABASE_ANON_KEY);
+    assert.equal(h.Authorization, 'Bearer MY-SESSION-TOKEN');
+  });
+
+  it('401 then refresh 200 then data 200 -> result returned, exactly 3 fetches in that order', async () => {
+    await signIn({ access_token: 'OLD-TOKEN' });
+    const calls = installFetchSequence([
+      { status: 401, body: { message: 'JWT expired' } },
+      {
+        status: 200,
+        body: {
+          access_token: 'NEW-TOKEN',
+          refresh_token: 'new-refresh',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        },
+      },
+      { status: 200, body: [{ id: 1, name: 'x' }] },
+    ]);
+
+    const result = await listTrackables();
+
+    assert.equal(calls.length, 3);
+    assert.deepEqual(result, [{ id: 1, name: 'x' }]);
+    assert.ok(calls[0].url.includes('/rest/v1/trackables'), calls[0].url);
+    assert.equal(calls[0].headers.Authorization, 'Bearer OLD-TOKEN');
+    assert.ok(calls[1].url.includes('/auth/v1/token?grant_type=refresh_token'), calls[1].url);
+    assert.ok(calls[2].url.includes('/rest/v1/trackables'), calls[2].url);
+    assert.equal(calls[2].headers.Authorization, 'Bearer NEW-TOKEN', 'the retried request must carry the NEW token');
+  });
+
+  it('401 then refresh 400 -> AuthError session_expired, retryable, session cleared, exactly 2 fetches', async () => {
+    await signIn({ access_token: 'OLD-TOKEN' });
+    const calls = installFetchSequence([
+      { status: 401, body: { message: 'JWT expired' } },
+      { status: 400, body: {} },
+    ]);
+
+    await assert.rejects(() => listTrackables(), (err) => {
+      assert.equal(err.name, 'AuthError');
+      assert.equal(err.reason, 'session_expired');
+      assert.equal(isRetryable(err), true);
+      return true;
+    });
+    assert.equal(calls.length, 2, 'original request + refresh attempt, no third request once the session is dead');
+    assert.equal(getAuth().getSession(), null);
+  });
+
+  // NOTE ON A CONTRACT DISCREPANCY (reported per CONTRACT-D.7.md's Test
+  // Author instructions — "if the contract is ambiguous ... report the
+  // ambiguity precisely"): §12.3 states this exact case is "exactly 4
+  // fetches", but §4 point 4's algorithm — "send the same request once
+  // more [...] if the retry is 401 again [...] throw AuthError", with no
+  // second call to handleUnauthorized() described — only accounts for 3
+  // network calls (original request, one refresh, one retry). I could not
+  // find a fourth call implied anywhere in §3/§4's operational description,
+  // so this test asserts 3, following the more detailed §4 algorithm text,
+  // and the discrepancy is called out here rather than silently guessed at.
+  it('401 then refresh 200 then 401 again -> AuthError, no infinite loop (see contract-discrepancy note above)', async () => {
+    await signIn({ access_token: 'OLD-TOKEN' });
+    const calls = installFetchSequence([
+      { status: 401, body: {} },
+      {
+        status: 200,
+        body: {
+          access_token: 'NEW-TOKEN',
+          refresh_token: 'new-refresh',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        },
+      },
+      { status: 401, body: {} },
+    ]);
+
+    await assert.rejects(() => listTrackables(), (err) => {
+      assert.equal(err.name, 'AuthError');
+      assert.equal(err.reason, 'session_expired');
+      return true;
+    });
+    assert.equal(calls.length, 3, 'must not loop: original + one refresh + one retry, then give up');
+  });
+
+  it('401 while signed out -> ApiError status 401 as before, exactly 1 fetch (no retry with the anon bearer)', async () => {
+    const calls = installFetch({ status: 401, body: { message: 'no anon access' } });
+    await assert.rejects(() => listTrackables(), (err) => {
+      assert.equal(err.name, 'ApiError');
+      assert.equal(err.status, 401);
+      return true;
+    });
+    assert.equal(calls.length, 1);
+  });
+
+  it('403 stays an ApiError (a real row-level denial), not retried, not an AuthError', async () => {
+    await signIn();
+    const calls = installFetch({ status: 403, body: { message: 'forbidden' } });
+    await assert.rejects(() => listTrackables(), (err) => {
+      assert.equal(err.name, 'ApiError');
+      assert.equal(err.status, 403);
+      assert.equal(err.retryable, false);
+      return true;
+    });
+    assert.equal(calls.length, 1);
+  });
+
+  it('a near-expiry session token: the refresh request precedes the data request', async () => {
+    await signIn({
+      access_token: 'ABOUT-TO-EXPIRE',
+      expires_at: Math.floor(Date.now() / 1000) + 10, // well inside REFRESH_MARGIN_S
+    });
+    const calls = installFetchSequence([
+      {
+        status: 200,
+        body: {
+          access_token: 'REFRESHED',
+          refresh_token: 'new-refresh',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        },
+      },
+      { status: 200, body: [] },
+    ]);
+
+    await listTrackables();
+
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].url.includes('/auth/v1/token?grant_type=refresh_token'), calls[0].url);
+    assert.ok(calls[1].url.includes('/rest/v1/trackables'), calls[1].url);
+    assert.equal(calls[1].headers.Authorization, 'Bearer REFRESHED');
+  });
+
+  it('a near-expiry session token whose refresh fails with a NetworkError: the data request is still sent, with the STALE token', async () => {
+    await signIn({
+      access_token: 'STALE-TOKEN',
+      expires_at: Math.floor(Date.now() / 1000) + 10,
+    });
+    const calls = installFetchSequence([
+      { reject: new TypeError('offline') },
+      { status: 200, body: [] },
+    ]);
+
+    const result = await listTrackables();
+
+    assert.deepEqual(result, []);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].headers.Authorization, 'Bearer STALE-TOKEN');
+  });
+
+  it('the error classes re-exported from api.js are the SAME objects as js/errors.js exports', () => {
+    assert.equal(ValidationError, ErrorsValidationError);
+    assert.equal(NetworkError, ErrorsNetworkError);
+    assert.equal(ApiError, ErrorsApiError);
+    assert.equal(api.AuthError, AuthError);
+    assert.equal(isRetryable, errorsIsRetryable);
   });
 });

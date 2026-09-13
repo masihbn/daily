@@ -272,3 +272,80 @@ describe('D.6: renderOutboxStatus', () => {
     assert.doesNotThrow(() => renderOutboxStatus(null, 3));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Step D.7 (CONTRACT-D.7.md §5, §12.4) — canFlush gate.
+//
+// Why this exists: after D.7 the policies are owner-scoped, so a flush while
+// signed out would send queued writes with the anon bearer, get a 401 that
+// api.js maps to a non-retryable-looking failure once the session is gone,
+// and store.js would DROP the op instead of keeping it queued. canFlush lets
+// main.js wire `() => getAuth().isSignedIn()` in without outbox-sync.js
+// knowing anything about auth.
+// ---------------------------------------------------------------------------
+
+describe('D.7: createOutboxSync — canFlush gate', () => {
+  it('canFlush() returning false: flushNow() resolves {..., skipped: true}, store.flushOutbox is NOT called, onChange still notified', async () => {
+    const store = fakeStore({ pending: 2 });
+    const counts = [];
+    const sync = createOutboxSync({
+      store,
+      target: fakeTarget(),
+      onChange: (c) => counts.push(c),
+      canFlush: () => false,
+    });
+
+    const result = await sync.flushNow();
+
+    assert.deepEqual(result, { sent: 0, failed: 0, remaining: 2, skipped: true });
+    assert.equal(store.flushes, 0, 'store.flushOutbox() must not be called while canFlush() is false');
+    assert.ok(counts.length >= 1, 'onChange must still be notified even when the flush is skipped');
+    assert.equal(counts[counts.length - 1], 2);
+  });
+
+  it('canFlush() returning true: flushOutbox() is called as normal', async () => {
+    const store = fakeStore({ pending: 2 });
+    const sync = createOutboxSync({ store, target: fakeTarget(), onChange: () => {}, canFlush: () => true });
+    const result = await sync.flushNow();
+    assert.equal(store.flushes, 1);
+    assert.notEqual(result.skipped, true, 'a non-skipped result should not report skipped:true');
+  });
+
+  it('absent canFlush: flushOutbox() is called exactly as before D.7', async () => {
+    const store = fakeStore({ pending: 1 });
+    const sync = createOutboxSync({ store, target: fakeTarget(), onChange: () => {} });
+    const result = await sync.flushNow();
+    assert.equal(store.flushes, 1);
+    assert.notEqual(result.skipped, true);
+  });
+
+  it('start() with canFlush() false: no flush happens at start', async () => {
+    const store = fakeStore({ pending: 3 });
+    const sync = createOutboxSync({ store, target: fakeTarget(), onChange: () => {}, canFlush: () => false });
+    sync.start();
+    await sync.flushNow();
+    assert.equal(store.flushes, 0);
+  });
+
+  it('a canFlush() that throws is treated as false, and does not break the sync loop', async () => {
+    const store = fakeStore({ pending: 1 });
+    const target = fakeTarget();
+    const sync = createOutboxSync({
+      store,
+      target,
+      onChange: () => {},
+      canFlush: () => { throw new Error('canFlush blew up'); },
+    });
+
+    sync.start();
+    const result = await sync.flushNow();
+    assert.equal(store.flushes, 0, 'a throwing canFlush must behave like false, not like a real error');
+    assert.equal(result.skipped, true);
+
+    // And the sync loop itself must still be alive/functional afterward —
+    // events keep working rather than the throw having wedged something.
+    target.emit('online');
+    await new Promise((r) => setImmediate(r));
+    assert.equal(store.flushes, 0, 'still skipped: canFlush keeps throwing on every call');
+  });
+});

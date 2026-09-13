@@ -17,11 +17,12 @@
 // deliberate here and NOT a hazard the way it would be for a destructive
 // script: this one only ever issues GETs.
 //
-// >>> AFTER STEP D.7 (RLS hardening), THE ANON KEY WILL STOP BEING ABLE TO
-// >>> READ THESE TABLES. Point SUPABASE_KEY at a service_role key then. A
-// >>> backup that succeeds while returning zero rows is worse than one that
-// >>> fails, so assertNonEmptyDump() below treats an all-empty dump as an
-// >>> error rather than writing it.
+// >>> SINCE STEP D.7 (2026-09-05) THE ANON KEY CANNOT READ THESE TABLES —
+// >>> the owner-scoped policies in migration 0010 grant select only to the
+// >>> `authenticated` role. SUPABASE_KEY must be the secret (service_role)
+// >>> key from here on. A backup that succeeds while returning zero rows is
+// >>> worse than one that fails, so assertNonEmptyDump() below treats an
+// >>> all-empty dump as an error rather than writing it.
 //
 // THE OUTPUT MUST NOT LAND IN THIS REPO. `masihbn/daily` is public because
 // free GitHub Pages requires it, and this payload is weight, calorie and

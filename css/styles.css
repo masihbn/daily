@@ -140,6 +140,16 @@ header h1 {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
+/* Step D.7: an element given its own explicit `display` (the `display:
+   flex` above) loses the user-agent's `[hidden] { display: none }` rule —
+   the author rule wins on specificity, so `#nav.hidden = true` (main.js's
+   sign-out gate) would otherwise set the attribute while the bar stays
+   visibly on screen. This rule wins the fight back and is what keeps the
+   gate honest. */
+#nav[hidden] {
+  display: none;
+}
+
 #nav a {
   flex: 1;
   display: flex;
@@ -1296,4 +1306,88 @@ button.hm-cell {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--fg-muted);
+}
+
+/* Sign-in gate (Step D.7) -------------------------------------------------
+   Rendered by js/views/signin.js in place of every route's own view while
+   there is no session (see main.js's render()). Inputs follow the same
+   44px-min-height / 16px-font sizing every other form in this app uses
+   (.tform-input, .trow-input) so iOS never auto-zooms on focus. */
+
+.signin {
+  display: block;
+  width: 100%;
+}
+
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.signin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.signin-field input {
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.signin-submit {
+  width: 100%;
+  min-height: 44px;
+}
+
+.signin-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.signin-error[hidden] {
+  display: none;
+}
+
+/* Settings: signed-in-as + sign-out (Step D.7) ---------------------------- */
+
+.signin-as {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+
+.signin-email {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.signout {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--fg-muted);
+}
+
+.signout-warning {
+  margin: 0 0 12px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.signout-warning[hidden] {
+  display: none;
 }

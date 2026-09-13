@@ -12,8 +12,17 @@
 // because requests made from inside a SW are invisible to page.route() and
 // the app would reach the LIVE database.
 import { test, expect } from '@playwright/test';
+import { seedSession } from '../helpers/e2e-session.mjs';
 
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: seed a signed-in session so these tests still reach the app
+  // (and its canFlush(): () => getAuth().isSignedIn() gate) instead of the
+  // sign-in view. No installAuthGuard() here: this file has no existing
+  // REST-guard assertion pattern to restate (CONTRACT-D.7.md §12.1).
+  await seedSession(page);
+});
 
 const TRACKABLE = {
   id: 366,

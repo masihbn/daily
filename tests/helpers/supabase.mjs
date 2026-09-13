@@ -32,8 +32,45 @@
 // Credentials come only from js/config.js — do not hardcode them here.
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../js/config.js';
+import { getAuth } from '../../js/auth.js';
 
 export const TEST_PREFIX = '__test__';
+
+// Step D.7: the test project's RLS is owner-scoped (migration 0010) — every
+// helper below that talks to PostgREST now needs a session, not just the
+// anon key, or it gets 401/403 no matter how carefully __test__-scoped its
+// request is. Signs in once per process (memoised — a second call returns
+// the same in-flight/resolved promise rather than signing in again) using
+// DAILY_TEST_EMAIL/DAILY_TEST_PASSWORD, which tests/helpers/run-tier.mjs
+// resolves via tests/helpers/test-target.mjs's resolveTestCredentials() and
+// sets on process.env before any test file runs. Fails closed: a missing
+// credential throws here rather than letting every request fail later with
+// a confusing 401 far from the actual cause.
+let signInPromise = null;
+
+export function ensureSignedIn() {
+  if (!signInPromise) {
+    signInPromise = (async () => {
+      const email = process.env.DAILY_TEST_EMAIL;
+      const password = process.env.DAILY_TEST_PASSWORD;
+      if (typeof email !== 'string' || email.trim() === '' || typeof password !== 'string' || password.trim() === '') {
+        throw new Error(
+          'tests/helpers/supabase.mjs: DAILY_TEST_EMAIL and DAILY_TEST_PASSWORD must be set ' +
+            '(see .env.test.example / tests/helpers/run-tier.mjs) — the integration tier must ' +
+            'sign in now that the test project\'s policies are owner-scoped.'
+        );
+      }
+      await getAuth().signInWithPassword(email, password);
+    })();
+  }
+  return signInPromise;
+}
+
+// -> the signed-in test user's id, or null if not (yet) signed in.
+export function currentUserId() {
+  const session = getAuth().getSession();
+  return (session && session.user && session.user.id) ?? null;
+}
 
 export function isTestName(name) {
   return typeof name === 'string' && name.startsWith(TEST_PREFIX);
@@ -58,10 +95,19 @@ export function buildDeleteByNameUrl(name) {
   return `${SUPABASE_URL}/rest/v1/trackables?name=eq.${encodeURIComponent(name)}`;
 }
 
+// Step D.7: the bearer is now the signed-in test user's access token when
+// there is one — `apikey` stays the anon key regardless (it identifies the
+// project, not the caller). Falls back to the anon key only for the window
+// before ensureSignedIn() has resolved; every exported helper below awaits
+// ensureSignedIn() before it can reach a call site that uses this, so in
+// practice a real request is never sent with the anon fallback once
+// signed in.
 function standardHeaders() {
+  const session = getAuth().getSession();
+  const token = (session && session.access_token) || SUPABASE_ANON_KEY;
   return {
     apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
 }
@@ -93,6 +139,7 @@ function throwHttpError(status, text, json) {
 }
 
 export async function createTestTrackable(fields = {}) {
+  await ensureSignedIn();
   const name =
     fields.name ??
     `__test__auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -141,6 +188,7 @@ function withoutUndefined(obj) {
 // script (Step D.5), which bypasses api.js entirely, so it is the only place
 // in the codebase allowed to set it.
 export async function createTestEntry(trackable, { entry_date, value, note, source } = {}) {
+  await ensureSignedIn();
   assertTestName(trackable && trackable.name);
   if (!trackable || trackable.id === undefined || trackable.id === null) {
     throw new Error('createTestEntry requires a trackable row object with an id');
@@ -164,6 +212,7 @@ export async function createTestEntry(trackable, { entry_date, value, note, sour
 }
 
 export async function upsertTestEntry(trackable, { entry_date, value, note } = {}) {
+  await ensureSignedIn();
   assertTestName(trackable && trackable.name);
   if (!trackable || trackable.id === undefined || trackable.id === null) {
     throw new Error('upsertTestEntry requires a trackable row object with an id');
@@ -203,6 +252,7 @@ export async function upsertTestEntry(trackable, { entry_date, value, note } = {
 const UPSERT_BATCH_SIZE = 500;
 
 export async function upsertTestEntries(trackable, rows) {
+  await ensureSignedIn();
   assertTestName(trackable && trackable.name);
   if (!trackable || trackable.id === undefined || trackable.id === null) {
     throw new Error('upsertTestEntries requires a trackable row object with an id');
@@ -237,6 +287,7 @@ export async function upsertTestEntries(trackable, rows) {
 }
 
 export async function deleteTestTrackablesByName(name) {
+  await ensureSignedIn();
   assertTestName(name);
   const url = buildDeleteByNameUrl(name);
 
@@ -256,6 +307,7 @@ export async function deleteTestTrackablesByName(name) {
 }
 
 export async function cleanupTestRows(names) {
+  await ensureSignedIn();
   const list = Array.isArray(names) ? names : [names];
 
   // Validate every name BEFORE issuing any delete — a bad name anywhere
@@ -272,6 +324,7 @@ export async function cleanupTestRows(names) {
 }
 
 export async function sweepStaleTestRows() {
+  await ensureSignedIn();
   const url = buildSweepListUrl();
 
   const res = await fetch(url, {
@@ -298,6 +351,7 @@ export async function sweepStaleTestRows() {
 }
 
 export async function restGet(path) {
+  await ensureSignedIn();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: standardHeaders(),
   });

@@ -28,6 +28,7 @@
 // routes a second trackable alongside the fixture under test.
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 import { addDays } from '../../js/dates.js';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
@@ -38,6 +39,13 @@ import { addDays } from '../../js/dates.js';
 // LIVE Supabase database instead. Blocking service workers entirely
 // sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures ---------------------------------------------------------
 
@@ -251,6 +259,7 @@ test('P1 — a manual-bounds numeric trackable renders .bounds with canvas.bound
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -264,6 +273,7 @@ test('P1 — a manual-bounds numeric trackable renders .bounds with canvas.bound
   await expect(bounds.locator('canvas.bounds-canvas')).toHaveCount(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -274,6 +284,7 @@ test('P2 — with heatmap, weekly, bounds AND overlay all live, loading the deta
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // A second trackable pushes otherTrackableCount above 0, which is what
   // makes visibleSlots() also include 'overlay' — see this file's header.
   await routeTrackables(page, [T_MANUAL, T_OTHER]);
@@ -291,6 +302,7 @@ test('P2 — with heatmap, weekly, bounds AND overlay all live, loading the deta
   await expect.poll(() => getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -301,6 +313,7 @@ test('P3 — the live chart carries all five annotations (below/inBand/above box
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]); // bound_lower:78, bound_upper:85
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -361,6 +374,7 @@ test('P3 — the live chart carries all five annotations (below/inBand/above box
   expect(result.hasUpperLine).toBe(true);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -372,6 +386,7 @@ test('P4 — the RESOLVED y-axis min/max strictly frame both bounds, and min is 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]); // bound_lower:78, bound_upper:85
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -395,6 +410,7 @@ test('P4 — the RESOLVED y-axis min/max strictly frame both bounds, and min is 
   expect(result.min).toBeGreaterThan(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -405,6 +421,7 @@ test('P5 — an auto fixture with 5 readings (below MIN_BOUND_READINGS) shows "N
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_AUTO_FEW]);
   // 5 distinct days, all safely inside the default 3m window, counting
   // backward from today (not forward from PAST_DATE, which could overrun
@@ -427,6 +444,7 @@ test('P5 — an auto fixture with 5 readings (below MIN_BOUND_READINGS) shows "N
   await expect(bounds.locator('canvas')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -437,6 +455,7 @@ test('P6 — a fixture whose latest reading is above the upper bound shows "Abov
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]); // bound_lower:78, bound_upper:85
   await routeEntries(page, {
     getFixture: [
@@ -458,6 +477,7 @@ test('P6 — a fixture whose latest reading is above the upper bound shows "Abov
   await expect(summary).toHaveAttribute('data-zone', 'above');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -466,6 +486,7 @@ test('P6 — a fixture whose latest reading is above the upper bound shows "Abov
 
 test('P7 — invalid manual bounds (lower > upper) shows the invalid message and renders no canvas', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_INVALID]); // bound_lower:90, bound_upper:80
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 503, entry_date: PAST_DATE, value: 80, note: null }],
@@ -480,6 +501,7 @@ test('P7 — invalid manual bounds (lower > upper) shows the invalid message and
   await expect(bounds.locator('canvas')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -493,6 +515,7 @@ test('P8 — no uncaught page errors, no horizontal scroll at 390px, and .bounds
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -517,6 +540,7 @@ test('P8 — no uncaught page errors, no horizontal scroll at 390px, and .bounds
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -528,6 +552,7 @@ test('P9 — changing range repeatedly, and navigating away and back, never leav
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -570,6 +595,7 @@ test('P9 — changing range repeatedly, and navigating away and back, never leav
   await expect.poll(() => liveChartInstanceCount(page)).toBe(2);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -597,6 +623,7 @@ test('Q9 — switching the bounds-chart period to Weekly issues ZERO new entries
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -635,6 +662,7 @@ test('Q9 — switching the bounds-chart period to Weekly issues ZERO new entries
   expect(getRequests.length).toBe(countBefore);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -645,6 +673,7 @@ test('Q9 — switching the bounds-chart period to Weekly issues ZERO new entries
 
 test('Q10 — the range buttons are NOT disabled when the bounds chart is set to Daily', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -663,6 +692,7 @@ test('Q10 — the range buttons are NOT disabled when the bounds chart is set to
   await expect(page.locator('.detail-range[data-range="all"]')).toBeEnabled();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -674,6 +704,7 @@ test('Q11 — the trend period and the bounds period are independent, separately
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_MANUAL]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -707,6 +738,7 @@ test('Q11 — the trend period and the bounds period are independent, separately
   await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -719,6 +751,7 @@ test('Q11 — the trend period and the bounds period are independent, separately
 
 test('Q12 — the RESOLVED bounds annotation values are identical at Daily and at Monthly', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_AUTO_MANY]);
   // 20 distinct daily readings, comfortably above MIN_BOUND_READINGS(12),
   // spread every other day over the 40 days before TODAY so both the
@@ -774,6 +807,7 @@ test('Q12 — the RESOLVED bounds annotation values are identical at Daily and a
   expect(boundsAtMonth).toEqual(boundsAtDay);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -785,6 +819,7 @@ test('Q13 — the bounds-period control and .bounds-meaning render in the "insuf
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_AUTO_FEW]);
   const getFixture = [1, 3, 5, 7, 9].map((offset, i) => ({
     id: 900 + i,
@@ -826,4 +861,5 @@ test('Q13 — the bounds-period control and .bounds-meaning render in the "insuf
   expect(getRequests.length).toBe(countBefore);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

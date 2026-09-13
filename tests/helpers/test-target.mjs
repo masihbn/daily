@@ -154,6 +154,46 @@ export function resolveTestTarget(
   );
 }
 
+// Step D.7 — the test project's RLS is now owner-scoped (migration 0010), so
+// the integration tier can no longer read or write anything with the anon
+// key alone; it must sign in first. Same fail-closed shape as
+// resolveTestTarget() above: both variables must be present and non-blank,
+// or this throws naming both and pointing at .env.test.example, rather than
+// letting the tier limp along unauthenticated and fail every request with a
+// confusing 401/403 far from the actual cause.
+export const TEST_EMAIL_VAR = 'DAILY_TEST_EMAIL';
+export const TEST_PASSWORD_VAR = 'DAILY_TEST_PASSWORD';
+
+/**
+ * Resolves the email/password the integration tier signs in as.
+ *
+ * Returns { email, password }. Throws when either is missing or blank.
+ * `email` is trimmed (it is compared/displayed); `password` is NOT trimmed —
+ * a password legitimately can contain leading/trailing whitespace, but a
+ * whitespace-only password still counts as unset.
+ */
+export function resolveTestCredentials(env = {}) {
+  const rawEmail = env ? env[TEST_EMAIL_VAR] : undefined;
+  const rawPassword = env ? env[TEST_PASSWORD_VAR] : undefined;
+
+  const email = typeof rawEmail === 'string' ? rawEmail.trim() : '';
+  // Only used to decide "was this set at all" — the returned password is
+  // the untrimmed original.
+  const passwordForCheck = typeof rawPassword === 'string' ? rawPassword.trim() : '';
+  const password = typeof rawPassword === 'string' ? rawPassword : '';
+
+  if (email === '' || passwordForCheck === '') {
+    throw new Error(
+      `Step D.7: both ${TEST_EMAIL_VAR} and ${TEST_PASSWORD_VAR} must be set.\n\n` +
+        `See .env.test.example — the integration tier must sign in because the ` +
+        `test project's policies are now owner-scoped (migration 0010), not ` +
+        `merely guarded by the __test__ naming convention.`
+    );
+  }
+
+  return { email, password };
+}
+
 // The banner is deliberately hard to miss and deliberately not suppressible.
 // A warning nobody sees is the same as no warning.
 export function productionWarningLines(ref) {

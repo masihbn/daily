@@ -21,6 +21,7 @@
 // to Supabase.
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 import { addDays } from '../../js/dates.js';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
@@ -31,6 +32,13 @@ import { addDays } from '../../js/dates.js';
 // LIVE Supabase database instead. Blocking service workers entirely
 // sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures -------------------------------------------------------------
 
@@ -194,6 +202,7 @@ test('H1 — .heatmap renders inside .chart-slot[data-slot="heatmap"] with exact
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   await routeEntries(page, { getFixture: [] });
 
@@ -209,6 +218,7 @@ test('H1 — .heatmap renders inside .chart-slot[data-slot="heatmap"] with exact
   await expect(weekdays.first()).toHaveText('Mon');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -219,6 +229,7 @@ test('H2 — with the heatmap live, loading the detail screen issues exactly ONE
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -229,6 +240,7 @@ test('H2 — with the heatmap live, loading the detail screen issues exactly ONE
   await expect.poll(() => getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -239,6 +251,7 @@ test('H3 — the next-month button is disabled on the current month, and stays d
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   await routeEntries(page, { getFixture: [] });
 
@@ -256,6 +269,7 @@ test('H3 — the next-month button is disabled on the current month, and stays d
   await expect(next).toBeDisabled();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -266,6 +280,7 @@ test('H4 — clicking prev changes .heatmap[data-month] and .hm-month text, and 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -289,6 +304,7 @@ test('H4 — clicking prev changes .heatmap[data-month] and .hm-month text, and 
   await expect.poll(() => getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -297,6 +313,7 @@ test('H4 — clicking prev changes .heatmap[data-month] and .hm-month text, and 
 
 test('H5 — a logged day has computed .hm-fill opacity > 0; an unlogged day computes to 0', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   await routeEntries(page, {
     getFixture: [{ id: 900, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -316,6 +333,7 @@ test('H5 — a logged day has computed .hm-fill opacity > 0; an unlogged day com
   expect(Number(unloggedOpacity)).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -326,6 +344,7 @@ test('H6 — a break-direction boolean: an unlogged in-window day reads good, a 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL_BREAK]);
   await routeEntries(page, {
     getFixture: [{ id: 901, trackable_id: 5, entry_date: PAST_DATE, value: 1, note: null }],
@@ -345,6 +364,7 @@ test('H6 — a break-direction boolean: an unlogged in-window day reads good, a 
   expect(loggedColor).not.toBe(unloggedColor);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -355,6 +375,7 @@ test('H7 — tapping a past day with an existing numeric entry opens the day edi
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { getRequests, postRequests, deleteRequests } = await routeEntries(page, {
     getFixture: [{ id: 902, trackable_id: 366, entry_date: PAST_DATE, value: 1850, note: null }],
@@ -375,6 +396,7 @@ test('H7 — tapping a past day with an existing numeric entry opens the day edi
   expect(deleteRequests.length).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -385,6 +407,7 @@ test('H8 — saving the day editor writes the parsed value directly (replace): P
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [{ id: 903, trackable_id: 366, entry_date: PAST_DATE, value: 1850, note: null }],
@@ -409,6 +432,7 @@ test('H8 — saving the day editor writes the parsed value directly (replace): P
   expect(posted.entry_date).toBe(PAST_DATE);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -419,6 +443,7 @@ test('H9 — after a save resolves, the cell reflects the new value (a genuinely
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   // A dominant anchor entry, safely within the default 3m window but far
   // from PAST_DATE, keeps rangeMax pinned well above both the before/after
@@ -460,6 +485,7 @@ test('H9 — after a save resolves, the cell reflects the new value (a genuinely
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -470,6 +496,7 @@ test('H10 — Clear on a boolean day with an entry issues a DELETE, and the cell
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL_BUILD]);
   const { deleteRequests } = await routeEntries(page, {
     getFixture: [{ id: 907, trackable_id: 1, entry_date: PAST_DATE, value: 1, note: null }],
@@ -495,6 +522,7 @@ test('H10 — Clear on a boolean day with an entry issues a DELETE, and the cell
   await expect(cell).toHaveAttribute('data-logged', 'false');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -505,6 +533,7 @@ test('H11 — typing "abc" and submitting shows .day-error "Enter a number" and 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { postRequests, deleteRequests, getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -527,6 +556,7 @@ test('H11 — typing "abc" and submitting shows .day-error "Enter a number" and 
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -537,6 +567,7 @@ test('H12 — outside/future/before cells are not <button> elements, carry no da
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   await routeEntries(page, { getFixture: [] });
 
@@ -571,6 +602,7 @@ test('H12 — outside/future/before cells are not <button> elements, carry no da
   await expect(outsideCell).toHaveCount(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -579,6 +611,7 @@ test('H12 — outside/future/before cells are not <button> elements, carry no da
 
 test('H13 — Cancel closes the day editor with zero requests', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   const { postRequests, deleteRequests, getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -598,6 +631,7 @@ test('H13 — Cancel closes the day editor with zero requests', async ({ page })
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -611,6 +645,7 @@ test('H14 — no uncaught page errors, no horizontal scroll at 390px, every .hm-
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_NUM]);
   await routeEntries(page, {
     getFixture: [{ id: 908, trackable_id: 366, entry_date: PAST_DATE, value: 1850, note: null }],
@@ -639,6 +674,7 @@ test('H14 — no uncaught page errors, no horizontal scroll at 390px, every .hm-
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -652,6 +688,7 @@ test('B15 — D1 on a real page: a clean day on a break boolean has computed opa
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL_BREAK]);
   await routeEntries(page, { getFixture: [] }); // no entries at all -> every in-window day is "clean"
 
@@ -697,6 +734,7 @@ test('B15 — D1 on a real page: a clean day on a break boolean has computed opa
   expect(cleanColor).not.toBe(emptyColor);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -711,6 +749,7 @@ test('B15b — a break boolean\'s unlogged day cell (clean) is visible; a build 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEntries(page, { getFixture: [] }); // no entries anywhere
 
   // Break boolean: the unlogged PAST_DATE cell is a real 'day' cell, verdict
@@ -750,4 +789,5 @@ test('B15b — a break boolean\'s unlogged day cell (clean) is visible; a build 
   expect(breakOpacity).toBeGreaterThan(buildOpacity);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

@@ -49,6 +49,7 @@
 // data-action / data-symbol values are the raw enum strings).
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
 // sw.js installs a `fetch` event handler that proxies every request through
@@ -59,6 +60,13 @@ import { test, expect } from '@playwright/test';
 // hits the LIVE Supabase database instead. Blocking service workers entirely
 // sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures ---------------------------------------------------------
 
@@ -269,6 +277,7 @@ test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 default
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -287,6 +296,7 @@ test('F1 — #/new renders section.tform[data-mode="new"] with the §3.3 default
   }
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -297,6 +307,7 @@ test('F2 — selecting numeric reveals (actually shows, enabled) unit/aggregatio
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -311,6 +322,7 @@ test('F2 — selecting numeric reveals (actually shows, enabled) unit/aggregatio
   await assertFieldHidden(page, 'bounds_enabled', FIELD_CONTROLS.bounds_enabled);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -321,6 +333,7 @@ test('F3 — ticking bounds_enabled actually reveals bounds_mode; choosing manua
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
   await page.locator('input[name="value_shape"][value="numeric"]').check();
@@ -341,6 +354,7 @@ test('F3 — ticking bounds_enabled actually reveals bounds_mode; choosing manua
   await assertFieldHidden(page, 'bound_upper', FIELD_CONTROLS.bound_upper);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -351,6 +365,7 @@ test('DEFECT3 — the value_shape radio labels read exactly "Boolean" and "Numer
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -369,6 +384,7 @@ test('DEFECT3 — the value_shape radio labels read exactly "Boolean" and "Numer
   await expect(page.locator('.tform-field[data-field="direction"]')).toContainText('Less is better');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -379,6 +395,7 @@ test('DEFECT4a — selecting Numeric shows "Average per week" and hides "Times p
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -400,12 +417,14 @@ test('DEFECT4a — selecting Numeric shows "Average per week" and hides "Times p
   await expect(targetSelect.locator('option', { hasText: 'Average per week' })).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('DEFECT4b — switching Boolean -> Numeric while "Times per week" is selected resets target_type to "No target" and hides+disables target_value (illegal combination must never reach the database check constraint)', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -419,6 +438,7 @@ test('DEFECT4b — switching Boolean -> Numeric while "Times per week" is select
   await assertFieldHidden(page, 'target_value', FIELD_CONTROLS.target_value);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -429,6 +449,7 @@ test('DEFECT6 — selecting a colour swatch marks its radio checked (and the pre
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -448,6 +469,7 @@ test('DEFECT6 — selecting a colour swatch marks its radio checked (and the pre
   await expect(defaultSwatch).not.toBeChecked();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -465,6 +487,7 @@ test('ICON-T1 — the icon grid (.tform-icon-grid) is visible on #/new, with the
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -473,12 +496,14 @@ test('ICON-T1 — the icon grid (.tform-icon-grid) is visible on #/new, with the
   await expect(page.locator('input[name="icon"][value="dot"]')).toBeChecked();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('ICON-T2 — clicking an icon option checks its radio, and the previously-selected default ("dot") is no longer checked', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -493,12 +518,14 @@ test('ICON-T2 — clicking an icon option checks its radio, and the previously-s
   await expect(page.locator('input[name="icon"][value="dot"]')).not.toBeChecked();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('ICON-T3 — saving with the dumbbell icon selected POSTs a body whose icon equals "dumbbell"', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, {
     getFixture: [],
     post: {
@@ -535,12 +562,14 @@ test('ICON-T3 — saving with the dumbbell icon selected POSTs a body whose icon
   expect(body.icon).toBe('dumbbell');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('ICON-T4 — the icon grid\'s computed colour follows the currently-selected colour swatch', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.goto('/index.html#/new');
 
@@ -557,6 +586,7 @@ test('ICON-T4 — the icon grid\'s computed colour follows the currently-selecte
   await expect(grid).toHaveCSS('color', 'rgb(52, 120, 246)');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -567,6 +597,7 @@ test('F4 — submitting with an empty name issues zero requests and shows exactl
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, { getFixture: [] });
 
   await page.goto('/index.html#/new');
@@ -576,6 +607,7 @@ test('F4 — submitting with an empty name issues zero requests and shows exactl
   expect(postRequests.length).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -586,6 +618,7 @@ test('F5 — target_type "weekly_count" with target_value "0" shows exactly the 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, { getFixture: [] });
 
   await page.goto('/index.html#/new');
@@ -600,6 +633,7 @@ test('F5 — target_type "weekly_count" with target_value "0" shows exactly the 
   expect(postRequests.length).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -610,6 +644,7 @@ test('F6 — manual bounds with lower 10 and upper 5 shows exactly the bounds-or
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, { getFixture: [] });
 
   await page.goto('/index.html#/new');
@@ -627,6 +662,7 @@ test('F6 — manual bounds with lower 10 and upper 5 shows exactly the bounds-or
   expect(postRequests.length).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -637,6 +673,7 @@ test('F7 — a valid boolean save POSTs a body containing relog_semantic:"state"
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, {
     getFixture: [],
     post: {
@@ -687,6 +724,7 @@ test('F7 — a valid boolean save POSTs a body containing relog_semantic:"state"
   }
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -695,6 +733,7 @@ test('F7 — a valid boolean save POSTs a body containing relog_semantic:"state"
 
 test('F8 — a valid numeric save includes unit and aggregation:"sum"', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, {
     getFixture: [],
     post: {
@@ -731,6 +770,7 @@ test('F8 — a valid numeric save includes unit and aggregation:"sum"', async ({
   expect(body.aggregation).toBe('sum');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -739,6 +779,7 @@ test('F8 — a valid numeric save includes unit and aggregation:"sum"', async ({
 
 test('F9 — after a successful save the hash becomes #/ and the home view renders', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, {
     getFixture: [],
     post: {
@@ -769,6 +810,7 @@ test('F9 — after a successful save the hash becomes #/ and the home view rende
 
   expect(postRequests.length).toBe(1);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -779,6 +821,7 @@ test('F10 — a failed save (500) keeps the form mounted, shows an error, and do
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { postRequests } = await routeTrackables(page, {
     getFixture: [],
     post: { status: 500, body: { message: 'internal error' } },
@@ -797,6 +840,7 @@ test('F10 — a failed save (500) keeps the form mounted, shows an error, and do
 
   expect(postRequests.length).toBe(1);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -805,6 +849,7 @@ test('F10 — a failed save (500) keeps the form mounted, shows an error, and do
 
 test('F11 — #/t/366/edit loads that trackable and populates the name input', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, { getFixture: [T1, T366] });
 
   await page.goto('/index.html#/t/366/edit');
@@ -814,12 +859,14 @@ test('F11 — #/t/366/edit loads that trackable and populates the name input', a
   await expect(page.locator('input[name="name"]')).toHaveValue('Weight');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('F11b — #/t/99999/edit (an id that does not exist) renders data-state="notfound" with a link back to #/', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, { getFixture: [T1, T366] });
 
   await page.goto('/index.html#/t/99999/edit');
@@ -828,6 +875,7 @@ test('F11b — #/t/99999/edit (an id that does not exist) renders data-state="no
   await expect(page.locator('section.tform a[href="#/"]')).toBeVisible();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -838,6 +886,7 @@ test('F12 — Archive is two-step: first click issues zero requests and shows th
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const { patchRequests } = await routeTrackables(page, {
     getFixture: [T1, T366],
     patch: { body: [{ ...T366, archived: true }] },
@@ -881,6 +930,7 @@ test('F12 — Archive is two-step: first click issues zero requests and shows th
   expect(patchRequests[0].url).toContain('id=eq.366');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -891,6 +941,7 @@ test('F13 — #/new has no .tform-archive button, and no .tform-delete button ex
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, { getFixture: [T1, T366] });
 
   await page.goto('/index.html#/new');
@@ -902,6 +953,7 @@ test('F13 — #/new has no .tform-archive button, and no .tform-delete button ex
   await expect(page.locator('.tform-delete')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -923,6 +975,7 @@ test('F14 — home shows a.home-new[href="#/new"] for a non-empty list, and the 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, { getFixture: [T1] });
   await routeEntries(page, { getFixture: [] });
 
@@ -934,6 +987,7 @@ test('F14 — home shows a.home-new[href="#/new"] for a non-empty list, and the 
   await expect(page.locator('a.detail-edit[href="#/t/1/edit"]')).toBeVisible();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -947,6 +1001,7 @@ test('F15 — no uncaught page errors, no horizontal scroll at 390px, and every 
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, { getFixture: [T1, T366] });
 
   await page.goto('/index.html#/t/366/edit');
@@ -965,4 +1020,5 @@ test('F15 — no uncaught page errors, no horizontal scroll at 390px, and every 
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

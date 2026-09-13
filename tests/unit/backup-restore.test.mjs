@@ -39,6 +39,8 @@ import {
   chunk,
   buildUpsertUrl,
   RESTORE_PLAN,
+  remapUserId,
+  assertUserIdForCrossProject,
 } from '../../scripts/restore.mjs';
 
 const PROJECT = 'https://okwzgmvnsdlheuolcthn.supabase.co';
@@ -260,5 +262,111 @@ describe('D.3 restore: batching and URLs', () => {
       order.indexOf('trackables') < order.indexOf('entries'),
       'restoring entries first would fail the foreign key on a fresh database'
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step D.7 (CONTRACT-D.7.md §10, §12.5) — --user-id, remapUserId,
+// assertUserIdForCrossProject.
+//
+// After migration 0010 the anon key cannot write, and every row carries a
+// user_id owner column referencing auth.users in the TARGET project. A
+// cross-project restore (test project's dump -> production, or vice versa)
+// would otherwise silently write rows owned by a user that doesn't exist in
+// the target project (or, worse, exists but is the WRONG person) — that is
+// the failure remapUserId and assertUserIdForCrossProject exist to close.
+// ---------------------------------------------------------------------------
+
+const VALID_UUID = 'a1b2c3d4-e5f6-4789-8abc-def012345678';
+
+describe('D.7 restore: parseArgs — --user-id', () => {
+  it('parses a valid UUID into out.userId', () => {
+    const out = restoreParseArgs(['--file', 'd.json', '--target', PROJECT, '--user-id', VALID_UUID]);
+    assert.equal(out.userId, VALID_UUID);
+  });
+
+  it('defaults userId to null when --user-id is not given', () => {
+    const out = restoreParseArgs(['--file', 'd.json', '--target', PROJECT]);
+    assert.equal(out.userId, null);
+  });
+
+  it('accepts a mixed-case UUID (case-insensitive per the documented regex)', () => {
+    const mixed = 'A1B2C3D4-E5F6-4789-8ABC-DEF012345678';
+    const out = restoreParseArgs(['--file', 'd.json', '--target', PROJECT, '--user-id', mixed]);
+    assert.equal(out.userId, mixed);
+  });
+
+  const badUuids = [
+    'not-a-uuid',
+    '12345678-1234-1234-1234-12345678901', // one digit short
+    '12345678-1234-1234-1234-1234567890123', // one digit long
+    '12345678123412341234123456789012', // no dashes
+    '',
+    'a1b2c3d4-e5f6-4789-8abc-def01234567g', // invalid hex char
+  ];
+  for (const bad of badUuids) {
+    it(`refuses an invalid --user-id ${JSON.stringify(bad)}`, () => {
+      assert.throws(
+        () => restoreParseArgs(['--file', 'd.json', '--target', PROJECT, '--user-id', bad]),
+        /restore: --user-id must be a UUID/
+      );
+    });
+  }
+});
+
+describe('D.7 restore: remapUserId', () => {
+  it('returns NEW row objects with user_id set to the given id', () => {
+    const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }];
+    const out = remapUserId(rows, VALID_UUID);
+    assert.deepEqual(out, [
+      { id: 1, name: 'a', user_id: VALID_UUID },
+      { id: 2, name: 'b', user_id: VALID_UUID },
+    ]);
+  });
+
+  it('leaves the INPUT rows untouched (no in-place mutation)', () => {
+    const rows = [{ id: 1, name: 'a' }];
+    const before = JSON.parse(JSON.stringify(rows));
+    remapUserId(rows, VALID_UUID);
+    assert.deepEqual(rows, before, 'remapUserId must not mutate its input');
+  });
+
+  it('overwrites a row that already carries a DIFFERENT user_id (the whole point of a remap)', () => {
+    const rows = [{ id: 1, user_id: 'old-owner-id' }];
+    const out = remapUserId(rows, VALID_UUID);
+    assert.equal(out[0].user_id, VALID_UUID);
+    assert.equal(rows[0].user_id, 'old-owner-id', 'the original row must still show the old owner');
+  });
+
+  it('returns a new array (not the same reference), and rows are new objects too', () => {
+    const rows = [{ id: 1 }];
+    const out = remapUserId(rows, VALID_UUID);
+    assert.notEqual(out, rows);
+    assert.notEqual(out[0], rows[0]);
+  });
+
+  it('an empty array in -> an empty array out', () => {
+    assert.deepEqual(remapUserId([], VALID_UUID), []);
+  });
+});
+
+describe('D.7 restore: assertUserIdForCrossProject', () => {
+  it('refuses a cross-project restore with no user id', () => {
+    assert.throws(
+      () => assertUserIdForCrossProject({ crossProject: true, userId: null }),
+      /restore: a cross-project restore needs --user-id/
+    );
+  });
+
+  it('permits a cross-project restore when a user id is given', () => {
+    assert.doesNotThrow(() => assertUserIdForCrossProject({ crossProject: true, userId: VALID_UUID }));
+  });
+
+  it('permits a same-project restore with no user id', () => {
+    assert.doesNotThrow(() => assertUserIdForCrossProject({ crossProject: false, userId: null }));
+  });
+
+  it('permits a same-project restore that also happens to carry a user id', () => {
+    assert.doesNotThrow(() => assertUserIdForCrossProject({ crossProject: false, userId: VALID_UUID }));
   });
 });

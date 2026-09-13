@@ -26,6 +26,16 @@
 // The credential comes from SUPABASE_KEY in the environment. It is never a
 // command-line argument, so it cannot end up in shell history.
 //
+// >>> SINCE STEP D.7 (2026-09-05): every restored row now needs a user_id
+// >>> (owner-scoped RLS, migration 0009/0010), and the anon key can no longer
+// >>> write to these tables at all — SUPABASE_KEY must be the target's secret
+// >>> (service_role) key, which bypasses RLS. Restoring a same-project dump
+// >>> (dump rows already carry the right user_id) needs nothing extra; a
+// >>> cross-project restore (--allow-cross-project) needs --user-id <uuid of
+// >>> the TARGET project's auth user> so every row's user_id is rewritten to
+// >>> an id that actually exists there — see remapUserId()/
+// >>> assertUserIdForCrossProject() below.
+//
 // Upserts, never deletes: every write is ON CONFLICT DO UPDATE on the row's
 // natural key. Running the same restore twice is a no-op. This script issues
 // no DELETE of any kind, deliberately — restoring is about putting rows back,
@@ -46,16 +56,23 @@ export const RESTORE_PLAN = [
 
 export const BATCH_SIZE = 500;
 
+// Step D.7: --user-id must be a real UUID — it is written verbatim into
+// user_id on every restored row, and a malformed value would either fail
+// the FK to auth.users with a confusing error mid-restore or (worse, if it
+// happened to collide) attribute the data to the wrong account.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // --- pure helpers (unit-tested) ---------------------------------------------
 
 export function parseArgs(argv) {
-  const out = { file: null, target: null, yes: false, allowCrossProject: false };
+  const out = { file: null, target: null, yes: false, allowCrossProject: false, userId: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--file') { out.file = argv[i + 1] ?? null; i += 1; }
     else if (a === '--target') { out.target = argv[i + 1] ?? null; i += 1; }
     else if (a === '--yes') { out.yes = true; }
     else if (a === '--allow-cross-project') { out.allowCrossProject = true; }
+    else if (a === '--user-id') { out.userId = argv[i + 1] ?? null; i += 1; }
     else throw new Error(`restore: unknown argument ${JSON.stringify(a)}`);
   }
   if (!out.file) throw new Error('restore: --file <dump.json> is required');
@@ -66,7 +83,34 @@ export function parseArgs(argv) {
         'production is a data-loss tool.'
     );
   }
+  if (out.userId !== null && !UUID_RE.test(out.userId)) {
+    throw new Error('restore: --user-id must be a UUID');
+  }
   return out;
+}
+
+// Step D.7: returns a NEW array of shallow row copies with user_id set to
+// `userId` — the input rows are never mutated, so a caller that still holds
+// the original dump object (e.g. for logging counts) sees it unchanged.
+export function remapUserId(rows, userId) {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => ({ ...row, user_id: userId }));
+}
+
+// Step D.7: a cross-project restore writes rows whose user_id came from a
+// DIFFERENT project's auth.users — that id almost certainly does not exist
+// in the target, and even if it collided by coincidence it would attribute
+// the data to the wrong person. --user-id makes the intent explicit rather
+// than letting the restore silently violate the user_id -> auth.users FK
+// (or, worse, silently succeed against the wrong account).
+export function assertUserIdForCrossProject({ crossProject, userId } = {}) {
+  if (crossProject && !userId) {
+    throw new Error(
+      'restore: a cross-project restore needs --user-id <uuid of the target ' +
+        "project's auth user>: user_id references auth.users and the target " +
+        'project has different users'
+    );
+  }
 }
 
 export function assertDumpShape(dump) {
@@ -174,9 +218,13 @@ async function main() {
 
   const dump = assertDumpShape(JSON.parse(await readFile(args.file, 'utf8')));
   const { dumpRef, targetRef, crossProject } = assertProjectMatch(dump, args.target, args.allowCrossProject);
+  assertUserIdForCrossProject({ crossProject, userId: args.userId });
 
   console.log(`restore: dump taken_at=${dump.taken_at} project=${dumpRef}`);
   console.log(`restore: target=${targetRef}${crossProject ? '  (CROSS-PROJECT, explicitly allowed)' : ''}`);
+  if (args.userId) {
+    console.log(`restore: remapping user_id -> ${args.userId} on every row`);
+  }
   for (const { table } of RESTORE_PLAN) {
     console.log(`  ${table}: ${dump.tables[table].length} rows`);
   }
@@ -187,7 +235,11 @@ async function main() {
   }
 
   for (const { table, onConflict } of RESTORE_PLAN) {
-    const n = await restoreTable(args.target, key, table, onConflict, dump.tables[table]);
+    // Step D.7: user_id references auth.users, so every restored row needs
+    // one that exists in the TARGET project. --user-id rewrites it; without
+    // that flag the dump's own user_id (same-project restore) is used as-is.
+    const rows = args.userId ? remapUserId(dump.tables[table], args.userId) : dump.tables[table];
+    const n = await restoreTable(args.target, key, table, onConflict, rows);
     console.log(`restore: upserted ${n} rows into ${table}`);
   }
 

@@ -8,6 +8,7 @@
 // 390x844 viewport).
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 
 // MANDATORY MECHANIC #1 (see tests/e2e/home.test.mjs, read first): block
 // service workers for every test in this file. sw.js installs a `fetch`
@@ -24,6 +25,13 @@ import { test, expect } from '@playwright/test';
 // they check data-route, nav markup, window.Chart, and layout, all of
 // which come from the page's own script execution, not the SW.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- route helpers -------------------------------------------------------
 //
@@ -63,6 +71,7 @@ test('index.html loads: 200, title "Daily", no uncaught page errors', async ({ p
   });
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   const response = await page.goto('/index.html');
@@ -71,10 +80,12 @@ test('index.html loads: 200, title "Daily", no uncaught page errors', async ({ p
   expect(pageErrors).toEqual([]);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('#app exists and has data-route="home" on initial load', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html');
@@ -82,10 +93,12 @@ test('#app exists and has data-route="home" on initial load', async ({ page }) =
   await expect(app).toHaveAttribute('data-route', 'home');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('#nav exists with exactly 3 links to #/, #/compare, #/settings', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html');
@@ -101,6 +114,7 @@ test('#nav exists with exactly 3 links to #/, #/compare, #/settings', async ({ p
   expect(hrefs).toContain('#/settings');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('navigating via hash updates #app data-route for settings, compare, and new', async ({ page }) => {
@@ -128,6 +142,7 @@ test('#/t/42 routes to data-route="detail" and mounts section.detail for that id
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html#/t/42');
@@ -135,6 +150,7 @@ test('#/t/42 routes to data-route="detail" and mounts section.detail for that id
   await expect(page.locator('section.detail')).toHaveAttribute('data-trackable-id', '42');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('#/nope renders a real notfound view without silently redirecting', async ({ page }) => {
@@ -157,6 +173,7 @@ test('#/nope renders a real notfound view without silently redirecting', async (
 
 test('clicking a nav link updates data-route without a full page reload', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html');
@@ -175,6 +192,7 @@ test('clicking a nav link updates data-route without a full page reload', async 
   expect(sentinel).toBe('still-here');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('the active nav link has aria-current="page" and inactive ones do not', async ({ page }) => {
@@ -192,6 +210,7 @@ test('the active nav link has aria-current="page" and inactive ones do not', asy
 
 test('window.Chart is defined after load (pinned Chart.js UMD script executed)', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html');
@@ -199,10 +218,12 @@ test('window.Chart is defined after load (pinned Chart.js UMD script executed)',
   expect(chartDefined).toBe(true);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('the bottom nav is visible and its bounding box sits within the 390x844 viewport', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeEmptyRest(page);
 
   await page.goto('/index.html');
@@ -220,4 +241,5 @@ test('the bottom nav is visible and its bounding box sits within the 390x844 vie
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

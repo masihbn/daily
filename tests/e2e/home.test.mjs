@@ -15,6 +15,7 @@
 // to Supabase. That is verified per-test below via installGuard().
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
 // sw.js installs a `fetch` event handler that proxies every request through
@@ -25,6 +26,13 @@ import { test, expect } from '@playwright/test';
 // silently stop applying and the app hits the LIVE Supabase database
 // instead. Blocking service workers entirely sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures (ids matter for the assertions below — from contract §6.2) ---
 
@@ -263,6 +271,7 @@ test('E1 — empty trackables renders the empty state, no ul.tlist, a link to #/
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, []);
   await routeEntries(page, { getFixture: [] });
 
@@ -275,6 +284,7 @@ test('E1 — empty trackables renders the empty state, no ul.tlist, a link to #/
   await expect(link).toBeVisible();
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -285,6 +295,7 @@ test('E2 — visible rows are sorted by sort_order/id and archived rows are drop
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   // Deliberately out of order, with an archived row mixed in.
   await routeTrackables(page, [T_STATE, T_BOOL, T_ARCH, T_CUM]);
   await routeEntries(page, { getFixture: [] });
@@ -298,6 +309,7 @@ test('E2 — visible rows are sorted by sort_order/id and archived rows are drop
   await expect(page.locator('li.trow[data-trackable-id="4"]')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -306,6 +318,7 @@ test('E2 — visible rows are sorted by sort_order/id and archived rows are drop
 
 test('E3 — a boolean row with no entry today renders unlogged', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, { getFixture: [] });
 
@@ -323,6 +336,7 @@ test('E3 — a boolean row with no entry today renders unlogged', async ({ page 
   await expect(btn).toHaveAttribute('aria-label', 'Log Workout for today');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -333,6 +347,7 @@ test('E4 — logging a boolean row is optimistic immediately, then confirmed by 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [],
@@ -380,6 +395,7 @@ test('E4 — logging a boolean row is optimistic immediately, then confirmed by 
   expect(JSON.parse(posted.body)).toEqual({ trackable_id: 1, entry_date: TODAY, value: 1 });
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -388,6 +404,7 @@ test('E4 — logging a boolean row is optimistic immediately, then confirmed by 
 
 test('E5 — un-toggling a logged boolean row issues a DELETE and never a POST', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   const { postRequests, deleteRequests } = await routeEntries(page, {
     getFixture: [
@@ -412,6 +429,7 @@ test('E5 — un-toggling a logged boolean row issues a DELETE and never a POST',
   expect(postRequests.length).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -432,6 +450,7 @@ test('E6 — a numeric trackable whose DATA still says relog_semantic:"cumulativ
   // to prove that path is intact. See V6 below for the actual regression
   // guard on the new default ('state') behaviour.
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CUM]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [{ id: 100, trackable_id: 2, entry_date: TODAY, value: 320, note: null }],
@@ -471,6 +490,7 @@ test('E6 — a numeric trackable whose DATA still says relog_semantic:"cumulativ
   await expect(row.locator('.trow-value')).toHaveText('820 kcal');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -481,6 +501,7 @@ test('E7 — the numeric state editor replaces the existing value, does not add 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_STATE]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [{ id: 200, trackable_id: 3, entry_date: TODAY, value: 78.4, note: null }],
@@ -504,6 +525,7 @@ test('E7 — the numeric state editor replaces the existing value, does not add 
   expect(JSON.parse(postRequests[0].body).value).toBe(79.1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -512,6 +534,7 @@ test('E7 — the numeric state editor replaces the existing value, does not add 
 
 test('E8 — invalid numeric input issues no request and shows an inline error', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CUM]);
   const { postRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -531,6 +554,7 @@ test('E8 — invalid numeric input issues no request and shows an inline error',
   expect(state).not.toBe('failed');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -541,6 +565,7 @@ test('E9 — a retryable (503) failure leaves the row pending and persists the o
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, {
     getFixture: [],
@@ -574,6 +599,7 @@ test('E9 — a retryable (503) failure leaves the row pending and persists the o
   expect(outbox.ops[0].payload.value).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -584,6 +610,7 @@ test('E10 — a non-retryable (400) failure reverts the row and leaves the outbo
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, {
     getFixture: [],
@@ -613,6 +640,7 @@ test('E10 — a non-retryable (400) failure reverts the row and leaves the outbo
   }
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -623,6 +651,7 @@ test('E11 — a failed trackables load still shows cached data with an offline n
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   await page.addInitScript((cache) => {
     localStorage.setItem('daily.cache.v1', JSON.stringify(cache));
@@ -643,6 +672,7 @@ test('E11 — a failed trackables load still shows cached data with an offline n
   // aborted request from OUR OWN handler, not from the fallback guard — the
   // guard itself must still see nothing unaccounted for.
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -653,6 +683,7 @@ test('E12 — navigating away and back leaves exactly one section.home and no du
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [],
@@ -675,6 +706,7 @@ test('E12 — navigating away and back leaves exactly one section.home and no du
   expect(postRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -685,6 +717,7 @@ test('E13 — an open numeric editor survives a re-render triggered by another r
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_CUM]);
   await routeEntries(page, {
     getFixture: [],
@@ -706,6 +739,7 @@ test('E13 — an open numeric editor survives a re-render triggered by another r
   await expect(calInput).toHaveValue('12');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -719,6 +753,7 @@ test('E14 — a populated home route throws no uncaught page errors and does not
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_CUM, T_STATE]);
   await routeEntries(page, { getFixture: [] });
 
@@ -730,6 +765,7 @@ test('E14 — a populated home route throws no uncaught page errors and does not
   expect(pageErrors).toEqual([]);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -738,6 +774,7 @@ test('E14 — a populated home route throws no uncaught page errors and does not
 
 test('E15 — every .trow-log button is at least 44px tall', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_CUM, T_STATE]);
   await routeEntries(page, { getFixture: [] });
 
@@ -751,6 +788,7 @@ test('E15 — every .trow-log button is at least 44px tall', async ({ page }) =>
   }
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -773,6 +811,7 @@ test('V1 — a build-direction boolean with no entry today is verdict "neutral",
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, { getFixture: [] });
 
@@ -784,6 +823,7 @@ test('V1 — a build-direction boolean with no entry today is verdict "neutral",
   await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'empty');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -794,6 +834,7 @@ test('V2 — a build-direction boolean logged today is verdict "good", text "Don
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
   await routeEntries(page, {
     getFixture: [{ id: 600, trackable_id: 1, entry_date: TODAY, value: 1, note: null }],
@@ -807,6 +848,7 @@ test('V2 — a build-direction boolean logged today is verdict "good", text "Don
   await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'check');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -828,6 +870,7 @@ test('V3 — a break-direction boolean with NO entry today is verdict "good" (a 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BREAK]);
   await routeEntries(page, { getFixture: [] });
 
@@ -839,6 +882,7 @@ test('V3 — a break-direction boolean with NO entry today is verdict "good" (a 
   await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'check');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -849,6 +893,7 @@ test('V4 — a break-direction boolean logged today is verdict "bad", text "Logg
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BREAK]);
   await routeEntries(page, {
     getFixture: [{ id: 601, trackable_id: 5, entry_date: TODAY, value: 1, note: null }],
@@ -862,6 +907,7 @@ test('V4 — a break-direction boolean logged today is verdict "bad", text "Logg
   await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'cross');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -873,6 +919,7 @@ test('V5 — tapping an unlogged break-direction boolean flips verdict good->bad
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BREAK]);
   await routeEntries(page, {
     getFixture: [],
@@ -910,6 +957,7 @@ test('V5 — tapping an unlogged break-direction boolean flips verdict good->bad
   await expect(row).toHaveAttribute('data-state', 'idle');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -926,6 +974,7 @@ test('V6 — numeric re-log REPLACES the day\'s value; the POST body must be 500
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CAL_STATE]);
   const { postRequests } = await routeEntries(page, {
     getFixture: [{ id: 700, trackable_id: 6, entry_date: TODAY, value: 2000, note: null }],
@@ -954,6 +1003,7 @@ test('V6 — numeric re-log REPLACES the day\'s value; the POST body must be 500
   await expect(row.locator('.trow-value')).toHaveText('500 kcal');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -964,6 +1014,7 @@ test('V7 — numeric rows show a plain-English directionLabel ("less is better" 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CAL_STATE, T_NUM_BUILD]);
   await routeEntries(page, { getFixture: [] });
 
@@ -980,6 +1031,7 @@ test('V7 — numeric rows show a plain-English directionLabel ("less is better" 
   await expect(buildRow.locator('.trow-direction')).not.toHaveText('build');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -990,6 +1042,7 @@ test('V8 — the four boolean statusWord states (Done/Not yet/Clean/Logged) are 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [
     T_V8_BUILD_LOGGED,
     T_V8_BUILD_UNLOGGED,
@@ -1037,6 +1090,7 @@ test('V8 — the four boolean statusWord states (Done/Not yet/Clean/Logged) are 
   expect(new Set(allFour).size).toBe(4);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -1067,6 +1121,7 @@ test('BOUNDS1 — a manual-bounds numeric with an in-range entry (75, inside 70-
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOUNDED]);
   await routeEntries(page, {
     getFixture: [{ id: 900, trackable_id: 20, entry_date: TODAY, value: 75, note: null }],
@@ -1079,12 +1134,14 @@ test('BOUNDS1 — a manual-bounds numeric with an in-range entry (75, inside 70-
   await expect(row.locator('.trow-status')).toHaveText('In range');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('BOUNDS2 — a manual-bounds numeric with an out-of-range entry (85, outside 70-80) renders data-verdict="bad", .trow-status "Out of range", and symbol "cross"', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOUNDED]);
   await routeEntries(page, {
     getFixture: [{ id: 901, trackable_id: 20, entry_date: TODAY, value: 85, note: null }],
@@ -1098,12 +1155,14 @@ test('BOUNDS2 — a manual-bounds numeric with an out-of-range entry (85, outsid
   await expect(row.locator('.trow-symbol')).toHaveAttribute('data-symbol', 'cross');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('BOUNDS3 — the same trackable with bounds_mode "auto" (not yet wired to a real derivation — Step 3.3) renders data-verdict="neutral" and no .trow-status element at all', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   const autoTrackable = { ...T_BOUNDED, bounds_mode: 'auto' };
   await routeTrackables(page, [autoTrackable]);
   await routeEntries(page, {
@@ -1124,6 +1183,7 @@ test('BOUNDS3 — the same trackable with bounds_mode "auto" (not yet wired to a
   await expect(row.locator('.trow-status')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -1162,6 +1222,7 @@ test('ICON1 — a trackable with icon:"dumbbell" and color:"#34c759" renders .tr
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_ICON]);
   await routeEntries(page, { getFixture: [] });
 
@@ -1187,12 +1248,14 @@ test('ICON1 — a trackable with icon:"dumbbell" and color:"#34c759" renders .tr
   await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('ICON2 — a trackable with icon:null renders .trow-icon[data-icon="dot"] (the documented fallback), with no inline colour style when color is also null', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_ICON_NULL]);
   await routeEntries(page, { getFixture: [] });
 
@@ -1211,12 +1274,14 @@ test('ICON2 — a trackable with icon:null renders .trow-icon[data-icon="dot"] (
   expect(inlineColor).toBe('');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('ICON3 — a trackable with an unknown icon key ("bogus") also renders .trow-icon[data-icon="dot"] — unknown keys fall back, they do not render an empty box', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_ICON_BOGUS]);
   await routeEntries(page, { getFixture: [] });
 
@@ -1231,6 +1296,7 @@ test('ICON3 — a trackable with an unknown icon key ("bogus") also renders .tro
   await expect(icon).toHaveCSS('color', 'rgb(52, 199, 89)');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -1279,6 +1345,7 @@ test('NAV-RACE — a render suspended on #/ must not clobber the nav after a lat
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
 
   // Trackables GET is deliberately slow (~800ms) so render#1's mount() is
   // reliably still awaiting it when we switch the hash below. The handler
@@ -1336,4 +1403,5 @@ test('NAV-RACE — a render suspended on #/ must not clobber the nav after a lat
   await expect(page.locator('#nav a[href="#/"]')).not.toHaveAttribute('aria-current', 'page');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

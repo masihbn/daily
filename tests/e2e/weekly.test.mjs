@@ -45,6 +45,7 @@
 // actually reached the chart's live options.
 
 import { test, expect } from '@playwright/test';
+import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
 import { addDays } from '../../js/dates.js';
 
 // MANDATORY MECHANIC #1: block service workers for every test in this file.
@@ -55,6 +56,13 @@ import { addDays } from '../../js/dates.js';
 // LIVE Supabase database instead. Blocking service workers entirely
 // sidesteps that.
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  // Step D.7: the app is gated behind a signed-in session; seed one before
+  // any page script runs so existing tests still reach the view under test
+  // instead of the sign-in gate.
+  await seedSession(page);
+});
 
 // --- fixtures ---------------------------------------------------------
 
@@ -213,6 +221,7 @@ test('X1 — .chart-slot[data-slot="weekly"] contains .weekly with canvas.weekly
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -229,6 +238,7 @@ test('X1 — .chart-slot[data-slot="weekly"] contains .weekly with canvas.weekly
   expect(hasChart).toBe(true);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -239,6 +249,7 @@ test('X2 — with both the heatmap and the weekly chart live, loading the detail
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -252,6 +263,7 @@ test('X2 — with both the heatmap and the weekly chart live, loading the detail
   await expect.poll(() => getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -262,6 +274,7 @@ test('X3 — for the Calories fixture (aggregation:sum, target_type:weekly_avera
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -273,6 +286,7 @@ test('X3 — for the Calories fixture (aggregation:sum, target_type:weekly_avera
   await expect(page.locator('.weekly-meaning')).toHaveText('Average per week · kcal');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -283,6 +297,7 @@ test('X4 — changing range repeatedly, and navigating away and back, never leav
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -323,6 +338,7 @@ test('X4 — changing range repeatedly, and navigating away and back, never leav
   await expect.poll(() => liveChartInstanceCount(page)).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -333,6 +349,7 @@ test('X5 — the annotation plugin is registered, and the live chart carries an 
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -374,6 +391,7 @@ test('X5 — the annotation plugin is registered, and the live chart carries an 
   expect(result.foundAtTarget).toBe(true);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -395,6 +413,7 @@ test('X6 — a trackable with NO entries at all, on the "all" range, renders .we
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, { getFixture: [] });
 
@@ -411,6 +430,7 @@ test('X6 — a trackable with NO entries at all, on the "all" range, renders .we
   await expect(weekly.locator('canvas')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -424,6 +444,7 @@ test('X7 — no uncaught page errors, no horizontal scroll at 390px, and .weekly
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -450,6 +471,7 @@ test('X7 — no uncaught page errors, no horizontal scroll at 390px, and .weekly
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -467,6 +489,7 @@ test('B16 — U1: every visible chart slot shows the loading placeholder until t
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -499,12 +522,14 @@ test('B16 — U1: every visible chart slot shows the loading placeholder until t
   expect(getRequests.length).toBe(1);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 test('B17 — U1 does not re-trigger on a range change: after the first load completes, changing range never re-shows the loading placeholder', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -523,6 +548,7 @@ test('B17 — U1 does not re-trigger on a range change: after the first load com
   await expect(page.locator('.chart-slot-loading')).toHaveCount(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -535,6 +561,7 @@ test('B18 — D3 end to end: the live chart\'s resolved y-axis max is strictly g
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]); // target_value: 1700
   await routeEntries(page, {
     // A single entry whose week-average equals the target exactly (1700) —
@@ -556,6 +583,7 @@ test('B18 — D3 end to end: the live chart\'s resolved y-axis max is strictly g
   expect(resolvedMax).toBeGreaterThan(1700);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -576,6 +604,7 @@ test('C12 — THE WEIGHT REGRESSION: for a single-value "last" fixture, the RESO
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_WEIGHT]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }],
@@ -602,6 +631,7 @@ test('C12 — THE WEIGHT REGRESSION: for a single-value "last" fixture, the RESO
   expect(result.min).toBeGreaterThan(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -610,6 +640,7 @@ test('C12 — THE WEIGHT REGRESSION: for a single-value "last" fixture, the RESO
 
 test('C13 — a count-aggregation fixture renders config.type === "bar"', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_WORKOUT]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 602, entry_date: PAST_DATE, value: 1, note: null }],
@@ -628,6 +659,7 @@ test('C13 — a count-aggregation fixture renders config.type === "bar"', async 
   expect(type).toBe('bar');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -643,6 +675,7 @@ test('C14 — switching period issues ZERO new entries requests when the range i
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [
@@ -684,6 +717,7 @@ test('C14 — switching period issues ZERO new entries requests when the range i
   expect(getRequests.length).toBe(countBefore);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -694,6 +728,7 @@ test('C15 — the Daily cap: clicking Daily disables 6M/1Y/All and forces the ra
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -739,6 +774,7 @@ test('C15 — the Daily cap: clicking Daily disables 6M/1Y/All and forces the ra
   await expect(page.locator('section.detail')).toHaveAttribute('data-range', '3m');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -749,6 +785,7 @@ test('C16 — a weekly_count target of 3 renders a scaled annotation at 12 in Mo
   page,
 }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_WORKOUT]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 602, entry_date: PAST_DATE, value: 1, note: null }],
@@ -803,6 +840,7 @@ test('C16 — a weekly_count target of 3 renders a scaled annotation at 12 in Mo
   expect(dayResult.keyCount).toBe(0);
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -811,6 +849,7 @@ test('C16 — a weekly_count target of 3 renders a scaled annotation at 12 in Mo
 
 test('C17 — the chosen period persists across navigating away (Home) and back', async ({ page }) => {
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -832,6 +871,7 @@ test('C17 — the chosen period persists across navigating away (Home) and back'
   await expect(page.locator('.trend-period[data-period="week"]')).toHaveAttribute('aria-pressed', 'false');
 
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });
 
 // ===========================================================================
@@ -845,6 +885,7 @@ test('C18 — no uncaught page errors, no horizontal scroll at 390px, .trend-per
   page.on('pageerror', (err) => pageErrors.push(err));
 
   const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_CALORIES]);
   const { getRequests } = await routeEntries(page, {
     getFixture: [{ id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null }],
@@ -872,4 +913,5 @@ test('C18 — no uncaught page errors, no horizontal scroll at 390px, .trend-per
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
 });

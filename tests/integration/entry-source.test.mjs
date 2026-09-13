@@ -9,7 +9,7 @@
 // Every trackable is named __test__D.2_* and cleaned up in `after`. Entries
 // have no name of their own and disappear via ON DELETE CASCADE.
 
-import { describe, it, after } from 'node:test';
+import { describe, it, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { upsertEntry } from '../../js/api.js';
 import {
@@ -17,10 +17,15 @@ import {
   createTestEntry,
   cleanupTestRows,
   restGet,
+  ensureSignedIn,
 } from '../helpers/supabase.mjs';
 
 const NETWORK_TIMEOUT_MS = 15000;
 const CLEANUP_TIMEOUT_MS = 30000;
+
+// Step D.7: the policies are owner-scoped now — every request in this file
+// needs a real session, not the anon bearer.
+before(ensureSignedIn, { timeout: NETWORK_TIMEOUT_MS });
 
 const created = [];
 function track(name) {
