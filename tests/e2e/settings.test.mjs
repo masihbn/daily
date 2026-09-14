@@ -20,6 +20,7 @@ import { test, expect } from '@playwright/test';
 import { seedSession, installAuthGuard, FAKE_USER } from '../helpers/e2e-session.mjs';
 import { addDays } from '../../js/dates.js';
 import { deriveBounds } from '../../js/aggregate.js';
+import { roundBound } from '../../js/charts/bounds.js';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -341,10 +342,13 @@ test('S2 — Save 30 PATCHes rolling_window_days; a later detail visit is cached
   await expect(page.locator('.bounds-meaning')).toContainText('last 30 days');
 
   const liveValues = await readBoundsLineValues(page);
+  // boundsFor() rounds auto-derived bounds for display (roundBound(): >=100
+  // whole-number, else one decimal) — the raw deriveBounds() output must be
+  // rounded the same way before comparing to what the live chart resolved.
   const expected30 = deriveBounds(entries, 30);
   const expected90 = deriveBounds(entries, 90);
-  const sorted30 = [expected30.lower, expected30.upper].sort((a, b) => a - b);
-  const sorted90 = [expected90.lower, expected90.upper].sort((a, b) => a - b);
+  const sorted30 = [roundBound(expected30.lower), roundBound(expected30.upper)].sort((a, b) => a - b);
+  const sorted90 = [roundBound(expected90.lower), roundBound(expected90.upper)].sort((a, b) => a - b);
 
   expect(liveValues).toEqual(sorted30);
   expect(liveValues).not.toEqual(sorted90);

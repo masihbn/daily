@@ -5091,9 +5091,9 @@ the account block reads right at the bottom.
 
 ## Step 4.2 — CSV export
 
-**Status:** DONE (2026-09-14) — suite-verified, **awaiting the Phase 4
-gate** (the iOS download path cannot be verified from this machine —
-see below). Same Implementer/Test Author as 4.1, from
+**Status:** DONE (2026-09-14) — suite-verified and **device-verified
+2026-09-14** ("The export seems to be fine" from the installed app).
+Same Implementer/Test Author as 4.1, from
 `CONTRACT-4.2.md`; one test-side fix cycle. `sw.js` `CACHE` → `daily-v36`.
 
 **Goal.** The user can get all their data out. Scoped as a real v1
@@ -5179,6 +5179,16 @@ and whether Save to Files produces a readable CSV there.
 ---
 
 ## ⛔ PHASE 4 GATE — hard stop
+
+**Status:** PASSED — 2026-09-14. The user set the window to 15, saw
+the band move (and asked how it is derived — answered: p10/p90 of the
+last 15 readings, with the two 3900–4000 kcal days pulling the top to
+3180), and exported a CSV from the installed home-screen app. One
+device-feedback fix folded in the same morning: auto-derived bounds
+are rounded (`roundBound`: whole numbers at ≥100, one decimal below),
+so a kcal band reads 1644–3180, not 1644.2–3180.04; manual bounds stay
+as typed. Suite 4079 green, `CACHE` → `daily-v37`. `PROJECT_NOTES.md`
+Test log, Attempt 16.
 
 The user changes the rolling window and confirms bounds visibly move,
 then exports a CSV **from the installed home-screen app, not a Safari
@@ -5537,3 +5547,9 @@ unwind than to ask about.
   delivery = share sheet → anchor download → textarea, decided at run
   time. One test-side fix (textarea CRLF normalisation). Suite 4070
   green. `CACHE` → `daily-v36`. Phase 4 gate next.
+- **2026-09-14** — **Phase 4 gate passed.** Window change moves the
+  band; CSV export works from the installed app. Auto bounds now
+  rounded for display and verdicts alike (whole numbers at ≥100, one
+  decimal below); the N3/N16 unit expectations and S2 wrap
+  `deriveBounds` in `roundBound`. Next: Phase 5, starting with the
+  service-worker pass (5.1), which also fixes the 10-minute update lag.

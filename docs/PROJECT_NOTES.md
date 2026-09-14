@@ -312,6 +312,23 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 16 — 2026-09-14, Steps 4.1 + 4.2 and the Phase 4 gate
+
+**4.1** (`daily-v35`): Settings screen — window, reorder, archived,
+sign out. "works, move forward."
+
+**4.2 + gate** (`daily-v36` → `v37`): the user set the rolling window
+to 15 and saw the Calories auto band become 1644–3180, and asked how
+that is supposed to work. Explained from the data (15 sorted readings;
+p10 sits between the 2nd and 3rd lowest, p90 between the 13th and
+14th, where two 3900–4000 days live). Two lessons: with few readings
+the top band is "just under your biggest days", and the labels showed
+raw percentiles with decimals, which the user found awkward. Fixed the
+same morning: auto bounds rounded (≥100 → whole, else one decimal),
+manual bounds untouched. **CSV export from the installed home-screen
+app: "seems to be fine"** — the share-sheet path, which was the one
+thing this gate existed to check. Phase 4 gate: PASSED.
+
 ### Attempt 15 — 2026-09-13, Steps 3.4c + 3.5 and the Phase 3 gate
 
 **3.4c** (`daily-v32`): Weight as a dashed line on the Calories Range

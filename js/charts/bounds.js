@@ -117,6 +117,19 @@ function coerceFinite(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Device feedback (Phase 4 gate): an auto-derived band on a calories-scale
+// trackable was printing long decimal tails ("3180.0…") that read as false
+// precision — deriveBounds()'s percentile math has no reason to land on a
+// round number. Whole numbers at calorie/step scale, one decimal at
+// weight/measurement scale: >= 100 in magnitude rounds to an integer,
+// otherwise to one decimal place. Non-finite input is returned unchanged
+// (never throws, never invents a number) — callers that care whether a
+// bound is real still check isFiniteValue()/coerceFinite() themselves.
+export function roundBound(v) {
+  if (!isFiniteValue(v)) return v;
+  return Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
+}
+
 function unitOf(trackable) {
   return trackable && typeof trackable === 'object' && typeof trackable.unit === 'string' && trackable.unit !== ''
     ? trackable.unit
@@ -372,7 +385,21 @@ export function boundsFor(trackable, entries, windowDays = DEFAULT_ROLLING_WINDO
   if (!isFiniteValue(derived.lower) || !isFiniteValue(derived.upper)) {
     return { status: 'insufficient', mode: 'auto', lower: null, upper: null, readingCount, windowDays: wd };
   }
-  return { status: 'ok', mode: 'auto', lower: derived.lower, upper: derived.upper, readingCount, windowDays: wd };
+  // Rounded here, not inside deriveBounds() (untouched — this step's
+  // boundaries) or at render time: this is the ONE place both the verdict
+  // math (zoneFor(), which reads bounds.lower/upper directly) and the
+  // chart's own labels (String(bounds.lower)) get their numbers, so
+  // rounding here guarantees they can never disagree with each other.
+  // Manual bounds above are the user's own typed numbers and are
+  // deliberately left untouched.
+  return {
+    status: 'ok',
+    mode: 'auto',
+    lower: roundBound(derived.lower),
+    upper: roundBound(derived.upper),
+    readingCount,
+    windowDays: wd,
+  };
 }
 
 // --- §2.3 zoneFor ----------------------------------------------------------

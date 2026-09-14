@@ -31,6 +31,7 @@ import {
   DEFAULT_ROLLING_WINDOW_DAYS,
   MIN_BOUND_READINGS,
   MAX_BRIDGE_DAYS,
+  roundBound,
 } from '../../js/charts/bounds.js';
 import { deriveBounds, rollup, fillSeries } from '../../js/aggregate.js';
 import {
@@ -285,16 +286,18 @@ describe('N3 — boundsFor delegates to the REAL deriveBounds(), not a reimpleme
   it('default windowDays (90): lower/upper equal deriveBounds(entries, 90)', () => {
     const result = boundsFor(T_AUTO, entries);
     const expected = deriveBounds(entries, 90);
+    // since the 2026-09-14 rounding rule, boundsFor returns roundBound(deriveBounds(...))
     assert.equal(result.status, 'ok');
-    assert.equal(result.lower, expected.lower);
-    assert.equal(result.upper, expected.upper);
+    assert.equal(result.lower, roundBound(expected.lower));
+    assert.equal(result.upper, roundBound(expected.upper));
   });
 
   it('an explicit non-default windowDays (30) is actually threaded through, not hardcoded to 90: lower/upper equal deriveBounds(entries, 30)', () => {
     const result = boundsFor(T_AUTO, entries, 30);
     const expected = deriveBounds(entries, 30);
-    assert.equal(result.lower, expected.lower);
-    assert.equal(result.upper, expected.upper);
+    // since the 2026-09-14 rounding rule, boundsFor returns roundBound(deriveBounds(...))
+    assert.equal(result.lower, roundBound(expected.lower));
+    assert.equal(result.upper, roundBound(expected.upper));
   });
 });
 
@@ -1238,10 +1241,11 @@ describe('N16 — Q4: THE DECISION-1 GUARD — model.bounds.lower/upper are iden
     const expected = deriveBounds(entries, DEFAULT_ROLLING_WINDOW_DAYS);
     const weekModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'week' });
     const monthModel = boundsModel({ trackable: T_AUTO, entries, from, to, period: 'month' });
-    assert.equal(weekModel.bounds.lower, expected.lower);
-    assert.equal(weekModel.bounds.upper, expected.upper);
-    assert.equal(monthModel.bounds.lower, expected.lower);
-    assert.equal(monthModel.bounds.upper, expected.upper);
+    // since the 2026-09-14 rounding rule, boundsFor returns roundBound(deriveBounds(...))
+    assert.equal(weekModel.bounds.lower, roundBound(expected.lower));
+    assert.equal(weekModel.bounds.upper, roundBound(expected.upper));
+    assert.equal(monthModel.bounds.lower, roundBound(expected.lower));
+    assert.equal(monthModel.bounds.upper, roundBound(expected.upper));
   });
 });
 
