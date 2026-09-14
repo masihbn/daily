@@ -479,7 +479,11 @@ strictly inside its cell.
 
 ## Step U.4 — Full-screen charts (landscape, sideways scroll)
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pinged (the
+rotation and the sideways scroll under a CSS transform are the two
+things only the phone can prove). Contract `CONTRACT-U.4.md`; one code
+amendment and two test-side measurement fixes (below). `sw.js` `CACHE`
+→ `daily-v49`.
 
 **Goal.** Expand on any chart opens a full-screen landscape view of that
 chart with the whole selected range scrollable sideways, y axis pinned,
@@ -551,7 +555,42 @@ nav hidden on the fullscreen route), `js/views/fullscreen.js` (new),
   card.
 - Reduced motion: no animation on open; otherwise a 200ms fade.
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4703 green** — 4409 unit, 54 integration, 240 e2e.
+New: `js/charts/scroll.js` (`AXIS_WIDTH`, `PX_PER_BUCKET`,
+`pxPerBucket`, `trackWidth`, `maxTicksFor`, `pinnedAxisPlugin`),
+`js/views/fullscreen.js`, `tests/unit/chart-scroll.test.mjs`,
+`tests/e2e/fullscreen.test.mjs`; changed: `js/router.js` (`chart`
+route), `js/charts/weekly.js` / `bounds.js` (`opts`: `chrome`,
+`trackWidth`, `plugins`; defaults untouched), `js/views/detail.js`
+(storage keys exported, Expand wired), `js/main.js`, `css/styles.css`,
+`sw.js`, `scripts/screenshots.mjs` (four fullscreen shots).
+
+*Unit:* router R-C1–R-C8 (kind whitelist, empty id, encoded id, extra
+segment, fresh params); scroll S1–S5 (bucket widths, track width
+floor, tick budget, the pinned-axis copy math for both sides against a
+fake canvas, never-throws cases).
+*E2E:* F1 route renders full screen, nav and title bar hidden, rotated
+in portrait, box equals the viewport; F2 opens scrolled to today; F3
+1Y × Daily allowed and the track is ≥ 365 × 14px wide; F4 Close
+returns to the trackable; F5 overlay draws with a pinned right axis;
+F6 Expand on the card opens it; F7 bad kind → Not Found; F8 landscape
+viewport → not rotated; F9 unknown id → "Trackable not found.".
+
+*Amendment (code):* the contract's Close rule `history.length > 1 ?
+back : hash` was wrong — a fresh tab already has length 2 and a cold
+PWA launch can have 1. Now Expand navigates with
+`history.pushState({ fromApp: true })` (+ a manual `hashchange`), and
+Close goes back only when that marker is present, else sets the hash.
+*Fixes (tests):* inside the rotated section Playwright's
+`boundingBox()` is screen-space (width and height swap), so F1/F3
+measure `offsetWidth` instead; U.3's DU-2 asserted the Expand buttons
+hidden and now asserts them visible (the U.4 contract unhides them).
+*Found by the Implementer's own screenshot check:* `.fs-track` needed
+an explicit inline width (a block is not widened by an overflowing
+child), otherwise nothing scrolled.
+*Scope note:* the Compare full-screen view moved to U.5.
 
 ---
 
@@ -751,3 +790,7 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — Device feedback after U.3 recorded as **U.4b**
   (type scale down, centred glyphs, first motion, shorter Home hints).
   The user also asked for a screenshot audit at the end — that is U.7.
+- **2026-09-14** — **U.4 executed.** `#/t/:id/chart/:kind`, self-
+  rotating full-screen view, native sideways scroll with a pinned axis,
+  any range × any period. Close rule amended (pushState marker).
+  Suite 4703 green.

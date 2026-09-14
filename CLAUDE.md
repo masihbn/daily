@@ -25,7 +25,8 @@ provenance, the one-off CSV import, outbox durability, paged history,
 single-user Supabase Auth with owner-scoped RLS, a service worker that
 caches only app assets and updates after one relaunch, and an offline
 indicator. Routes: `#/`, `#/t/:id`, `#/t/:id/edit`, `#/new`, `#/compare`,
-`#/settings`.
+`#/settings`, and since U.4 `#/t/:id/chart/:kind` (full-screen chart,
+`kind` = `trend` | `range`).
 
 **Next work: the design pass — `docs/DESIGN_PLAN.md`** (Phase U, started
 2026-09-14). Find the first step there that is not `DONE` and run it
@@ -59,7 +60,7 @@ full-screen sideways-scrolling charts; no data-flow changes.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4661 tests as of Step U.3** (4376 unit, 54 integration, 231 e2e). See
+**4703 tests as of Step U.4** (4409 unit, 54 integration, 240 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -175,14 +176,17 @@ js/applock.js        5.2: opt-in local Face ID lock over WebAuthn (platform
                       credential id in localStorage, "unlocked" in
                       sessionStorage). The assertion is not server-verified;
                       the OS user-verification gate is the property.
-js/views/            home.js (+ home-model.js), trackable.js (create/
+js/views/            fullscreen.js (U.4: full-screen chart route — rotates
+                      itself in portrait, sideways scroll, pinned axis via
+                      charts/scroll.js), home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       compare.js (3.5: #/compare, normalised multi-series),
                       settings.js (4.1/4.2/5.2: rolling window, reorder,
                       archived, export, app lock, sign out), signin.js
                       (email + password, Show/Hide), lock.js (5.2: the lock
                       screen with "Sign out instead" as the escape hatch).
-js/charts/           theme.js (U.3: Chart.js option fragments read from
+js/charts/           scroll.js (U.4: pure sizing math for the full-screen
+                      track + the pinned-axis Chart.js plugin); theme.js (U.3: Chart.js option fragments read from
                       the CSS tokens — axes, tooltip, labels, gradient
                       line fill; injectable reader, unit-tested);
                       heatmap.js, weekly.js, bounds.js — pure chart
