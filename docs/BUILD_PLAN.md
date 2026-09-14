@@ -5333,7 +5333,14 @@ value logged and sent after reconnecting. "It all works."
 
 ## Step 5.2 — Face ID local app-lock (WebAuthn)
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified, **awaiting device
+check** (Face ID itself cannot run anywhere but the phone). Fresh
+Implementer and Test Author from `CONTRACT-5.2.md`; suite green on the
+first run. `sw.js` `CACHE` → `daily-v41`. Note for the reader: this step's own notes
+("anyone with the anon key can still read/write until Step 5.3") predate
+D.7; since 2026-09-13 the backend is behind Supabase Auth, and the lock's
+honest claim is narrower — "someone holding the unlocked phone cannot
+open the app".
 
 **Goal.** Opening the installed app requires Face ID (falling back to
 device passcode).
@@ -5364,7 +5371,60 @@ device passcode).
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **4166 green** — 3903 unit (+38), 54 integration,
+209 e2e (+10). New: `js/applock.js`, `js/views/lock.js`,
+`tests/unit/applock.test.mjs`, `tests/e2e/applock.test.mjs`; changed:
+`js/main.js`, `js/views/settings.js`, `css/styles.css`, `sw.js`.
+
+*Design decisions taken at execution time:*
+
+- **Opt-in, default off**, from a Settings block that says exactly what
+  it protects: "Locks the app on this device behind Face ID, Touch ID
+  or your passcode. Your account is separate: signing in still needs
+  your password." Since D.7 the backend is behind Supabase Auth, so the
+  step's original "does not secure the backend" warning is now moot and
+  the honest claim is the narrow one.
+- **Mechanism**: a WebAuthn platform credential created on enable
+  (`authenticatorAttachment: 'platform'`, `userVerification:
+  'required'`, `attestation: 'none'`), its id stored locally; unlock =
+  `credentials.get` with that id and `userVerification: 'required'`.
+  The assertion is not verified by any server — the security property
+  is the OS's user-verification gate, and the module header says so.
+- **Locks on every cold launch**: "unlocked" lives in sessionStorage,
+  which an installed iOS PWA clears when killed and keeps while
+  backgrounded. No timeout in v1.
+- **Escape hatch = "Sign out instead"** on the lock screen: clears the
+  lock, the local cache and the session, so bypassing the lock costs
+  the account password. No URL bypass. Disabling from Settings (while
+  unlocked) also clears it. A browser without WebAuthn but with a
+  stored lock still shows the lock screen with the hatch — never a
+  silent bypass.
+- **Gate order**: signed-out → sign-in; signed-in + locked → lock
+  screen (`#app[data-lock="locked"]`, nav hidden, route still stamped,
+  hash untouched, no data requests while locked); then the route.
+
+*Unit (38):* base64url round-trip and alphabet; lock/unlocked storage
+helpers with malformed and throwing storage; support detection; the
+exact `create()` and `get()` option shapes; every result string
+(enabled/unlocked, cancelled on NotAllowedError, unsupported, error,
+no-lock); nothing stored on cancel; never rejects.
+
+*E2E (10, with a fake `navigator.credentials` installed after the
+session seed):* locked launch renders the lock screen with nav hidden
+and the route stamped, and issues no data requests; Unlock calls `get`
+with the seeded credential bytes and `userVerification: 'required'`
+and then renders the route; cancel keeps it locked; the unlocked state
+survives a reload and clears with sessionStorage; "Sign out instead"
+clears lock, cache and session and hits `/auth/v1/logout`; no WebAuthn
+→ lock screen with the not-available text and a working hatch;
+Settings turn-on calls `create` with the required verification and the
+RP name and marks the session unlocked; turn-off clears; no WebAuthn →
+"Not available" and no button; signed out + lock → sign-in gate, no
+lock screen.
+
+*Not verifiable from this machine (device check):* the Face ID sheet
+itself, passcode fallback, and whether iOS keeps the credential across
+app kills.
 
 ---
 
@@ -5642,3 +5702,9 @@ unwind than to ask about.
   handlers unit-tested in a vm sandbox; one e2e group runs the real
   worker. Suite 4118 green. `CACHE` → `daily-v39`. Device check of the
   update path next.
+- **2026-09-14** — **Step 5.2 executed.** Opt-in Face ID lock: WebAuthn
+  platform credential from Settings, `get` with required user
+  verification at every cold launch, "unlocked" in sessionStorage,
+  "Sign out instead" as the escape hatch (no URL bypass). Suite 4166
+  green first run. `CACHE` → `daily-v41`. Device check pending; 5.3 is
+  already satisfied by D.7, 5.4 next.

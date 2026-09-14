@@ -28,9 +28,8 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 5.2
-as of 2026-09-14, after 5.1's device check). Nothing in Phase D changed
-what 3.4 onward need to do.
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (5.3 is
+satisfied by D.7; Step 5.4 as of 2026-09-14, after 5.2's device check).
 
 **Three things that will bite an unwary session during the park:**
 
@@ -57,7 +56,7 @@ what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4118 tests as of Step 5.1** (3865 unit, 54 integration, 199 e2e). See
+**4166 tests as of Step 5.2** (3903 unit, 54 integration, 209 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -168,11 +167,17 @@ js/export-csv.js     CSV export (4.2): pure row/CSV builders plus the
 js/net-status.js     5.1: the global offline indicator (navigator.onLine +
                       online/offline events) and requestAppVersion(), which
                       asks the controlling worker for its cache name.
+js/applock.js        5.2: opt-in local Face ID lock over WebAuthn (platform
+                      credential id in localStorage, "unlocked" in
+                      sessionStorage). The assertion is not server-verified;
+                      the OS user-verification gate is the property.
 js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       compare.js (3.5: #/compare, normalised multi-series),
-                      settings.js (4.1: rolling window, reorder, archived,
-                      sign out), signin.js (email + password, Show/Hide).
+                      settings.js (4.1/4.2/5.2: rolling window, reorder,
+                      archived, export, app lock, sign out), signin.js
+                      (email + password, Show/Hide), lock.js (5.2: the lock
+                      screen with "Sign out instead" as the escape hatch).
 js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
                       builders over Chart.js; overlay.js (3.4–3.4c) —
                       one other trackable on the bounds chart's right

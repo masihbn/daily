@@ -10,10 +10,12 @@ import { createDetailView } from './views/detail.js';
 import { createCompareView } from './views/compare.js';
 import { createSignInView } from './views/signin.js';
 import { createSettingsView } from './views/settings.js';
+import { createLockView } from './views/lock.js';
 import { createOutboxSync, renderOutboxStatus } from './outbox-sync.js';
 import { startNetStatus } from './net-status.js';
 import { getStore } from './store.js';
 import { getAuth } from './auth.js';
+import { isLockEnabled, isUnlocked } from './applock.js';
 
 const VIEW_TITLES = {
   detail: 'Trackable',
@@ -50,6 +52,28 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// Step 5.2 (CONTRACT-5.2 §3). Same try/catch accessor pattern as
+// js/views/detail.js's overlayStorage() — private-mode Safari (or a
+// browser with storage disabled entirely) can expose a localStorage/
+// sessionStorage whose methods throw, and js/applock.js's isLockEnabled()/
+// isUnlocked() are already null-safe against that, so returning null here
+// just routes through that same safety net instead of duplicating it.
+function localStorageOrNull() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function sessionStorageOrNull() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 function updateNav(routeName) {
@@ -112,6 +136,25 @@ async function render() {
         if (outboxSync) outboxSync.flushNow();
       },
     });
+    currentView.mount(document.getElementById('view'));
+    return;
+  }
+
+  // Step 5.2 (CONTRACT-5.2 §3). Same signed-in-gate treatment as the
+  // signed-out gate above: nav hidden, data-route already stamped above
+  // (unchanged either way), hash never touched. isLockEnabled()/
+  // isUnlocked() are both null-safe against a throwing or missing storage
+  // (localStorageOrNull()/sessionStorageOrNull() above), so a browser with
+  // storage disabled just never locks rather than ever crashing render().
+  // "Unlocked" lives in sessionStorage, which an installed iOS PWA clears
+  // when killed and keeps while backgrounded — so this locks on every cold
+  // launch and nothing else (no timeout in v1).
+  const locked = isLockEnabled(localStorageOrNull()) && !isUnlocked(sessionStorageOrNull());
+  app.setAttribute('data-lock', locked ? 'locked' : 'unlocked');
+  if (locked) {
+    nav.hidden = true;
+    app.innerHTML = '<h1>Locked</h1><div id="view"></div>';
+    currentView = createLockView({ auth, store: getStore(), onUnlocked: () => render() });
     currentView.mount(document.getElementById('view'));
     return;
   }

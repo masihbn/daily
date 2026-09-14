@@ -1590,6 +1590,56 @@ button.hm-cell {
   display: none;
 }
 
+/* Lock screen (Step 5.2, CONTRACT-5.2 §5) ---------------------------------
+   Rendered by js/views/lock.js in place of every route's own view while
+   signed in with the app lock enabled and this session not yet unlocked
+   (see main.js's render()). Styled like .signin* just above — both are
+   full-screen gates with nothing else on the page until they resolve —
+   and .lock-signout reuses .signout's transparent/muted "secondary text
+   button" treatment for the same reason .signout itself uses it: this is
+   an escape hatch, not the primary action on the screen. */
+
+.lock {
+  display: block;
+  width: 100%;
+}
+
+.lock-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.lock-help {
+  margin: 0 0 16px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.lock-unlock {
+  width: 100%;
+}
+
+.lock-error {
+  margin: 12px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.lock-error[hidden] {
+  display: none;
+}
+
+.lock-alt {
+  margin: 16px 0 0;
+}
+
+.lock-signout {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--fg-muted);
+}
+
 /* Settings screen (Step 4.1, CONTRACT-4.1.md §6) ---------------------------
    .settings-block groups (window / order / archived / account) get the same
    card-ish spacing rhythm as .chart-slot on the detail screen, but without
@@ -1821,4 +1871,30 @@ button.hm-cell {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--fg);
+}
+
+/* App lock (Step 5.2, CONTRACT-5.2 §5) -------------------------------------
+   Sits between Export and Account (js/views/settings.js's render()).
+   .settings-applock-toggle takes the plain base `button` sizing with no
+   extra overrides, same as .settings-window-save; status/error lines
+   mirror .settings-window-status/-error exactly. */
+
+.settings-applock-status {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.settings-applock-toggle {
+  margin: 0 0 4px;
+}
+
+.settings-applock-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.settings-applock-error[hidden] {
+  display: none;
 }

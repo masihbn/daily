@@ -31,6 +31,17 @@ import { exportRows, buildCsv, exportFilename, deliverCsv } from '../export-csv.
 // confirmation that a deploy's new worker actually took over. See that
 // function's own comment in net-status.js for why it lives there.
 import { requestAppVersion } from '../net-status.js';
+// Step 5.2 (CONTRACT-5.2 §4): the "App lock" block. isWebAuthnSupported()
+// resolves its own real-browser nav/win defaults (see js/applock.js's
+// header), but readLock() is the low-level, storage-first function that
+// always needs an explicit storage, which is why this file also defines
+// localStorageOrNull()/sessionStorageOrNull() below (copied from
+// js/views/detail.js's overlayStorage()) and threads them through every
+// applock.js call in this block — including enableLock()/disableLock(),
+// even though those two could resolve their own defaults — so this
+// screen's idea of "is the lock on" (via readLock()) can never disagree
+// with what enableLock()/disableLock() just wrote.
+import { isWebAuthnSupported, enableLock, disableLock, readLock, markUnlocked } from '../applock.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -94,6 +105,26 @@ export function reorderPlan(visible, id, direction) {
 // =============================================================================
 // DOM + network wiring
 // =============================================================================
+
+// Step 5.2 (CONTRACT-5.2 §4). Same try/catch accessor pattern as
+// js/views/detail.js's overlayStorage(), copied here for both storages
+// rather than shared, since this file has no existing import of that kind
+// from detail.js and the accessor is two lines each.
+function localStorageOrNull() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function sessionStorageOrNull() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 const WINDOW_SAVE_ERROR = 'Could not save. Check your connection and try again.';
 const WINDOW_VALIDATION_ERROR = 'Enter a whole number from 14 to 730.';
@@ -164,6 +195,11 @@ export function createSettingsView({ store, auth, today } = {}) {
   let exportStatus = ''; // '' | 'Preparing…' | `Exported ${n} rows.` | 'Export cancelled.' | 'Nothing to export.'
   let exportError = null; // string | null
   let exportFallbackText = null; // the CSV text, only non-null after a 'fallback' outcome
+
+  // Step 5.2 (CONTRACT-5.2 §4). Shares `busy` above with reorder/unarchive/
+  // export (mutually exclusive admin actions on this screen) rather than a
+  // block-local flag, same reasoning as the export state above.
+  let applockError = null; // string | null
 
   // --- render ----------------------------------------------------------
 
@@ -462,6 +498,65 @@ export function createSettingsView({ store, auth, today } = {}) {
     return block;
   }
 
+  // Step 5.2 (CONTRACT-5.2 §4). Sits between Export and Account. Rebuilt
+  // fresh every render, same as Order/Archived/Export/Account — nothing
+  // here holds live user input. `readLock()`/`isWebAuthnSupported()` are
+  // read fresh on every call rather than cached in module state, so a
+  // Turn on/off action's own render() call always reflects what was just
+  // written.
+  function buildAppLockBlock() {
+    const block = document.createElement('section');
+    block.className = 'settings-block';
+    block.dataset.block = 'applock';
+
+    const h3 = document.createElement('h3');
+    h3.className = 'settings-title';
+    h3.textContent = 'App lock';
+    block.appendChild(h3);
+
+    const help = document.createElement('p');
+    help.className = 'settings-help';
+    help.textContent =
+      'Locks the app on this device behind Face ID, Touch ID or your passcode. Your account is separate: signing in still needs your password.';
+    block.appendChild(help);
+
+    const supported = isWebAuthnSupported();
+    const lock = readLock(localStorageOrNull());
+
+    const statusP = document.createElement('p');
+    statusP.className = 'settings-applock-status';
+    if (!supported) {
+      statusP.textContent = 'Not available on this device or browser.';
+    } else if (lock) {
+      const enabledDate = typeof lock.enabledAt === 'string' ? lock.enabledAt.slice(0, 10) : '';
+      statusP.textContent = `On since ${enabledDate}`;
+    } else {
+      statusP.textContent = 'Off';
+    }
+    block.appendChild(statusP);
+
+    // No button at all when unsupported (CONTRACT-5.2 §0 rule 5) — there is
+    // nothing a tap could do.
+    if (supported) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'settings-applock-toggle';
+      btn.dataset.action = lock ? 'applock-off' : 'applock-on';
+      btn.disabled = busy;
+      btn.textContent = lock ? 'Turn off' : 'Turn on';
+      block.appendChild(btn);
+    }
+
+    const errorP = document.createElement('p');
+    errorP.className = 'settings-applock-error';
+    errorP.setAttribute('role', 'alert');
+    errorP.hidden = applockError === null;
+    errorP.textContent = applockError === null ? '' : applockError;
+    block.appendChild(errorP);
+
+    return block;
+  }
+
   // Step D.7's sign-out block, moved here unchanged in DOM/texts — see
   // handleSignOutClick() below for the moved logic. Rebuilt fresh every
   // render (unlike the window block above) because nothing here holds live
@@ -559,6 +654,7 @@ export function createSettingsView({ store, auth, today } = {}) {
     section.appendChild(buildOrderBlock());
     section.appendChild(buildArchivedBlock());
     section.appendChild(buildExportBlock());
+    section.appendChild(buildAppLockBlock());
     section.appendChild(buildAccountBlock());
 
     if (settingsError !== null) {
@@ -781,6 +877,51 @@ export function createSettingsView({ store, auth, today } = {}) {
     textarea.select();
   }
 
+  // Step 5.2 (CONTRACT-5.2 §4). Shares `busy` with reorder/unarchive/
+  // export — ignored while any of those is in flight, and sets `busy` for
+  // its own duration (the WebAuthn prompt) so those are disabled while it
+  // runs. enableLock() never rejects, but the try/catch mirrors every other
+  // async handler in this file rather than trusting that invariant alone.
+  async function handleAppLockOn() {
+    if (busy) return;
+
+    busy = true;
+    applockError = null;
+    render();
+
+    let result;
+    try {
+      result = await enableLock({ storage: localStorageOrNull() });
+    } catch {
+      result = 'error';
+    }
+    if (disposed) return;
+
+    if (result === 'enabled') {
+      // The user just verified with Face ID/Touch ID/passcode to create
+      // the credential — requiring it again immediately on the very next
+      // render would be redundant, so this session counts as unlocked.
+      markUnlocked(sessionStorageOrNull());
+    } else if (result === 'cancelled') {
+      applockError = 'Setup was cancelled.';
+    } else if (result === 'error') {
+      applockError = 'Could not set up the lock.';
+    }
+    // 'unsupported' needs no error line here — buildAppLockBlock() already
+    // hides the button and shows the "not available" status whenever
+    // isWebAuthnSupported() is false, so this outcome can't normally be
+    // reached from this screen's own button at all.
+    busy = false;
+    render();
+  }
+
+  function handleAppLockOff() {
+    if (busy) return;
+    disableLock({ storage: localStorageOrNull(), session: sessionStorageOrNull() });
+    applockError = null;
+    render();
+  }
+
   // Step D.7's handleSignOutClick(), moved from js/main.js verbatim in
   // spirit (same refusal-while-outbox-non-empty rule, same warning texts,
   // same store.clear() then auth.signOut() sequence) — see
@@ -875,6 +1016,10 @@ export function createSettingsView({ store, auth, today } = {}) {
           handleExportOne(id);
         } else if (action === 'export-select') {
           handleExportSelect();
+        } else if (action === 'applock-on') {
+          handleAppLockOn();
+        } else if (action === 'applock-off') {
+          handleAppLockOff();
         }
       }
     } catch {
@@ -961,6 +1106,7 @@ export function createSettingsView({ store, auth, today } = {}) {
     exportFallbackText = null;
     appVersionKnown = false;
     appVersionCache = null;
+    applockError = null;
   }
 
   return { mount, unmount };

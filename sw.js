@@ -12,7 +12,7 @@
 // Request, Response, URL, Promise, console, and never run a fetch (or any
 // other side effect) at evaluation time — only inside a listener.
 
-const CACHE = 'daily-v40';
+const CACHE = 'daily-v41';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -26,6 +26,7 @@ const ASSETS = [
   './js/errors.js',
   './js/auth.js',
   './js/api.js',
+  './js/applock.js',
   './js/store.js',
   './js/export-csv.js',
   './js/outbox-sync.js',
@@ -45,6 +46,7 @@ const ASSETS = [
   './js/views/compare.js',
   './js/views/signin.js',
   './js/views/settings.js',
+  './js/views/lock.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];
