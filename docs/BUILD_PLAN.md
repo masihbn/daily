@@ -5334,6 +5334,20 @@ ten-minute wait) → v40 pushed → **one relaunch showed daily-v40**;
 airplane mode: shell, data, "Offline — showing last saved data", a
 value logged and sent after reconnecting. "It all works."
 
+*Defect found at Step 5.4's phone pass (2026-09-14): no charts offline.*
+Home worked offline; the detail screen drew nothing. Reproduced in a
+real browser: both CDN scripts WERE in the cache, but jsDelivr sends
+`Vary: Accept-Encoding`, and on WebKit the page's own `<script>` request
+did not Vary-match the entry the install-time `fetch()` had stored; the
+miss then fell to `fetch(request)`, which rejects offline with no
+catch. Fix (`daily-v44`): the CDN lookup uses `ignoreVary: true`
+(safe — pinned, immutable URLs), and an offline miss retries the cache
+once more before throwing a clear error instead of an unhandled
+rejection. Lesson for the record: **a cache entry with a `Vary`
+header is not a hit until the lookup request's varied headers match;
+for immutable versioned URLs, always `ignoreVary`.** Unit W11 pins
+both behaviours.
+
 ---
 
 ## Step 5.2 — Face ID local app-lock (WebAuthn)
@@ -5443,6 +5457,17 @@ silently back to the idle Unlock button (a browser that demands a user
 gesture rejects with NotAllowedError, which must not read as an
 error). Apple's consent sheet cannot be removed by a web app — that is
 iOS's own passkey UX — so the best flow is open → sheet → Face ID.
+
+*Second device finding, 2026-09-14: the passkey needs a network
+connection.* In airplane mode the "Use passkey" sheet appears but Face
+ID never comes up; with Wi-Fi back it works. That is iOS's passkey
+flow, not the app. Offered a PIN fallback for offline; **user decision:
+"That's assumed that we're always gonna have Wi-Fi, so it's okay."**
+Consequence recorded plainly: with the lock on and no network there is
+no way into the app (and "Sign out instead" cannot sign back in
+offline either). The Settings help and the lock screen now say "Needs
+a network connection" (`daily-v43`). If this ever bites, the PIN
+fallback is the designed answer and is a one-step addition.
 
 ---
 
@@ -5762,3 +5787,7 @@ unwind than to ask about.
   reality; the only device items never exercised before (charts offline,
   a cellular log) handed to the user. From here, new work is new
   numbered steps under the same contract.
+- **2026-09-14** — **App lock needs a network connection to unlock
+  (iOS passkey flow).** PIN fallback offered and declined: "we're
+  always gonna have Wi-Fi". UI texts updated to say so. Revisit only if
+  the user asks.

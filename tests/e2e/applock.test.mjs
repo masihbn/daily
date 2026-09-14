@@ -216,6 +216,9 @@ test('K1 — a seeded lock + signed-in session renders the lock screen, hides na
 
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
   await expect(page.locator('section.lock')).toBeVisible();
+  await expect(page.locator('p.lock-help')).toHaveText(
+    'Unlock with Face ID, Touch ID or your device passcode. Needs a network connection.'
+  );
   await expect(page.locator('#nav')).toBeHidden();
   await expect(page.locator('#app')).toHaveAttribute('data-route', 'settings');
   const hash = await page.evaluate(() => window.location.hash);
@@ -436,6 +439,9 @@ test('K7 — Settings "Turn on": create() gets userVerification required and rp.
   await page.goto('/index.html#/settings');
   const block = page.locator('section.settings-block[data-block="applock"]');
   await expect(block).toBeVisible();
+  await expect(block.locator('.settings-help')).toHaveText(
+    'Locks the app on this device behind Face ID, Touch ID or your passcode. Needs a network connection to unlock. Your account is separate: signing in still needs your password.'
+  );
   await expect(block.locator('.settings-applock-status')).toHaveText('Off');
   await expect(block.locator('button[data-action="applock-on"]')).toHaveText('Turn on');
 

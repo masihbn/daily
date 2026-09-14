@@ -34,7 +34,7 @@ import { unlock, disableLock } from '../applock.js';
 const ERROR_CANCELLED = 'Unlock was cancelled.';
 const ERROR_UNSUPPORTED = 'Face ID is not available in this browser. Sign out to continue.';
 const ERROR_GENERIC = 'Could not unlock. Try again.';
-const HELP_IDLE = 'Unlock with Face ID, Touch ID or your device passcode.';
+const HELP_IDLE = 'Unlock with Face ID, Touch ID or your device passcode. Needs a network connection.';
 const HELP_BUSY = 'Unlocking with Face ID, Touch ID or your device passcode…';
 
 export function createLockView({ auth, store, storage, session, nav, onUnlocked } = {}) {

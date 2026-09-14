@@ -81,6 +81,23 @@ function makeFakeCaches() {
     return typeof reqOrUrl === 'string' ? reqOrUrl : reqOrUrl.url;
   }
 
+  function stripQuery(url) {
+    return url.split('?')[0];
+  }
+
+  // Real CacheStorage.match: `ignoreSearch` matches ignoring the query
+  // string. `ignoreVary` has no observable effect here (this fake never
+  // models Vary headers) — it's accepted and recorded purely so tests can
+  // assert the sw.js CDN branch passes it.
+  function keysMatch(storedKey, lookupKey, opts) {
+    if (opts && opts.ignoreSearch) {
+      return stripQuery(storedKey) === stripQuery(lookupKey);
+    }
+    return storedKey === lookupKey;
+  }
+
+  const topMatchCalls = [];
+
   function makeCacheApi(name) {
     const store = new Map();
     stores.set(name, store);
@@ -131,17 +148,21 @@ function makeFakeCaches() {
     // search all caches when no `cacheName` option is given), returning the
     // first hit. Backed by the SAME per-name Maps as the per-cache `.match`
     // spy above, so seeding via `(await caches.open(NAME)).put(...)` is
-    // visible here too.
-    async match(reqOrUrl) {
-      const key = keyFor(reqOrUrl);
+    // visible here too. Records every call (key + options) in `topMatchCalls`
+    // so tests can assert sw.js passes `{ ignoreVary: true }` etc.
+    async match(reqOrUrl, opts) {
+      const lookupKey = keyFor(reqOrUrl);
+      topMatchCalls.push({ key: lookupKey, opts });
       for (const store of stores.values()) {
-        if (store.has(key)) return store.get(key);
+        for (const [storedKey, response] of store) {
+          if (keysMatch(storedKey, lookupKey, opts)) return response;
+        }
       }
       return undefined;
     },
   };
 
-  return { caches, cacheApis, stores, openCalls, deleteCalls };
+  return { caches, cacheApis, stores, openCalls, deleteCalls, topMatchCalls };
 }
 
 // Builds a fresh sandbox, evaluates sw.js in it, and returns handles to
@@ -170,7 +191,7 @@ function buildSandbox({ fetchImpl } = {}) {
     location: { origin: 'https://app.test', href: 'https://app.test/daily/' },
   };
 
-  const { caches, cacheApis, stores, openCalls, deleteCalls } = makeFakeCaches();
+  const { caches, cacheApis, stores, openCalls, deleteCalls, topMatchCalls } = makeFakeCaches();
 
   const fetchCalls = [];
   const fetchFn = (input, init) => {
@@ -204,6 +225,7 @@ function buildSandbox({ fetchImpl } = {}) {
     listeners,
     skipWaiting,
     claim,
+    topMatchCalls,
   };
 }
 
@@ -446,7 +468,7 @@ describe('W10: same-origin POST', () => {
 });
 
 describe('W11: CDN asset, cache-first', () => {
-  it('cache hit: returned without a network fetch', async () => {
+  it('cache hit: returned without a network fetch, and the lookup passes ignoreVary: true', async () => {
     const sandbox = buildSandbox();
     const api = await cacheApi(sandbox);
     const cached = new FakeResponse({ ok: true, status: 200, marker: 'cdn-cached' });
@@ -459,6 +481,45 @@ describe('W11: CDN asset, cache-first', () => {
     const res = await ev.promise;
     assert.equal(res._marker, 'cdn-cached');
     assert.equal(sandbox.fetchCalls.length, 0);
+
+    // Device defect fix: a Vary: Accept-Encoding mismatch was making this
+    // lookup miss on the phone. The first cache-first match for a CDN
+    // request must pass { ignoreVary: true }.
+    assert.ok(sandbox.topMatchCalls.length >= 1);
+    const firstMatch = sandbox.topMatchCalls[0];
+    assert.equal(firstMatch.key, CDN_URL);
+    assert.equal(firstMatch.opts && firstMatch.opts.ignoreVary, true);
+  });
+
+  it('cache miss, network fetch rejects, second (ignoreSearch) match hits: the cached response is returned', async () => {
+    const sandbox = buildSandbox({ fetchImpl: () => Promise.reject(new Error('cdn offline')) });
+    const api = await cacheApi(sandbox);
+    // Seeded under a cache-busted URL so the first exact-key lookup misses
+    // and only the second, ignoreSearch: true lookup (which compares with
+    // the query string stripped) can find it.
+    const cachedUrl = `${CDN_URL}?cb=123`;
+    const cached = new FakeResponse({ ok: true, status: 200, marker: 'cdn-stale-but-cached' });
+    await api.put(cachedUrl, cached);
+
+    const request = new FakeRequest(CDN_URL, { method: 'GET', mode: 'cors' });
+    const ev = makeFetchEvent(request);
+    dispatch(sandbox, 'fetch', ev);
+
+    const res = await ev.promise;
+    assert.equal(res._marker, 'cdn-stale-but-cached');
+
+    const ignoreSearchMatch = sandbox.topMatchCalls.find((c) => c.opts && c.opts.ignoreSearch);
+    assert.ok(ignoreSearchMatch, 'expected a second caches.match call with ignoreSearch: true');
+    assert.equal(ignoreSearchMatch.opts.ignoreVary, true);
+  });
+
+  it('cache miss, network fetch rejects, nothing cached even with ignoreSearch: rejects with "unavailable offline"', async () => {
+    const sandbox = buildSandbox({ fetchImpl: () => Promise.reject(new Error('cdn offline')) });
+    const request = new FakeRequest(CDN_URL, { method: 'GET', mode: 'cors' });
+    const ev = makeFetchEvent(request);
+    dispatch(sandbox, 'fetch', ev);
+
+    await assert.rejects(ev.promise, /unavailable offline/);
   });
 
   it('cache miss, OK network response: fetched and put', async () => {

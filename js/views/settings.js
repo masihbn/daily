@@ -517,7 +517,7 @@ export function createSettingsView({ store, auth, today } = {}) {
     const help = document.createElement('p');
     help.className = 'settings-help';
     help.textContent =
-      'Locks the app on this device behind Face ID, Touch ID or your passcode. Your account is separate: signing in still needs your password.';
+      'Locks the app on this device behind Face ID, Touch ID or your passcode. Needs a network connection to unlock. Your account is separate: signing in still needs your password.';
     block.appendChild(help);
 
     const supported = isWebAuthnSupported();

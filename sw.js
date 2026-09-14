@@ -12,7 +12,7 @@
 // Request, Response, URL, Promise, console, and never run a fetch (or any
 // other side effect) at evaluation time — only inside a listener.
 
-const CACHE = 'daily-v42';
+const CACHE = 'daily-v44';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -187,19 +187,40 @@ self.addEventListener('fetch', (event) => {
   // exact versions — see the "no floating CDN script version" test), so
   // there is nothing to revalidate; serving the cached copy is both correct
   // and faster than a round trip.
+  //
+  // Device defect (5.4 phone pass): offline, charts didn't draw even though
+  // both CDN scripts WERE in the cache. jsDelivr sends `Vary:
+  // Accept-Encoding`, and on WebKit the page's own <script> request for the
+  // same URL doesn't Vary-match the entry the install-time `fetch(url, {
+  // mode: 'cors' })` stored, so a plain `caches.match(request)` misses and
+  // falls through to `fetch(request)`, which rejects offline. `ignoreVary:
+  // true` is safe here specifically because these two URLs are pinned exact
+  // versions marked immutable — there is only ever one possible response
+  // body per URL, so Vary-matching buys nothing and only costs the miss.
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.match(request, { ignoreVary: true }).then((cached) => {
       if (cached) return cached;
-      return fetch(request).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches
-            .open(CACHE)
-            .then((cache) => cache.put(request, copy))
-            .catch(() => {});
-        }
-        return res;
-      });
+      return fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches
+              .open(CACHE)
+              .then((cache) => cache.put(request, copy))
+              .catch(() => {});
+          }
+          return res;
+        })
+        .catch(async () => {
+          // Network failed too (the offline case the Vary mismatch was
+          // actually hitting). One more, looser lookup before giving up —
+          // `ignoreSearch` in case the two entries otherwise differ only by
+          // query string — and a clear, catchable error instead of letting
+          // the original fetch rejection propagate as an unhandled one.
+          const fallback = await caches.match(request, { ignoreVary: true, ignoreSearch: true });
+          if (fallback) return fallback;
+          throw new Error('daily: CDN asset unavailable offline');
+        });
     })
   );
 });
