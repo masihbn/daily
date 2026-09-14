@@ -312,6 +312,18 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 17 — 2026-09-14, Step 5.1: the update path, proven
+
+The reworked worker (`daily-v39`) still had to cross the OLD worker's
+ten-minute lag once — the phone was running v37, whose fetch path
+honoured the HTTP cache. After that: "I can see the thirty nine."
+Pushed a bare `CACHE` bump to v40; **one relaunch showed "App version
+daily-v40"** — the reload-on-controllerchange + `cache: 'no-cache'`
+path works on the device. Airplane mode: cached shell, last data,
+the offline banner; a value logged offline sent on reconnect. "It all
+works." **From here on, "deploy → wait ten minutes → relaunch twice" is
+history: deploy → relaunch once.**
+
 ### Attempt 16 — 2026-09-14, Steps 4.1 + 4.2 and the Phase 4 gate
 
 **4.1** (`daily-v35`): Settings screen — window, reorder, archived,

@@ -5201,9 +5201,11 @@ cannot be verified from this machine. **Wait before Phase 5.**
 
 ## Step 5.1 — Offline behavior & service-worker pass
 
-**Status:** DONE (2026-09-14) — suite-verified, **update path and
-airplane mode awaiting the device check** (§7 of the contract: a second
-deploy within ten minutes must reach the phone after ONE relaunch).
+**Status:** DONE (2026-09-14) — suite-verified and **device-verified
+2026-09-14** ("It all works."): v39 → v40 arrived after ONE relaunch
+(the ten-minute lag is gone), airplane mode showed the shell, the data
+and the indicator, a value logged offline sent when the network came
+back. `PROJECT_NOTES.md` Test log, Attempt 17.
 Fresh Implementer and Test Author from `CONTRACT-5.1.md`; one
 test-side fix cycle; one addition (a visible app version). `sw.js`
 `CACHE` → `daily-v39`.
@@ -5322,10 +5324,10 @@ with the worker ALLOWED: the trackables GET is still observed by
 still renders Home with the indicator, online reload hides it,
 Settings shows "App version daily-v…".
 
-*Device check (pending, §7):* deploy twice within ten minutes and
-confirm the phone shows the new version after one relaunch; airplane
-mode: shell + last data + indicator, log a value, leave airplane mode,
-watch it send.
+*Device check (§7), 2026-09-14:* v39 (after the old worker's last
+ten-minute wait) → v40 pushed → **one relaunch showed daily-v40**;
+airplane mode: shell, data, "Offline — showing last saved data", a
+value logged and sent after reconnecting. "It all works."
 
 ---
 
