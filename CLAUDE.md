@@ -26,7 +26,7 @@ single-user Supabase Auth with owner-scoped RLS, a service worker that
 caches only app assets and updates after one relaunch, and an offline
 indicator. Routes: `#/`, `#/t/:id`, `#/t/:id/edit`, `#/new`, `#/compare`,
 `#/settings`, and since U.4 `#/t/:id/chart/:kind` (full-screen chart,
-`kind` = `trend` | `range`).
+`kind` = `trend` | `range`) and `#/compare/chart` (U.5).
 
 **Next work: the design pass — `docs/DESIGN_PLAN.md`** (Phase U, started
 2026-09-14). Find the first step there that is not `DONE` and run it
@@ -60,7 +60,7 @@ full-screen sideways-scrolling charts; no data-flow changes.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4710 tests as of Step U.4b** (4413 unit, 54 integration, 243 e2e). See
+**4723 tests as of Step U.5** (4418 unit, 54 integration, 251 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s

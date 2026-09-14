@@ -683,7 +683,9 @@ so the arrival still reads as motion.
 
 ## Step U.5 — Compare screen
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pinged.
+Contract `CONTRACT-U.5.md`; one fix cycle (below). `sw.js` `CACHE` →
+`daily-v51`.
 
 **Goal.** Compare is one calm screen: a scrolling chip row, one control
 bar, one legend, and the same chart styling and Expand as detail.
@@ -708,7 +710,33 @@ where the contract moves elements.
   stays; x ticks horizontal.
 - Expand → `#/compare/chart` (U.4).
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4723 green** — 4418 unit, 54 integration, 251 e2e.
+Changed: `js/router.js` (`compare-chart`), `js/charts/compare.js`
+(`renderCompare(model, opts)`; Chart.js legend off; the key list is the
+legend — `button.compare-key-toggle` per series toggles
+`setDatasetVisibility`; themed axes/tooltip/lines; `data-chrome` on the
+root), `js/views/compare.js` (`.compare-controls`, `.compare-toolbar`
+with Expand), `js/views/fullscreen.js` (`kind: 'compare'` reading and
+writing `daily.compare.v1`), `js/main.js`, `css/styles.css`, `sw.js`,
+`scripts/screenshots.mjs` (compare full-screen shots).
+
+*Unit:* router RC-1–RC-4.
+*E2E:* CU-1 one control bar; CU-2 one scrolling chip row; CU-3 key
+above the chart, toggles hide/show a series; CU-4 Expand only with a
+selection; CU-5 Expand → full screen → range change persists → Close
+returns with the new range pressed; CU-6 empty selection → the empty
+state, no entries request; CU-7 the full-screen canvas fits the stage
+(both orientations).
+
+*Fix cycle (found in the orchestrator's screenshot review):* inside the
+full-screen track the compare root and its canvas wrap had no height
+chain, so Chart.js sized the canvas from its default aspect ratio and
+the bottom of the chart was cut off; `height: 100%` added for both, and
+CU-7 now guards it. The Implementer had separately found and fixed a
+ghosted axis strip (the compare root's card padding offset the canvas
+from the pinned-axis copy) via `data-chrome="false"`.
 
 ---
 
@@ -832,3 +860,6 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.4b executed** (the user's phone feedback): type
   scale down one step, glyphs centred (2.9px → 0), route transition +
   press states + shimmer, one-line hints. Suite 4710 green.
+- **2026-09-14** — **U.5 executed.** Compare: one control bar, scrolling
+  chips, key list as the legend, Expand → `#/compare/chart`. Suite 4723
+  green.
