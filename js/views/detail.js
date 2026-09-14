@@ -21,8 +21,14 @@
 import { getStore } from '../store.js';
 import * as apiModule from '../api.js';
 import { todayLocal, addDays } from '../dates.js';
-import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } from './home-model.js';
+import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue, formatValue } from './home-model.js';
 import { iconSvg, hasIcon } from '../icons.js';
+// Step U.3 (CONTRACT-U.3.md §3): the hero's Edit button gets an icon glyph
+// and the (hidden) Expand buttons on the weekly/bounds slots use the same
+// chrome icon set as the rest of the shell (js/ui-icons.js, Step U.0) — a
+// DIFFERENT module from ../icons.js above, which draws per-trackable
+// identity icons, never the app's own chrome.
+import { uiIconSvg } from '../ui-icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
 import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/weekly.js';
 // Step 3.4c (CONTRACT-3.4c.md §3): boundsFor() is imported here too — a
@@ -117,6 +123,39 @@ export const SLOT_TITLES = {
   bounds: 'Range',
   overlay: 'Overlay',
 };
+
+// --- todayLineText (Step U.3, CONTRACT-U.3.md §3) -------------------------
+//
+// The hero's new "today" line. A numeric trackable with a finite logged
+// value formats via home-model.js#formatValue (the single implementation of
+// "what does this trackable's value look like", so unit handling/rounding
+// are never duplicated here) — but the finiteness check happens HERE, first,
+// because formatValue's own '—' fallback for a non-finite value would read
+// as "Today: —", not the "Not logged today" this line calls for. A boolean
+// trackable reads "Logged today" iff entry.value !== 0 (mirrors home-
+// model.js#hasEntryValue's own rule for booleans, restated rather than
+// imported since that helper also folds in the numeric-finiteness case this
+// function already handles separately). A null/non-object trackable — or
+// any value_shape this module doesn't recognise — never invents a status
+// line; only a real numeric/boolean trackable gets one. Never throws.
+export function todayLineText(trackable, entry) {
+  if (!trackable || typeof trackable !== 'object') return '';
+
+  const value = entry && typeof entry === 'object' ? entry.value : undefined;
+
+  if (trackable.value_shape === 'numeric') {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return `Today: ${formatValue(trackable, value)}`;
+    }
+    return 'Not logged today';
+  }
+
+  if (trackable.value_shape === 'boolean') {
+    return typeof value === 'number' && value !== 0 ? 'Logged today' : 'Not logged today';
+  }
+
+  return '';
+}
 
 // --- historyFrom -----------------------------------------------------------
 //
@@ -632,10 +671,39 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
       header.appendChild(dirSpan);
     }
 
+    // Step U.3 (CONTRACT-U.3.md §3): today's value/state, from the entry
+    // already loaded for `day` — st.getEntry() is a synchronous cache read,
+    // issues no request. Trackable/entry shape are already validated by
+    // todayLineText() itself; nothing extra to guard here.
+    const todayP = document.createElement('p');
+    todayP.className = 'detail-today';
+    todayP.textContent = todayLineText(trackable, st.getEntry(trackable.id, day));
+    header.appendChild(todayP);
+
+    // Step U.3 (CONTRACT-U.3.md §3): the visible glyph carries the action;
+    // "Edit" stays the accessible name/textContent via the visually-hidden
+    // span (same pattern as home.js's .trow-log), and the aria-label names
+    // the trackable so two Edit buttons on screen (never actually true on
+    // this single-trackable screen, but consistent with home.js's rows)
+    // never read identically to a screen reader.
     const editLink = document.createElement('a');
     editLink.className = 'detail-edit';
     editLink.href = `#/t/${encodeURIComponent(String(trackable.id))}/edit`;
-    editLink.textContent = 'Edit';
+    editLink.setAttribute(
+      'aria-label',
+      `Edit ${typeof trackable.name === 'string' ? trackable.name : ''}`.trim()
+    );
+    const editIcon = document.createElement('span');
+    editIcon.className = 'detail-edit__icon';
+    editIcon.setAttribute('aria-hidden', 'true');
+    // Own constant SVG markup only (js/ui-icons.js) — same rule as
+    // iconSpan's innerHTML above.
+    editIcon.innerHTML = uiIconSvg('edit');
+    editLink.appendChild(editIcon);
+    const editText = document.createElement('span');
+    editText.className = 'visually-hidden';
+    editText.textContent = 'Edit';
+    editLink.appendChild(editText);
     header.appendChild(editLink);
 
     section.appendChild(header);
@@ -674,6 +742,12 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
     countP.textContent = n === 1 ? '1 entry in range' : `${n} entries in range`;
 
     const slots = visibleSlots(trackable, otherTrackableCount);
+    // Step U.3 (CONTRACT-U.3.md §0.3/§3): the overlay slot's <section> is
+    // appended INSIDE the bounds slot's <section> (after the bounds root),
+    // not as its sibling — visibleSlots() guarantees 'overlay' never
+    // appears without 'bounds' immediately before it, so this is always set
+    // by the time the 'overlay' branch below needs it.
+    let boundsSlotEl = null;
     for (const slot of slots) {
       if (slot === 'weekly') {
         // See the comment above rangesDiv's construction: this is where
@@ -687,10 +761,35 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
       slotSection.className = 'chart-slot';
       slotSection.dataset.slot = slot;
 
+      // Step U.3 (CONTRACT-U.3.md §3): the title now sits in a head row
+      // alongside an Expand control — real buttons with stable selectors,
+      // rendered `hidden` until U.4 wires the fullscreen routes.
+      const slotHead = document.createElement('div');
+      slotHead.className = 'chart-slot-head';
       const h3 = document.createElement('h3');
       h3.className = 'chart-slot-title';
       h3.textContent = SLOT_TITLES[slot] || '';
-      slotSection.appendChild(h3);
+      slotHead.appendChild(h3);
+
+      if (slot === 'weekly' || slot === 'bounds') {
+        const expandKind = slot === 'weekly' ? 'trend' : 'range';
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'chart-expand';
+        expandBtn.dataset.expand = expandKind;
+        expandBtn.hidden = true;
+        expandBtn.setAttribute('aria-label', `Expand ${SLOT_TITLES[slot]}`);
+        // Own constant SVG markup only (js/ui-icons.js) — same rule as
+        // iconSpan's innerHTML above.
+        expandBtn.innerHTML = uiIconSvg('expand');
+        const expandText = document.createElement('span');
+        expandText.className = 'visually-hidden';
+        expandText.textContent = 'Expand';
+        expandBtn.appendChild(expandText);
+        slotHead.appendChild(expandBtn);
+      }
+
+      slotSection.appendChild(slotHead);
 
       if (chartsPending) {
         // Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): before the first
@@ -786,7 +885,15 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
         );
       }
 
-      section.appendChild(slotSection);
+      // Step U.3 (CONTRACT-U.3.md §0.3): the overlay slot nests inside the
+      // bounds slot (after the bounds root) instead of landing as its
+      // sibling in `section` — every other slot keeps its previous parent.
+      if (slot === 'overlay' && boundsSlotEl) {
+        boundsSlotEl.appendChild(slotSection);
+      } else {
+        section.appendChild(slotSection);
+        if (slot === 'bounds') boundsSlotEl = slotSection;
+      }
     }
 
     // Offline banner: present iff the most recent trackables, entries or

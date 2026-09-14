@@ -791,3 +791,63 @@ test('B15b — a break boolean\'s unlogged day cell (clean) is visible; a build 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// HU-1 — Step U.3 (CONTRACT-U.3.md §4/§6): the calendar's logged-day fill is
+// now a disc, not a full square — `.hm-fill` gets `inset: 3px; border-radius:
+// 50%`, so its box must sit strictly inside the cell's box on every side,
+// and its border-radius must resolve to (approximately) half its own width.
+// The implementation is being written in parallel from the same contract
+// and is not visible here.
+// ===========================================================================
+
+test('HU-1 — a logged day\'s .hm-fill is a disc: border-radius resolves to ~50% of its width, and its box sits strictly inside the cell\'s box on all four sides', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM]);
+  await routeEntries(page, {
+    getFixture: [{ id: 909, trackable_id: 366, entry_date: PAST_DATE, value: 1850, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  const cell = page.locator(`.hm-cell[data-date="${PAST_DATE}"]`);
+  await expect(cell).toHaveAttribute('data-logged', 'true');
+
+  const fill = cell.locator('.hm-fill');
+  const info = await fill.evaluate((fillEl) => {
+    const cellEl = fillEl.closest('.hm-cell');
+    const fr = fillEl.getBoundingClientRect();
+    const cr = cellEl.getBoundingClientRect();
+    return {
+      fill: { left: fr.left, top: fr.top, right: fr.right, bottom: fr.bottom, width: fr.width, height: fr.height },
+      cell: { left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom, width: cr.width, height: cr.height },
+      borderRadius: getComputedStyle(fillEl).borderRadius,
+    };
+  });
+
+  // Computed border-radius may come back as a literal '50%' (Chromium keeps
+  // percentage radii symbolic for getComputedStyle in some cases) or as a
+  // resolved px value — either is acceptable, so long as a px value is
+  // (within 1px of) half the fill's own rendered width.
+  const radiusText = info.borderRadius.trim();
+  const firstToken = radiusText.split(/\s+/)[0];
+  if (firstToken !== '50%') {
+    const px = parseFloat(firstToken);
+    expect(Number.isNaN(px)).toBe(false);
+    expect(px).toBeGreaterThanOrEqual(info.fill.width / 2 - 1);
+    expect(px).toBeLessThanOrEqual(info.fill.width / 2 + 1);
+  }
+
+  // Strictly inside on every side (inset > 0), not flush with any edge.
+  expect(info.fill.left).toBeGreaterThan(info.cell.left);
+  expect(info.fill.top).toBeGreaterThan(info.cell.top);
+  expect(info.fill.right).toBeLessThan(info.cell.right);
+  expect(info.fill.bottom).toBeLessThan(info.cell.bottom);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

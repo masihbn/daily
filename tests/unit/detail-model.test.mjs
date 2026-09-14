@@ -24,6 +24,7 @@ import {
   historyFrom,
   calendarFrom,
   CALENDAR_FLOOR_DAYS,
+  todayLineText,
 } from '../../js/views/detail.js';
 import { addDays, rangeDays } from '../../js/dates.js';
 
@@ -455,6 +456,78 @@ describe('calendarFrom(entries, today) — Step D.6b follow-up (contract §2.1/�
         result = calendarFrom(input, TODAY);
       });
       assert.notEqual(result, null, `calendarFrom must never return null for ${JSON.stringify(input)}`);
+    }
+  });
+});
+
+// ===========================================================================
+// todayLineText(trackable, entry) — Step U.3 (CONTRACT-U.3.md §3, cases
+// TL1-TL6). The hero's new `.detail-today` line: numeric + an entry with a
+// finite value formats via home-model.js's own formatValue() (so unit
+// handling/rounding stay a single implementation, not duplicated here);
+// boolean reads "Logged today" iff entry.value !== 0; every other case
+// (including a null/invalid trackable, which returns '' rather than
+// 'Not logged today') falls back per the contract's exact wording. Never
+// throws, per the contract's own declared signature.
+// ===========================================================================
+
+describe('todayLineText(trackable, entry) — worked examples (contract §3, TL1-TL6)', () => {
+  it('TL1: numeric with a unit — "Today: 80.2 kg"', () => {
+    const trackable = { value_shape: 'numeric', unit: 'kg' };
+    assert.equal(todayLineText(trackable, { value: 80.2 }), 'Today: 80.2 kg');
+  });
+
+  it('TL2: numeric with no unit — "Today: 5"', () => {
+    const trackable = { value_shape: 'numeric' };
+    assert.equal(todayLineText(trackable, { value: 5 }), 'Today: 5');
+  });
+
+  it('TL3: numeric with no entry — "Not logged today"', () => {
+    const trackable = { value_shape: 'numeric', unit: 'kg' };
+    assert.equal(todayLineText(trackable, null), 'Not logged today');
+    assert.equal(todayLineText(trackable, undefined), 'Not logged today');
+  });
+
+  it('TL4: boolean, value 1 — "Logged today"', () => {
+    const trackable = { value_shape: 'boolean' };
+    assert.equal(todayLineText(trackable, { value: 1 }), 'Logged today');
+  });
+
+  it('TL5: boolean, value 0 or no entry — "Not logged today"', () => {
+    const trackable = { value_shape: 'boolean' };
+    assert.equal(todayLineText(trackable, { value: 0 }), 'Not logged today');
+    assert.equal(todayLineText(trackable, null), 'Not logged today');
+    assert.equal(todayLineText(trackable, undefined), 'Not logged today');
+  });
+
+  it('TL6: a null/invalid trackable returns \'\', never \'Not logged today\'', () => {
+    assert.equal(todayLineText(null, { value: 1 }), '');
+    assert.equal(todayLineText(undefined, { value: 1 }), '');
+    assert.equal(todayLineText('nope', { value: 1 }), '');
+    assert.equal(todayLineText(42, { value: 1 }), '');
+  });
+
+  it('TL6: numeric with a non-finite entry value falls to "Not logged today", not a formatted line', () => {
+    const trackable = { value_shape: 'numeric', unit: 'kg' };
+    assert.equal(todayLineText(trackable, { value: NaN }), 'Not logged today');
+    assert.equal(todayLineText(trackable, { value: Infinity }), 'Not logged today');
+    assert.equal(todayLineText(trackable, { value: '80' }), 'Not logged today');
+  });
+});
+
+describe('todayLineText — never throws over a hostile-input sweep (contract\'s own declared "never throws")', () => {
+  const hostileTrackables = [null, undefined, 0, '', [], {}, true, NaN, { value_shape: 'numeric' }, { value_shape: 'boolean' }];
+  const hostileEntries = [null, undefined, 0, '', [], {}, true, NaN, { value: undefined }, { value: NaN }, { value: {} }];
+
+  it('every (trackable, entry) pair in the hostile x hostile cross product never throws and returns a string', () => {
+    for (const t of hostileTrackables) {
+      for (const e of hostileEntries) {
+        let result;
+        assert.doesNotThrow(() => {
+          result = todayLineText(t, e);
+        }, `todayLineText(${JSON.stringify(t)}, ${JSON.stringify(e)}) threw`);
+        assert.equal(typeof result, 'string');
+      }
     }
   });
 });

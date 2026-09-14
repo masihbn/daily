@@ -59,7 +59,7 @@ full-screen sideways-scrolling charts; no data-flow changes.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4627 tests as of Step U.2** (4348 unit, 54 integration, 225 e2e). See
+**4661 tests as of Step U.3** (4376 unit, 54 integration, 231 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -182,7 +182,10 @@ js/views/            home.js (+ home-model.js), trackable.js (create/
                       archived, export, app lock, sign out), signin.js
                       (email + password, Show/Hide), lock.js (5.2: the lock
                       screen with "Sign out instead" as the escape hatch).
-js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
+js/charts/           theme.js (U.3: Chart.js option fragments read from
+                      the CSS tokens — axes, tooltip, labels, gradient
+                      line fill; injectable reader, unit-tested);
+                      heatmap.js, weekly.js, bounds.js — pure chart
                       builders over Chart.js; overlay.js (3.4–3.4c) —
                       one other trackable on the bounds chart's right
                       axis: bars vs its target (count/sum) or a dashed

@@ -942,8 +942,14 @@ test('D17 — the range control sits between the calendar and the trend chart: s
     'p.detail-count',
     'section.chart-slot[data-slot="weekly"]',
     'section.chart-slot[data-slot="bounds"]',
-    'section.chart-slot[data-slot="overlay"]',
   ]);
+  // Step U.3 (CONTRACT-U.3.md §0.3): the overlay slot is no longer a
+  // sibling of the bounds slot — it is nested INSIDE it (the Range card's
+  // footer) — so it no longer appears in section.detail's own direct
+  // children above; this proves it still exists, and exactly where.
+  await expect(
+    page.locator('section.chart-slot[data-slot="bounds"] > section.chart-slot[data-slot="overlay"]')
+  ).toHaveCount(1);
 
   // The control still works from its new place: clicking it is a pure
   // local filter (same load-once guard as D6/D7) — data-range updates and
@@ -992,8 +998,13 @@ test('D18 — the same order holds while the charts are still loading', async ({
     'p.detail-count',
     'section.chart-slot[data-slot="weekly"]',
     'section.chart-slot[data-slot="bounds"]',
-    'section.chart-slot[data-slot="overlay"]',
   ]);
+  // Step U.3 (CONTRACT-U.3.md §0.3): same reasoning as D17 above — the
+  // overlay slot is nested inside the bounds slot, not a sibling, even
+  // while every slot is still showing its loading placeholder.
+  await expect(
+    page.locator('section.chart-slot[data-slot="bounds"] > section.chart-slot[data-slot="overlay"]')
+  ).toHaveCount(1);
 
   // Let the delayed response resolve and confirm the placeholders clear —
   // proves the assertion above really was taken mid-load, not after.
@@ -1060,6 +1071,175 @@ test('D-T3 — #/t/366/edit: #title reads "Edit Trackable" with #title-back link
   const back = page.locator('#title-back');
   await expect(back).toBeVisible();
   await expect(back).toHaveAttribute('href', '#/t/366');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// Step U.3 (CONTRACT-U.3.md §3/§6): the hero's new .detail-today line, the
+// icon-only Edit link, per-slot .chart-slot-head/.chart-expand markup, and
+// the overlay slot nested inside the bounds slot's section. The
+// implementation is being written in parallel from the same contract and is
+// not visible here.
+// ===========================================================================
+
+// ===========================================================================
+// DU-1 — .detail-today text and the icon-only Edit link
+// ===========================================================================
+
+test('DU-1 — .detail-today reads "Today: <value> <unit>" for a trackable logged today; .detail-edit has textContent "Edit", contains an svg, and is >=44x44', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, {
+    getFixture: [{ id: 950, trackable_id: 366, entry_date: TODAY, value: 550, note: null }],
+  });
+
+  await page.goto('/index.html#/t/366');
+
+  const section = page.locator('section.detail');
+  await expect(section).toHaveAttribute('data-detail-state', 'ready');
+
+  await expect(section.locator('.detail-today')).toHaveText('Today: 550 kcal');
+
+  const edit = section.locator('a.detail-edit');
+  await expect(edit).toHaveText('Edit');
+  await expect(edit.locator('svg')).toHaveCount(1);
+  const editBox = await edit.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { width: r.width, height: r.height };
+  });
+  expect(editBox.width).toBeGreaterThanOrEqual(44);
+  expect(editBox.height).toBeGreaterThanOrEqual(44);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('DU-1b — .detail-today reads "Not logged today" when there is no entry for today', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+
+  const section = page.locator('section.detail');
+  await expect(section).toHaveAttribute('data-detail-state', 'ready');
+  await expect(section.locator('.detail-today')).toHaveText('Not logged today');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// DU-2 — .chart-slot-head / .chart-expand per slot
+// ===========================================================================
+
+test('DU-2 — every .chart-slot has .chart-slot-head > .chart-slot-title; weekly/bounds carry a hidden .chart-expand with the right data-expand; heatmap does not', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.chart-slot')).toHaveCount(4);
+
+  for (const slot of ['heatmap', 'weekly', 'bounds', 'overlay']) {
+    const slotEl = page.locator(`.chart-slot[data-slot="${slot}"]`).first();
+    const head = slotEl.locator(':scope > .chart-slot-head');
+    await expect(head).toHaveCount(1);
+    await expect(head.locator(':scope > .chart-slot-title')).toHaveCount(1);
+  }
+
+  const heatmapExpand = page.locator('.chart-slot[data-slot="heatmap"] .chart-slot-head > .chart-expand');
+  await expect(heatmapExpand).toHaveCount(0);
+
+  const overlayExpand = page.locator('.chart-slot[data-slot="overlay"] > .chart-slot-head > .chart-expand');
+  await expect(overlayExpand).toHaveCount(0);
+
+  const weeklyExpand = page.locator('.chart-slot[data-slot="weekly"] > .chart-slot-head > .chart-expand');
+  await expect(weeklyExpand).toHaveCount(1);
+  await expect(weeklyExpand).toHaveAttribute('type', 'button');
+  await expect(weeklyExpand).toHaveAttribute('data-expand', 'trend');
+  await expect(weeklyExpand).toHaveAttribute('aria-label', 'Expand Weekly trend');
+  await expect(weeklyExpand).toBeHidden();
+
+  const boundsExpand = page.locator('.chart-slot[data-slot="bounds"] > .chart-slot-head > .chart-expand');
+  await expect(boundsExpand).toHaveCount(1);
+  await expect(boundsExpand).toHaveAttribute('type', 'button');
+  await expect(boundsExpand).toHaveAttribute('data-expand', 'range');
+  await expect(boundsExpand).toHaveAttribute('aria-label', 'Expand Range');
+  await expect(boundsExpand).toBeHidden();
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// DU-3 — the overlay slot nests INSIDE the bounds slot (§0.3)
+// ===========================================================================
+
+test('DU-3 — with all four slots present, .chart-slot count is still 4, the overlay slot is nested inside the bounds slot, and .overlay-picker is still reachable via that nested path', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  await expect(page.locator('.chart-slot')).toHaveCount(4);
+  await expect(page.locator('.chart-slot[data-slot="bounds"] .chart-slot[data-slot="overlay"]')).toHaveCount(1);
+  await expect(page.locator('.chart-slot[data-slot="overlay"] .overlay-picker')).toHaveCount(1);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// DU-4 — chart canvas wraps have their new fixed heights
+// ===========================================================================
+
+test('DU-4 — .weekly-canvas-wrap is >=200px tall and .bounds-canvas-wrap is >=240px tall', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  // T_NUM_BOUNDS is bounds_mode:'auto' with no entries, which resolves to
+  // boundsFor() status 'insufficient' (fewer than MIN_BOUND_READINGS
+  // readings — see js/charts/bounds.js) — the Range chart then shows its
+  // "not enough data" message instead of a canvas, so .bounds-canvas-wrap
+  // never exists at all. Switch this ONE test's trackable to manual bounds
+  // (same shape as tests/e2e/bounds.test.mjs's T_MANUAL: a manual mode with
+  // valid lower<=upper bounds always resolves 'ok' regardless of entries —
+  // see boundsFor()'s Rule 2) and give it real entries, so both charts
+  // actually render their canvases and this test measures a genuine box,
+  // not a message.
+  const manualBoundsTrackable = { ...T_NUM_BOUNDS, bounds_mode: 'manual', bound_lower: 300, bound_upper: 800 };
+  await routeTrackables(page, [manualBoundsTrackable, T_OTHER]);
+  await routeEntries(page, {
+    getFixture: [
+      { id: 1, trackable_id: 366, entry_date: PAST_DATE, value: 500, note: null },
+      { id: 2, trackable_id: 366, entry_date: TODAY, value: 600, note: null },
+    ],
+  });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('.chart-slot')).toHaveCount(4);
+
+  const weeklyBox = await page.locator('.weekly-canvas-wrap').evaluate((el) => el.getBoundingClientRect().height);
+  expect(weeklyBox).toBeGreaterThanOrEqual(200);
+
+  const boundsBox = await page.locator('.bounds-canvas-wrap').evaluate((el) => el.getBoundingClientRect().height);
+  expect(boundsBox).toBeGreaterThanOrEqual(240);
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);

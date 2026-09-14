@@ -41,6 +41,10 @@ import {
   overlayTargetAnnotation,
   overlayBoundAnnotations,
 } from './overlay.js';
+// Step U.3 (CONTRACT-U.3.md §2): shared colour/font/grid/tooltip/
+// annotation-label fragments, replacing this file's own (now-deleted)
+// private cssVar.
+import { cssVar, chartFont, xAxisTheme, yAxisTheme, tooltipTheme, annotationLabelTheme, lineSeriesTheme } from './theme.js';
 
 // --- §2.1 constants ------------------------------------------------------
 
@@ -627,28 +631,15 @@ export function segmentVisibility(values, maxBridge = MAX_BRIDGE_DAYS) {
   return visible;
 }
 
-// Reads a CSS custom property off :root at render time (light/dark both
-// work), with a hardcoded fallback — same as weekly.js#cssVar (duplicated
-// rather than imported: §2's import list is deriveBounds/rangeDays only,
-// and this function touches `document` anyway so it belongs in this half
-// of the file regardless).
-function cssVar(name, fallback) {
-  try {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 // See js/charts/weekly.js#annotationPluginAvailable for the full
 // verification story (chartjs-plugin-annotation self-registers off
 // window.Chart the moment its <script> tag runs — confirmed at
 // implementation time by actually executing both pinned CDN files, not
-// assumed from documentation). Duplicated locally rather than imported
-// for the same reason as cssVar() above. Still checked here despite that
-// self-registration: sw.js caches the two CDN scripts independently, so
-// window.Chart can exist while the annotation plugin failed to load.
+// assumed from documentation). Duplicated locally (this module touches
+// `document`/`window` in this half of the file regardless). Still checked
+// here despite that self-registration: sw.js caches the two CDN scripts
+// independently, so window.Chart can exist while the annotation plugin
+// failed to load.
 function annotationPluginAvailable() {
   try {
     return !!(
@@ -848,14 +839,17 @@ export function renderBounds(model) {
   const visibility = segmentVisibility(model.values, maxBridgeBucketsFor(activePeriod));
   const transparent = 'rgba(0, 0, 0, 0)';
 
+  // Step U.3 (CONTRACT-U.3.md §2): the line/point/fill look now comes from
+  // the shared theme fragment (including the gradient fill under the line);
+  // the per-zone point colours, spanGaps and the gap-bridging segment
+  // callback below still override it exactly as before. A daily lens uses a
+  // smaller point (2.5px, many points on screen at once); Weekly/Monthly use
+  // 4px, same as the trend chart's single-logged-period floor.
   const dataset = {
     data: model.values,
-    borderColor: lineColor,
+    ...lineSeriesTheme(lineColor, { pointRadius: activePeriod === 'day' ? 2.5 : 4 }),
     pointBackgroundColor: pointColors,
     pointBorderColor: pointColors,
-    pointRadius: 3,
-    borderWidth: 2,
-    tension: 0,
     spanGaps: true,
     segment: {
       borderColor: (ctx) => (visibility[ctx.p0DataIndex] ? lineColor : transparent),
@@ -874,13 +868,26 @@ export function renderBounds(model) {
 
   // Step 3.4b (CONTRACT-3.4b.md §2): legend stays `{ display: false }` with
   // no overlay (CONTRACT-3.4.md §0 rule 9's byte-for-byte requirement) and
-  // lists BOTH series once one is drawn — no `filter` this time (3.4's rug
-  // markers hid the metric line from the legend; 3.4b's bars are a real
-  // second series worth naming), and `usePointStyle: false` since a bar
-  // swatch, not a point marker, is what a bar dataset actually draws.
+  // lists BOTH series once one is drawn. Step U.3 (CONTRACT-U.3.md §2):
+  // the legend swatch is now a small rounded-rect point style, token-
+  // coloured, rather than the bar-shaped default.
   const plugins = {
-    legend: overlay !== null ? { display: true, labels: { usePointStyle: false } } : { display: false },
+    legend:
+      overlay !== null
+        ? {
+            display: true,
+            labels: {
+              color: cssVar('--fg-2', '#a1a1aa'),
+              boxWidth: 10,
+              boxHeight: 10,
+              usePointStyle: true,
+              pointStyle: 'rectRounded',
+              font: chartFont(),
+            },
+          }
+        : { display: false },
     tooltip: {
+      ...tooltipTheme(),
       callbacks: {
         // The tooltip title is the full 'YYYY-MM-DD' date, not the short
         // 'd MMM' axis label — same pattern as weekly.js's weekKeys title.
@@ -907,7 +914,12 @@ export function renderBounds(model) {
   // §3.1 — zone shading, the feature itself. Degrades to an unshaded line
   // chart (never throws) if the annotation plugin failed to load.
   if (annotationPluginAvailable()) {
-    const mutedColor = cssVar('--fg-muted', '#9a9a9a');
+    // Step U.3 (CONTRACT-U.3.md §2): the bound lines take the --fg-3 token
+    // (not the --fg-muted/--fg-2 alias the pre-U.3 build used) and a
+    // tighter dash; the zone box fills keep their existing tokens
+    // unchanged — this is a soft fill, not a hard boundary, so it stays as
+    // saturated as it already was.
+    const boundLineColor = cssVar('--fg-3', '#6e6e78');
     const belowBg = cssVar('--bad-bg', 'rgba(255, 107, 107, 0.18)');
     const inBg = cssVar('--good-bg', 'rgba(52, 199, 89, 0.18)');
     plugins.annotation = {
@@ -935,28 +947,26 @@ export function renderBounds(model) {
           type: 'line',
           yMin: model.bounds.lower,
           yMax: model.bounds.lower,
-          borderColor: mutedColor,
+          borderColor: boundLineColor,
           borderWidth: 1,
-          borderDash: [6, 4],
+          borderDash: [4, 4],
           label: {
-            display: true,
+            ...annotationLabelTheme(),
             content: String(model.bounds.lower),
             position: 'start',
-            backgroundColor: mutedColor,
           },
         },
         upperBound: {
           type: 'line',
           yMin: model.bounds.upper,
           yMax: model.bounds.upper,
-          borderColor: mutedColor,
+          borderColor: boundLineColor,
           borderWidth: 1,
-          borderDash: [6, 4],
+          borderDash: [4, 4],
           label: {
-            display: true,
+            ...annotationLabelTheme(),
             content: String(model.bounds.upper),
             position: 'start',
-            backgroundColor: mutedColor,
           },
         },
       },
@@ -988,8 +998,9 @@ export function renderBounds(model) {
   // comment for why.
   const axis = boundsAxisFor(model);
   const scales = {
-    x: { type: 'category' },
+    x: { type: 'category', ...xAxisTheme() },
     y: {
+      ...yAxisTheme(),
       suggestedMin: axis.suggestedMin,
       suggestedMax: axis.suggestedMax,
     },
@@ -1004,8 +1015,13 @@ export function renderBounds(model) {
   // overlay, keeping the zero-overlay scales config byte-for-byte its
   // pre-3.4 shape.
   if (overlay !== null) {
-    scales.y.title = { display: true, text: model.unit || '' };
+    // Step U.3 (CONTRACT-U.3.md §2): both axis titles are token-styled
+    // captions now, not Chart.js's default title look.
+    const axisTitleColor = cssVar('--fg-3', '#6e6e78');
+    const axisTitleFont = chartFont();
+    scales.y.title = { display: true, text: model.unit || '', color: axisTitleColor, font: axisTitleFont };
     const overlayAxis = overlayAxisFor(overlay);
+    const yOverlayTheme = yAxisTheme();
     // Step 3.4c (CONTRACT-3.4c.md §2): a 'bar' overlay is a count/amount —
     // `min: 0` and integer ticks still apply (3.4b, unchanged). A 'line'
     // overlay is a continuous reading (e.g. Weight in kg) — forcing it to
@@ -1013,24 +1029,29 @@ export function renderBounds(model) {
     // (the same weekly.js#axisBoundsFor reasoning cited in
     // overlay.js#overlayAxisFor), and fractional ticks are legitimate
     // (kg), so neither `min` nor `ticks.precision` is set for this kind.
+    // Step U.3 (CONTRACT-U.3.md §2): yOverlay also gets yAxisTheme(), with
+    // grid.drawOnChartArea: false kept so its ticks never draw a second
+    // grid over the metric's own.
     scales.yOverlay =
       overlay.kind === 'line'
         ? {
+            ...yOverlayTheme,
             type: 'linear',
             position: 'right',
             suggestedMin: overlayAxis.suggestedMin,
             suggestedMax: overlayAxis.suggestedMax,
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: overlayAxisTitle(overlay, model.period) },
+            grid: { ...yOverlayTheme.grid, drawOnChartArea: false },
+            title: { display: true, text: overlayAxisTitle(overlay, model.period), color: axisTitleColor, font: axisTitleFont },
           }
         : {
+            ...yOverlayTheme,
             type: 'linear',
             position: 'right',
             min: 0,
             suggestedMax: overlayAxis.suggestedMax,
-            grid: { drawOnChartArea: false },
-            ticks: { precision: 0 },
-            title: { display: true, text: overlayAxisTitle(overlay, model.period) },
+            grid: { ...yOverlayTheme.grid, drawOnChartArea: false },
+            ticks: { ...yOverlayTheme.ticks, precision: 0 },
+            title: { display: true, text: overlayAxisTitle(overlay, model.period), color: axisTitleColor, font: axisTitleFont },
           };
   }
 

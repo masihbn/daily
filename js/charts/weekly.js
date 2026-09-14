@@ -10,6 +10,10 @@
 // Allowed imports, and only these:
 import { rollup, fillSeries } from '../aggregate.js';
 import { isoWeeksInRange, isoWeekKey, monthsInRange, rangeDays } from '../dates.js';
+// Step U.3 (CONTRACT-U.3.md §2): every colour/font/grid/tooltip/annotation-
+// label look, plus the line/bar dataset fragments, now come from the shared
+// theme module rather than this file's own (now-deleted) private cssVar.
+import { cssVar, xAxisTheme, yAxisTheme, tooltipTheme, annotationLabelTheme, lineSeriesTheme, barSeriesTheme } from './theme.js';
 
 // §0(b): rollup(), fillSeries() and the ISO-week helpers in js/dates.js are
 // the SINGLE implementation of rollup/grouping math. This module imports
@@ -572,19 +576,6 @@ function modelMeaningText(model) {
   return meaningText(model.aggregation, model.period || 'week', model.unit);
 }
 
-// Reads a CSS custom property off :root at render time (so light/dark both
-// work — see css/styles.css's :root / prefers-color-scheme split), with a
-// hardcoded fallback in case getComputedStyle throws or the property is
-// unset (defensive; should not happen in this app's own stylesheet).
-function cssVar(name, fallback) {
-  try {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function colorForVerdict(verdict, identityColor) {
   if (verdict === 'good') return cssVar('--good', '#34c759');
   if (verdict === 'bad') return cssVar('--bad', '#ff6b6b');
@@ -715,6 +706,9 @@ export function renderWeekly(model) {
   const plugins = {
     legend: { display: false },
     tooltip: {
+      // Step U.3 (CONTRACT-U.3.md §2): token-styled tooltip card; the
+      // callbacks below are unchanged.
+      ...tooltipTheme(),
       callbacks: {
         // The axis only shows the short 'd MMM' label (weekLabel()) — the
         // tooltip title shows the full 'YYYY-Www' key instead.
@@ -730,22 +724,24 @@ export function renderWeekly(model) {
   // line itself stays one neutral colour, because a line whose segments
   // change colour is unreadable.
   const chartType = chartTypeFor(model.aggregation);
+  const lineColor = model.identityColor || cssVar('--accent', '#3478f6');
   const dataset = {
     data: model.values,
   };
   if (chartType === 'line') {
-    dataset.borderColor = model.identityColor || cssVar('--accent', '#3478f6');
+    // Step U.3 (CONTRACT-U.3.md §2): the line/point/fill look now comes
+    // from the shared theme fragment; the per-point verdict colour arrays
+    // and the no-bridge rule below still override its point colours/
+    // spanGaps exactly as before.
+    Object.assign(dataset, lineSeriesTheme(lineColor, { pointRadius: 4 }));
     dataset.pointBackgroundColor = backgroundColor;
     dataset.pointBorderColor = backgroundColor;
-    // A single logged period must not vanish into an invisible line.
-    dataset.pointRadius = 4;
-    dataset.borderWidth = 2;
     // A gap is a period with no data. Bridging it would draw a line
     // implying readings that were never taken.
     dataset.spanGaps = false;
-    dataset.tension = 0;
   } else {
     dataset.backgroundColor = backgroundColor;
+    Object.assign(dataset, barSeriesTheme());
   }
 
   if (model.target !== null && annotationPluginAvailable()) {
@@ -755,17 +751,16 @@ export function renderWeekly(model) {
           type: 'line',
           yMin: model.target.value,
           yMax: model.target.value,
-          borderColor: cssVar('--accent', '#3478f6'),
-          borderWidth: 2,
-          borderDash: [6, 4],
+          borderColor: cssVar('--fg-2', '#a1a1aa'),
+          borderWidth: 1.5,
+          borderDash: [4, 4],
           label: {
-            display: true,
+            ...annotationLabelTheme(),
             // The COMPUTED number, e.g. '12 / month' for a 3/week goal.
             // A silently rescaled target with no visible number is the same
             // class of quiet lie as plotting a sum against an average line.
             content: targetLabel(model.target, model.period || 'week'),
             position: 'end',
-            backgroundColor: cssVar('--accent', '#3478f6'),
           },
         },
       },
@@ -776,9 +771,10 @@ export function renderWeekly(model) {
   // the single source of the y-axis window — see its own comment for why
   // each of the three device defects traced back to this one gap.
   const bounds = axisBoundsFor(model);
+  const yTheme = yAxisTheme();
   const scales = {
-    x: { type: 'category' },
-    y: {},
+    x: { type: 'category', ...xAxisTheme() },
+    y: { ...yTheme },
   };
   if (bounds.beginAtZero) scales.y.beginAtZero = true;
   if (bounds.suggestedMin !== undefined) scales.y.suggestedMin = bounds.suggestedMin;
@@ -796,7 +792,7 @@ export function renderWeekly(model) {
     // absurd tick count on a wide axis if that default budget ever
     // changes upstream. See this step's implementer report for the exact
     // numbers measured.
-    scales.y.ticks = { precision: 0 };
+    scales.y.ticks = { ...yTheme.ticks, precision: 0 };
   }
 
   try {

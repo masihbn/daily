@@ -1417,70 +1417,146 @@ button {
   width: 100%;
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4, orchestrator fix 2026-09-14): the hero
+   header. NOT a card — page background, a hairline below instead of a
+   surface/shadow. A CSS Grid with FIVE columns, not the contract's literal
+   three ("56px 1fr auto"): `.detail-unit` and `.detail-direction` are
+   documented as sharing one "meta" grid-area, but two independent sibling
+   grid items placed in the exact same area do not flow side by side — each
+   stretches/aligns to the SAME start position and their text overlaps
+   (verified before choosing a different layout, not assumed). An earlier
+   revision of this rule gave unit/direction their own 1fr column each,
+   which visually pushed them apart across half the header's width — a
+   regression caught in screenshot review. The fix: `unit`/`dir` are two
+   adjacent `max-content` columns (each exactly as wide as its own text, no
+   wider), immediately followed by a flexible `1fr` spacer column that
+   absorbs the remaining width before the icon-button column — so the two
+   captions sit right next to each other (joined by
+   `.detail-direction::before`'s "·"), same flat/unchanged sibling markup,
+   no wrapper element added. `name`/`today` each span columns 2-4 so they
+   still read full-width. `icon`/`edit` span all three rows as one merged
+   area apiece. */
 .detail-head {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 56px max-content max-content 1fr auto;
+  grid-template-areas:
+    'icon name name name edit'
+    'icon unit dir . edit'
+    'icon today today today edit';
+  column-gap: var(--s2);
+  row-gap: 2px;
   align-items: center;
-  column-gap: var(--s3);
-  row-gap: 6px;
   margin: 0 0 var(--s4);
+  padding-bottom: var(--s4);
+  border-bottom: 1px solid var(--hairline);
 }
 
-/* Step 2.5: same tinted-icon treatment as .trow-icon, at a larger size
-   for the detail header. Tinted by the trackable's colour only — this
-   screen doesn't even compute a verdict, so there is nothing for it to
-   conflict with. No explicit `order` needed: this is appended first in
-   detail.js and detail-head's other children carry no order of their own,
-   so DOM order already puts it first. Not named in CONTRACT-U.0.md §4's
-   Detail bullet, so its geometry stays as-is; only its colour moves onto
-   a token (see the report). */
+/* Step 2.5, restyled U.3: a 56px round colour well (currentColor at 16%,
+   same recipe as home.js's .trow-icon) instead of a bare 40px glyph.
+   Tinted by the trackable's colour only — this screen doesn't even compute
+   a verdict, so there is nothing for it to conflict with. */
 .detail-icon {
-  flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  grid-area: icon;
+  align-self: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--fg-2);
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .detail-icon svg {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 .detail-name {
+  grid-area: name;
   margin: 0;
-  flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
   font: 700 28px/1.15 var(--font);
 }
 
-.detail-unit,
-.detail-direction {
-  flex: 0 0 auto;
+.detail-unit {
+  grid-area: unit;
+  justify-self: start;
+  min-width: 0;
   color: var(--fg-2);
   font: var(--t-cap);
   white-space: nowrap;
 }
 
-/* .detail-edit is an <a>; Step U.0 gives it the secondary/sm look. */
+.detail-direction {
+  grid-area: dir;
+  justify-self: start;
+  min-width: 0;
+  color: var(--fg-2);
+  font: var(--t-cap);
+  white-space: nowrap;
+}
+
+/* No unit: `.detail-direction` is then h2.detail-name's immediate next
+   sibling (a unit span, when present, always sits between them — see
+   js/views/detail.js) — this adjacent-sibling selector is a pure-CSS "is
+   there a unit" check with no JS/markup branching needed. It moves into
+   the `unit` column itself (spanning both middle columns) so a
+   unit-less caption still starts flush left instead of leaving an empty
+   gap where `.detail-unit` would have sat. */
+.detail-head > .detail-name + .detail-direction {
+  grid-column: 2 / span 2;
+}
+
+/* The "·" only appears when a unit is ALSO present (the general-sibling
+   combinator matches only when a preceding .detail-unit exists in the
+   same header) — when direction is the only caption on the line (the
+   rule above), it should read as the whole line, not as if something
+   were missing before it. */
+.detail-unit ~ .detail-direction::before {
+  content: '· ';
+}
+
+.detail-today {
+  grid-area: today;
+  margin: 0;
+  font: var(--t-sub);
+  color: var(--fg);
+}
+
+/* .detail-edit is an <a>; a round icon button (the kit's .btn--icon
+   secondary look) — the glyph carries the action, "Edit" moves to a
+   visually-hidden span (js/views/detail.js), same pattern as home.js's
+   .trow-log. */
 .detail-edit {
-  flex: 0 0 auto;
+  grid-area: edit;
+  align-self: start;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   min-height: 44px;
-  padding: 0 var(--s3);
-  border-radius: var(--r-ctl);
+  padding: 0;
+  border-radius: var(--r-pill);
   background: var(--surface-2);
   color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--hairline);
-  font: var(--t-cap);
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+}
+
+.detail-edit__icon {
+  display: flex;
+}
+
+.detail-edit svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* .detail-ranges is the segmented control's track (the buttons are its
@@ -1538,9 +1614,66 @@ button {
   box-shadow: var(--shadow);
 }
 
-.chart-slot-title {
+/* Step U.3 (CONTRACT-U.3.md §4): the title now sits in a head row with an
+   Expand control on the right (hidden until U.4 wires the fullscreen
+   routes — a real 44px icon button already, so unhiding it later is a
+   one-line change). */
+.chart-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
   margin: 0 0 var(--s3);
+}
+
+.chart-slot-title {
+  margin: 0;
   font: var(--t-head);
+}
+
+.chart-expand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  color: var(--fg-2);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chart-expand svg {
+  width: 20px;
+  height: 20px;
+}
+
+.chart-expand[hidden] {
+  display: none;
+}
+
+/* Step U.3 (CONTRACT-U.3.md §0.3/§4): the overlay slot nests INSIDE the
+   bounds slot now (js/views/detail.js) — it drops the card look (it is a
+   footer of the Range card, not a card of its own) and its title becomes a
+   small caption instead of a card title. */
+.chart-slot .chart-slot[data-slot='overlay'] {
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  margin: var(--s3) 0 0;
+  padding: var(--s3) 0 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.chart-slot[data-slot='overlay'] .chart-slot-title {
+  font: var(--t-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
 }
 
 .chart-slot-placeholder {
@@ -1670,14 +1803,18 @@ button {
   gap: 4px;
 }
 
+/* Step U.3 (CONTRACT-U.3.md §0.5/§4): the tile background is gone — every
+   cell (logged or not) is transparent now, so the grid reads as airy dots
+   on the page background rather than a solid block of tiles; the logged-day
+   disc (.hm-fill below) is the only fill a cell ever shows. */
 .hm-cell {
   position: relative;
   aspect-ratio: 1;
   min-height: 40px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0;
-  background: var(--surface-2);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1689,17 +1826,20 @@ button.hm-cell {
   cursor: pointer;
 }
 
+/* Step U.3 (CONTRACT-U.3.md §0.5/§4): a logged day is now an inset disc,
+   not a full-square flood — `background`/`opacity` are untouched (the
+   heatmap e2e suite asserts their computed values). */
 .hm-fill {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
+  inset: 3px;
+  border-radius: 50%;
   background: var(--hm-fill-color);
   opacity: var(--hm-alpha, 0);
 }
 
 .hm-day {
   position: relative; /* above the fill */
-  font-size: 12px;
+  font: 600 13px/1 var(--font);
   color: var(--fg);
 }
 
@@ -1844,16 +1984,19 @@ button.hm-cell {
   width: 100%;
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4): a tertiary caption under the segmented
+   control, not a secondary-weight line. */
 .weekly-meaning {
   margin: 0 0 10px;
   font: var(--t-cap);
-  color: var(--fg-2);
+  color: var(--fg-3);
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4): 220px, up from 200px. */
 .weekly-canvas-wrap {
   position: relative;
   width: 100%;
-  height: 200px;
+  height: 220px;
 }
 
 .weekly-canvas {
@@ -1920,26 +2063,39 @@ button.hm-cell {
   width: 100%;
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4): a pill, not a plain line of coloured text —
+   `data-zone` picks the tint (in = good, below/above = bad, else neutral);
+   the word itself stays the non-colour cue either way (WCAG 1.4.1). */
 .bounds-summary {
+  display: inline-flex;
+  align-items: center;
   margin: 0 0 10px;
+  height: 24px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
   font: var(--t-cap);
+  font-size: 12px;
   font-weight: 600;
+  background: var(--surface-2);
   color: var(--fg-2);
 }
 
 .bounds-summary[data-zone="in"] {
+  background: var(--good-bg);
   color: var(--good);
 }
 
 .bounds-summary[data-zone="below"],
 .bounds-summary[data-zone="above"] {
+  background: var(--bad-bg);
   color: var(--bad);
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4): 260px, up from 200px. */
 .bounds-canvas-wrap {
   position: relative;
   width: 100%;
-  height: 200px;
+  height: 260px;
 }
 
 .bounds-canvas {
@@ -1958,10 +2114,12 @@ button.hm-cell {
    classes), so the two controls cannot drift apart visually. Only the
    meaning line below is new. */
 
+/* Step U.3 (CONTRACT-U.3.md §4): same tertiary-caption treatment as
+   .weekly-meaning above. */
 .bounds-meaning {
   margin: 0 0 8px;
   font-size: 12px;
-  color: var(--fg-2);
+  color: var(--fg-3);
 }
 
 /* Correlation overlay picker (Step 3.4) -----------------------------------
@@ -1982,10 +2140,24 @@ button.hm-cell {
   color: var(--fg-2);
 }
 
+/* Step U.3 (CONTRACT-U.3.md §4): a single horizontally-scrolling row now
+   that the picker lives in the Range card's footer — wrapping to a second
+   line there would push the chart down every time a new trackable is
+   added. Hidden scrollbar (both the standard and WebKit properties) since
+   the row itself is the obvious affordance; a visible track would just be
+   noise under a chart. */
 .overlay-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.overlay-chips::-webkit-scrollbar {
+  display: none;
 }
 
 /* Fix cycle (2026-09-14): 44pt floor wins (docs/DESIGN_PLAN.md §1) — same

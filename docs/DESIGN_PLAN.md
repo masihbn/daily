@@ -388,7 +388,9 @@ second big ring.
 
 ## Step U.3 — Detail screen and chart styling
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pinged.
+Contract `CONTRACT-U.3.md`. Two test-side corrections (below), one
+contract retreat (overlay.js). `sw.js` `CACHE` → `daily-v48`.
 
 **Goal.** The detail screen has a hero header, calm calendar, one
 consistent segmented control per card, and charts that look designed.
@@ -435,7 +437,43 @@ overlay.test.mjs` updated only where the contract moves an element.
   <title>") in each chart card head (Weekly trend, Range). In U.3 it
   navigates to the U.4 route; until U.4 lands it is rendered `hidden`.
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4661 green** — 4376 unit (+28), 54 integration,
+231 e2e (+6). New: `js/charts/theme.js` (`cssVar`, `chartFont`,
+`xAxisTheme`, `yAxisTheme`, `tooltipTheme`, `annotationLabelTheme`,
+`lineSeriesTheme`, `barSeriesTheme`, `withAlpha`; injectable reader),
+`tests/unit/chart-theme.test.mjs`; changed: `js/charts/weekly.js` and
+`bounds.js` (options only — every model builder untouched),
+`js/views/detail.js` (`todayLineText` export, `.detail-today`, icon
+Edit, `.chart-slot-head` with hidden `.chart-expand` buttons, overlay
+slot nested inside the bounds slot), `css/styles.css`, `sw.js`.
+
+*Unit:* theme fragments TH1–TH8 (incl. the gradient scriptable against a
+fake canvas context); `todayLineText` TL1–TL6.
+*E2E:* DU-1 hero today line + icon Edit; DU-2 slot heads and hidden
+expand buttons; DU-3 slot count still 4 with the overlay slot nested
+under bounds; DU-4 canvas heights; HU-1 the calendar fill is a disc
+strictly inside its cell.
+
+*Decisions and corrections at execution time:*
+- **overlay.js not themed.** The contract asked `overlayDatasets` and
+  the overlay annotations to adopt the theme fragments, but those pure
+  functions are pinned by exact-shape unit tests from 3.4b/3.4c. The
+  Implementer stopped and reported instead of breaking them; ruling: the
+  contract retreats, overlay bars/lines keep their current look
+  (colours already come from tokens). Revisit in U.7 only if it is
+  worth re-pinning those tests.
+- **D17/D18 updated** (pre-existing tests listing `section.detail`'s
+  direct children): the overlay slot is no longer a direct child, by
+  contract; the two tests now assert it is nested under the bounds
+  slot instead. A contract change, not a weakened test.
+- **DU-4 fixture fixed** by its author (an auto-bounds trackable with
+  no readings never draws a Range canvas).
+- **No today ring** on the calendar: the heatmap model has no today
+  flag and the contract forbade adding one. Candidate for U.7.
+- Hero grid is five columns (`56px max-content max-content 1fr auto`)
+  so unit and direction sit adjacent.
 
 ---
 
@@ -458,8 +496,10 @@ nav hidden on the fullscreen route), `js/views/fullscreen.js` (new),
 
 **Implementation notes.**
 - Routes: `#/t/:id/chart/:kind` with `kind ∈ {trend, range}` →
-  `{ name: 'chart', params: { id, kind } }`; `#/compare/chart` →
-  `{ name: 'compare-chart', params: {} }`. Any other `kind` → notfound.
+  `{ name: 'chart', params: { id, kind } }`. Any other `kind` → notfound.
+  (`#/compare/chart` moves to U.5 with the rest of the Compare work,
+  decided at U.4 contract time: it needs `compare.js`, which U.5
+  restyles.)
   Because it is a real hash route, the iOS back gesture and the browser
   Back button close it, and a relaunch lands back on it harmlessly.
 - Orientation. iOS Safari (incl. standalone PWAs) does not implement
@@ -652,3 +692,7 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.2 executed.** Home card grid, icon-only Log
   button (text kept for tests), verdict badge on the icon well, date
   subtitle. Suite 4627 green.
+- **2026-09-14** — **U.3 executed.** Chart theme module, themed
+  weekly/range charts, hero header, disc calendar, overlay picker moved
+  into the Range card, expand buttons in place (hidden until U.4).
+  overlay.js theming dropped (pinned tests). Suite 4661 green.
