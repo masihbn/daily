@@ -1285,3 +1285,32 @@ test.describe('CU-7 — landscape viewport', () => {
     await assertCanvasFillsStage(page);
   });
 });
+
+// ===========================================================================
+// CONTRACT-U.7.md §2/§6 — the .empty component wraps Compare's none state
+// (the "0 selected" empty message, glyph 'compare'). Existing text is
+// unchanged. The implementation is being written in parallel from the same
+// contract and is not visible here.
+// ===========================================================================
+
+test('U7-3 — with zero selected, p.compare-empty.empty contains .empty__glyph svg and the existing text', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+
+  const empty = page.locator('p.compare-empty.empty');
+  await expect(empty).toHaveCount(1);
+  await expect(empty.locator('.empty__glyph svg')).toHaveCount(1);
+  await expect(empty).toHaveText('Pick two or more trackables above to compare them.');
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

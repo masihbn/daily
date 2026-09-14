@@ -315,6 +315,30 @@ export function createCompareView({ store, today } = {}) {
       const { from, to } = resolveRange(range, day);
       const model = compareModel({ trackables: selectedTrackables, entriesById, from, to, period });
       section.appendChild(renderCompare(model));
+
+      // Step U.7 (CONTRACT-U.7.md §0 follow-up 5, §2): js/charts/compare.js
+      // itself is out of scope for this step (its DOM builders are pinned by
+      // exact-shape unit tests — see js/charts/overlay.js's own U.3 retreat
+      // for the same reasoning), so the shared `.empty` component is applied
+      // here, as a post-render decoration of whichever `.compare-empty`
+      // paragraph renderCompare() just produced (the 'none'/'pick two or
+      // more' case and the 'empty'/'no entries' case both use that class) —
+      // its existing class and text are kept, only wrapped.
+      const emptyP = section.querySelector('.compare-empty');
+      if (emptyP && !emptyP.classList.contains('empty')) {
+        const text = emptyP.textContent;
+        emptyP.textContent = '';
+        emptyP.classList.add('empty');
+        const glyph = document.createElement('span');
+        glyph.className = 'empty__glyph';
+        glyph.setAttribute('aria-hidden', 'true');
+        glyph.innerHTML = uiIconSvg('compare');
+        emptyP.appendChild(glyph);
+        const textSpan = document.createElement('span');
+        textSpan.className = 'empty__text';
+        textSpan.textContent = text;
+        emptyP.appendChild(textSpan);
+      }
     }
 
     // --- offline banner ---------------------------------------------------

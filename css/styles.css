@@ -7,9 +7,11 @@
    at render time — a var() reference would still resolve for chart code,
    but the literal is what the contract pins so the two can never drift
    apart from what a human reviewing this file sees.
-   --bg-elevated, --fg-muted, --border, --danger are legacy names kept as
-   aliases of the new tokens for this step only (docs/DESIGN_PLAN.md §0
-   decision 3) — they are removed in U.7 once nothing references them. */
+   The legacy alias tokens (--bg-elevated, --fg-muted, --border, --danger)
+   kept since U.0 for a transition period (docs/DESIGN_PLAN.md §0 decision
+   3) are gone as of U.7 — nothing referenced them any more (verified with
+   a grep across css/** and js/charts/** before removal), so they were
+   deleted rather than carried forward. */
 :root {
   /* surfaces */
   --bg: #0b0b0e;
@@ -34,11 +36,6 @@
   --warn: #ffb340;
   --focus: rgba(245, 245, 247, 0.45);
   --shadow: none;
-  /* legacy aliases (removed in U.7) */
-  --bg-elevated: var(--surface);
-  --fg-muted: var(--fg-2);
-  --border: var(--hairline);
-  --danger: var(--bad);
   /* type */
   --font: -apple-system, system-ui, "SF Pro Text", "Segoe UI", sans-serif;
   /* Step U.4b (CONTRACT-U.4b.md §1): one step down — device feedback said
@@ -125,22 +122,13 @@ body {
   min-height: 100%;
 }
 
-header {
-  padding: var(--s4);
-  padding-top: calc(var(--s4) + env(safe-area-inset-top, 0px));
-  padding-left: calc(var(--s4) + env(safe-area-inset-left, 0px));
-  padding-right: calc(var(--s4) + env(safe-area-inset-right, 0px));
-  background: var(--surface);
-  border-bottom: 1px solid var(--hairline);
-}
-
 /* Step U.1 (CONTRACT-U.1 §4): the per-route title bar (docs/DESIGN_PLAN.md
    Step U.1). Sticky, not fixed — #app is the page's only scrolling region,
    so this stays reachable at the top of a long screen without a second
-   fixed layer to account for in #app's padding. Every property here wins
-   over the plain `header {}` rule above on specificity (class beats
-   element), so that rule is now inert for #title-bar; left alone rather
-   than deleted, since dead-CSS removal is Step U.7's job, not this one's. */
+   fixed layer to account for in #app's padding. This used to sit alongside
+   a bare `header {}` element rule that `#title-bar` (a `<header>`) always
+   beat on specificity anyway — Step U.7's dead-CSS pass removed that now-
+   inert rule (docs/DESIGN_PLAN.md §0 follow-up 4). */
 .title-bar {
   position: sticky;
   top: 0;
@@ -412,7 +400,32 @@ button {
   .bounds-period,
   .settings-move,
   .home-new {
-    transition: transform 120ms ease, opacity 120ms ease, background-color 160ms ease;
+    /* Step U.7 (CONTRACT-U.7.md §1): `color 160ms` added alongside the
+       existing `background-color 160ms` — the segmented-item family
+       (.seg__item/.detail-range/.trend-period/.bounds-period) recolours its
+       text on selection and that recolour was jumping instantly. */
+    transition: transform 120ms ease, opacity 120ms ease, background-color 160ms ease, color 160ms ease;
+  }
+
+  /* Step U.7 (CONTRACT-U.7.md §0 follow-up 1, §1): Home's cards fade in,
+     staggered by list position. `--i` is set by js/views/home.js's
+     buildRow() (0-based, capped at 12); `both` holds the 0-opacity state
+     before the delayed start so a later card doesn't flash at full opacity
+     before its turn. Opacity ONLY, same reasoning as `view-in` above. Scoped
+     to `data-home-state="ready"` so the loading/empty/error states (which
+     never render a `.trow` anyway) can't replay it. */
+  section.home[data-home-state="ready"] .trow {
+    animation: card-in 240ms ease-out both;
+    animation-delay: calc(var(--i, 0) * 30ms);
+  }
+
+  @keyframes card-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   /* .btn already has its own :active (transform + opacity) above; the rest
@@ -433,18 +446,37 @@ button {
     transform: scale(0.97);
   }
 
+  /* Step U.7 (CONTRACT-U.7.md §1): the calendar day's own press feedback —
+     the disc (.hm-fill) shrinks slightly, distinct from .hm-cell's own
+     scale(0.97) above (that one is barely visible against a 40px tile;
+     shrinking the inset disc reads more clearly as "this dot was pressed"). */
+  .hm-fill {
+    transition: transform 120ms ease;
+  }
+
+  .hm-cell:active .hm-fill {
+    transform: scale(0.9);
+  }
+
   /* Shared shimmer look: a class of its own (.skeleton, unused by markup
      yet — CONTRACT-U.4b.md §4 reserves it for U.7) plus the two existing
      loading placeholders, composed onto the same declarations rather than
      duplicated. The "Loading…" text nodes stay in the DOM for the tests;
-     `color: transparent` just hides them visually. */
+     `color: transparent` just hides them visually.
+     Step U.7 light-mode fix (CONTRACT-U.7.md §3): a `--surface-2` fill read
+     as almost invisible against `--bg`/`--surface` in light mode (verified
+     with a manual loading-state screenshot — the two are within a few
+     percent of each other). `--surface-3` (a fuller step darker than the
+     surrounding surfaces in light mode, lighter in dark mode — either way
+     more distinct) plus a `--hairline` edge fixes it in both schemes. */
   .skeleton,
   .chart-slot-loading,
   .compare-loading {
     position: relative;
     overflow: hidden;
     color: transparent !important;
-    background: var(--surface-2);
+    background: var(--surface-3);
+    box-shadow: inset 0 0 0 1px var(--hairline);
     border-radius: var(--r-ctl);
     min-height: 140px;
   }
@@ -456,7 +488,7 @@ button {
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, var(--surface-3), transparent);
+    background: linear-gradient(90deg, transparent, var(--surface-2), transparent);
     animation: shimmer 1.2s linear infinite;
   }
 
@@ -470,12 +502,16 @@ button {
      an EMPTY section — no row skeletons, no text node) gets its own
      shimmer: a fixed height plus three rounded bands drawn by a repeating
      gradient, with the same moving highlight sweeping over them. */
+  /* Step U.7 light-mode fix (CONTRACT-U.7.md §3): same --surface-2-on-
+     --bg invisibility as the shared shimmer above — this one sits directly
+     on the page background (it has no card of its own), so it needed the
+     same --surface-3 fill. */
   section.home[data-home-state="loading"] {
     position: relative;
     overflow: hidden;
     min-height: 260px;
     border-radius: var(--r-card);
-    background: repeating-linear-gradient(180deg, var(--surface-2) 0 96px, transparent 96px 108px);
+    background: repeating-linear-gradient(180deg, var(--surface-3) 0 96px, transparent 96px 108px);
   }
 
   section.home[data-home-state="loading"]::after {
@@ -483,7 +519,7 @@ button {
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, var(--surface-3), transparent);
+    background: linear-gradient(90deg, transparent, var(--surface-2), transparent);
     animation: shimmer 1.2s linear infinite;
   }
 }
@@ -539,16 +575,6 @@ button {
   color: var(--bad);
 }
 
-/* Fix cycle (2026-09-14): docs/DESIGN_PLAN.md §1's 44pt tap-target floor
-   wins over the smaller "sm" metric the contract's kit table originally
-   gave this variant — the padding/font still read as "small", only the
-   tap height does not shrink. */
-.btn--sm {
-  min-height: 44px;
-  padding: 0 var(--s3);
-  font: var(--t-cap);
-}
-
 .btn--icon {
   display: inline-flex;
   align-items: center;
@@ -558,11 +584,6 @@ button {
   padding: 0;
   line-height: 0;
   border-radius: var(--r-pill);
-}
-
-.btn--block {
-  display: flex;
-  width: 100%;
 }
 
 .btn svg {
@@ -622,46 +643,11 @@ button {
   font-weight: 600;
 }
 
-.chip__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 .card {
   background: var(--surface);
   border-radius: var(--r-card);
   padding: var(--s4);
   box-shadow: var(--shadow);
-}
-
-.card__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s3);
-  margin-bottom: var(--s3);
-}
-
-.card__title {
-  font: var(--t-head);
-  margin: 0;
-}
-
-.card__sub {
-  font: var(--t-cap);
-  color: var(--fg-2);
-  margin: 2px 0 0;
-}
-
-.list {
-  background: var(--surface);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow);
-  padding: 0;
-  margin: 0;
-  list-style: none;
 }
 
 .list__row {
@@ -676,25 +662,11 @@ button {
   box-shadow: inset 0 1px 0 var(--hairline);
 }
 
-.list__trail {
-  margin-left: auto;
-  display: flex;
-  gap: var(--s2);
-}
-
 .field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0 0 var(--s4);
-}
-
-.field__label {
-  font: var(--t-cap);
-  color: var(--fg-2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 12px;
 }
 
 .input {
@@ -731,11 +703,6 @@ button {
   color: var(--good);
 }
 
-.pill--bad {
-  background: var(--bad-bg);
-  color: var(--bad);
-}
-
 .pill--warn {
   color: var(--warn);
 }
@@ -745,8 +712,57 @@ button {
   height: 14px;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
+/* Step U.7 (CONTRACT-U.7.md §0 follow-up 5, §2): one shared "nothing here"
+   component for Home-empty, Compare-none/-empty and Settings' two empty
+   lists — each view keeps its own class/text on the same element (see
+   js/views/home.js, js/views/compare.js, js/views/settings.js) and only
+   adds `empty` plus this markup shape alongside it. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s2);
+  padding: var(--s5) var(--s4);
+  margin: 0;
+}
+
+.empty__glyph {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  color: var(--fg-3);
+}
+
+.empty__glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.empty__text {
+  color: var(--fg-2);
+  font: var(--t-sub);
+}
+
+/* The kit's .btn--secondary look, applied directly rather than via those
+   classes — the markup contract for this component lists only
+   `empty__action` on the element (docs/DESIGN_PLAN.md Step U.7). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  margin-top: var(--s1);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-head);
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Home: trackable list + quick-log (Step 2.1) --------------------------- */
@@ -756,11 +772,21 @@ button {
   width: 100%;
 }
 
-.home-offline,
+/* Step U.7 (CONTRACT-U.7.md §2): shared offline-banner shape with
+   .detail-offline below. */
+.home-offline {
+  margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  font: var(--t-cap);
+}
+
+/* Step U.7: most of this element's look now comes from `.empty` above —
+   this rule only supplies the bottom margin the list below relies on. */
 .home-empty {
   margin: 0 0 var(--s3);
-  color: var(--fg-2);
-  font: var(--t-sub);
 }
 
 .tlist {
@@ -1650,10 +1676,16 @@ button {
   font: var(--t-head);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): one shared error-banner look across
+   .detail-error/.tform-error/.signin-error/.lock-error/.settings-*-error —
+   --bad-bg fill, --bad text, radius ctl, padding s2 s3, t-cap. */
 .tform-error {
-  margin: 4px 0 0;
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 /* Trackable detail screen shell (Step 2.3) ------------------------------- */
@@ -1933,12 +1965,6 @@ button {
   color: var(--fg-3);
 }
 
-.chart-slot-placeholder {
-  margin: 0;
-  color: var(--fg-3);
-  font: var(--t-cap);
-}
-
 /* Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): shown instead of a slot's
    chart/placeholder until the first entries load settles. min-height is
    set per-slot via the data-slot attribute already on .chart-slot, close
@@ -1974,16 +2000,27 @@ button {
   min-height: 60px;
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared offline-banner shape with
+   .home-offline above — --surface-2 fill, --fg-2 text, radius ctl, padding
+   s2 s3, t-cap. */
 .detail-offline {
   margin: 0 0 var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
   color: var(--fg-2);
-  font: var(--t-sub);
+  font: var(--t-cap);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .detail-error {
-  margin: 4px 0 0;
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 /* Calendar heatmap (Step 3.1) --------------------------------------------
@@ -2123,6 +2160,14 @@ button.hm-cell {
     transparent 2px,
     transparent 6px
   );
+}
+
+/* Step U.7 (CONTRACT-U.7.md §0 follow-up 2): the calendar's "today" ring —
+   a thin ring on the cell itself (inset, so it never shifts layout or
+   collides with the disc/number inside it), independent of the verdict
+   hue it sits on top of. */
+.hm-cell[data-today="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--fg);
 }
 
 .hm-cell[data-cell-state="outside"],
@@ -2752,11 +2797,17 @@ button.hm-cell {
   opacity: 0.85;
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above; grid-column stays, it is this form's
+   own layout concern, not the shared shape. */
 .signin-error {
   grid-column: 1 / -1;
   margin: 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 .signin-error[hidden] {
@@ -2871,10 +2922,15 @@ button.hm-cell {
   opacity: 0.85;
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .lock-error {
   margin: 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 .lock-error[hidden] {
@@ -2981,10 +3037,15 @@ button.hm-cell {
   color: var(--fg-2);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .settings-window-error {
-  margin: 4px 0 0;
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 .settings-window-error[hidden] {
@@ -3072,10 +3133,15 @@ button.hm-cell {
   transform: rotate(180deg);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .settings-error {
-  margin: 12px 0 0;
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 /* Export (Step 4.2, CONTRACT-4.2.md §3) -----------------------------------
@@ -3154,10 +3220,15 @@ button.hm-cell {
   color: var(--fg-2);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .settings-export-error {
-  margin: 4px 0 0;
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 .settings-export-error[hidden] {
@@ -3212,10 +3283,15 @@ button.hm-cell {
   font: var(--t-head);
 }
 
+/* Step U.7 (CONTRACT-U.7.md §2): shared error-banner look, see
+   .tform-error's own comment above. */
 .settings-applock-error {
-  margin: 8px 0 0;
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
   color: var(--bad);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
 .settings-applock-error[hidden] {

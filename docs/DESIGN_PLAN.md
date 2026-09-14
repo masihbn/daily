@@ -811,7 +811,8 @@ square — U.7 replaces the icon.
 
 ## Step U.7 — Motion, states, light-mode audit, icon, cleanup
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; deployed for the Phase U
+gate. Contract `CONTRACT-U.7.md`. `sw.js` `CACHE` → `daily-v53`.
 
 **Goal.** The app feels finished: route transitions, press states,
 skeleton loading, consistent empty/error states, light mode checked on
@@ -838,7 +839,43 @@ stays for the tests), `icons/*`, `manifest.json` (`theme_color`,
 - App icon: new 512/192 PNGs (a simple mark on `--bg`), maskable
   variants if easy; `theme-color` `#0b0b0e` dark / `#f2f2f7` light.
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4739 green** — 4419 unit, 54 integration, 266 e2e.
+Changed: `css/styles.css` (card stagger, `.empty`, unified error/
+offline banners, light-mode fixes, legacy aliases and dead rules
+removed), `js/views/home.js` (`--i` per card, empty wrapper),
+`js/views/compare.js` / `settings.js` (empty wrappers),
+`js/charts/heatmap.js` (`isToday` on the cell model, `data-today`),
+`js/charts/*.js` (alias fallbacks → new tokens), `index.html` (two
+`theme-color` metas), `manifest.json` (colours, maskable purpose),
+`icons/*.png` (new mark), `sw.js`.
+
+*Unit:* heatmap `isToday` (today's cell only; none when today is
+outside the month); design-tokens T3 flipped (aliases must be absent),
+T11 (`card-in`, `.empty`).
+*E2E:* today ring on the calendar; `--i` stagger indices; `.empty`
+wrappers on Home and Compare keep their texts and links; two
+theme-color metas and the manifest fields.
+
+*Decisions and corrections at execution time:* the aliases had zero
+real uses left (only their declarations) — deleted; dead rules
+deleted with grep evidence (`header {}`, `.btn--sm`, `.btn--block`,
+`.card__*`, `.chip__dot`, `.field__label`, `.list`, `.list__trail`,
+`.pill--bad`, `.tabular`, `.chart-slot-placeholder`); kit classes
+pinned by the U.0 tokens test stay even where unused. Compare's
+`.empty` wrapper is a post-render patch in the view (the element is
+built in `charts/compare.js`, pinned by shape tests). The light-mode
+audit found one real bug: the loading shimmer was invisible on white
+(surface-2 on surface) — now surface-3 with a hairline. Test-side:
+the U.0 tokens test T1 dropped the four aliases from its required
+list; T3's absence check was narrowed to declarations and `var()`
+usages because `.btn--danger` contains the substring; the
+"today outside the month" heatmap fixture was rebuilt so the
+requested month is not clamped back to today's. The icons were
+regenerated with a scratch Playwright canvas script (near-black square,
+seven-dot week row). The today ring is a rounded-square inset ring on
+the cell, around the disc.
 
 ---
 
@@ -890,3 +927,7 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.6 executed.** Form preview + grouped cards +
   segmented radios + sticky actions; Settings rows; sign-in logo; lock
   glyph. Suite 4733 green.
+- **2026-09-14** — **U.7 executed.** Card stagger, today ring, empty
+  states, light audit, new icon and theme colours, alias/dead-CSS
+  cleanup. Suite 4739 green. **Phase U gate open** — awaiting the phone
+  verdict.

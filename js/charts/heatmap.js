@@ -249,6 +249,12 @@ export function heatmapModel({ trackable, entries, month, today, from } = {}) {
         alpha: 0,
         label,
         tappable: false,
+        // Step U.7 (CONTRACT-U.7.md §0 follow-up 2): false for every
+        // non-'day' cell — a padding/future/before tile is never the real,
+        // interactive "today" tile even on the rare occasion its date
+        // string happens to equal `today` (e.g. a past month's trailing
+        // padding days can reach into the current month).
+        isToday: false,
       };
     }
 
@@ -321,6 +327,10 @@ export function heatmapModel({ trackable, entries, month, today, from } = {}) {
       alpha,
       label,
       tappable: true,
+      // Step U.7 (CONTRACT-U.7.md §0 follow-up 2): pure `cell.date === today`
+      // — the calendar's "today" ring. Only reachable here, on the one real
+      // 'day'-state cell for that date.
+      isToday: date === today,
     };
   });
 
@@ -410,6 +420,10 @@ export function renderHeatmap(model) {
     } else {
       el.setAttribute('aria-hidden', 'true');
     }
+    // Step U.7 (CONTRACT-U.7.md §0 follow-up 2): the attribute is present
+    // ONLY when true — absent (not "false") on every other cell, so
+    // `[data-today]` alone is a reliable "is this the one" selector.
+    if (cell.isToday) el.dataset.today = 'true';
     el.dataset.logged = String(cell.hasEntry);
     el.style.setProperty('--hm-alpha', String(cell.alpha));
 

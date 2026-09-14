@@ -988,3 +988,60 @@ describe('B7 — numeric alpha ramp cases from Step 3.1 still hold, unchanged by
     assert.equal(alphaFor(-50), 0.625);
   });
 });
+
+// ===========================================================================
+// CONTRACT-U.7.md §0(2) / §6 — isToday: a pure flag on the cell model,
+// cell.date === today. The implementation is being written in parallel from
+// the same contract and is not visible here.
+// ===========================================================================
+
+describe('U14 — isToday (CONTRACT-U.7.md §0(2))', () => {
+  it('the cell for `today` has isToday === true; every other cell has isToday === false', () => {
+    const trackable = { id: 1, value_shape: 'boolean', direction: 'build' };
+    const month = '2026-08';
+    const today = '2026-08-15';
+
+    const model = heatmapModel({ trackable, entries: [], month, today, from: null });
+
+    const todayCell = model.cells.find((c) => c.date === today);
+    assert.ok(todayCell, 'expected a cell for today in the shown month');
+    assert.equal(todayCell.isToday, true);
+
+    for (const cell of model.cells) {
+      if (cell.date !== today) {
+        assert.equal(cell.isToday, false, `expected isToday false for ${cell.date}`);
+      }
+    }
+  });
+
+  it('a `today` outside the shown month -> no cell has isToday true', () => {
+    // heatmapModel clamps the requested month into monthBoundsFor's [min,
+    // max] via clampMonth (§2.6/§2.7): max is always monthOf(today), so
+    // `entries: [], from: null` (bounds collapse to exactly today's month)
+    // cannot produce a genuinely different displayed month — the request
+    // would just clamp back to today's own month. To build a real case, give
+    // `from` a date at least two months before `today`, which pushes
+    // bounds.min down, and request a month strictly between min and max (so
+    // clampMonth passes it through unchanged, not clamped to bounds.max).
+    const trackable = { id: 1, value_shape: 'boolean', direction: 'build' };
+    const today = '2026-08-23'; // bounds.max = '2026-08'
+    const from = '2026-05-01'; // bounds.min = '2026-05'
+    const month = '2026-06'; // strictly between min and max -> passes through
+
+    const model = heatmapModel({ trackable, entries: [], month, today, from });
+    // Confirm the fixture actually exercises a genuinely different displayed
+    // month, not a silently-clamped one.
+    assert.equal(model.month, '2026-06');
+
+    // June 2026's 42-cell grid pads at most a few days into May/July — it
+    // never reaches August, so no cell's date can equal `today`.
+    for (const cell of model.cells) {
+      assert.equal(
+        cell.isToday,
+        false,
+        `expected isToday false for ${cell.date} when the displayed month (${model.month}) is not today's month (${monthOf(today)})`
+      );
+    }
+    assert.ok(!model.cells.some((c) => c.isToday), 'expected no cell to have isToday true');
+  });
+});

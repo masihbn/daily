@@ -117,7 +117,7 @@ export function createHomeView({ store, today } = {}) {
     btn.appendChild(labelSpan);
   }
 
-  function buildRow(t) {
+  function buildRow(t, index) {
     const { entry, status, errorText } = rowViewData(t);
     const model = rowModel(t, entry, status);
     const isEditing = editingId === model.id;
@@ -125,6 +125,12 @@ export function createHomeView({ store, today } = {}) {
 
     const li = document.createElement('li');
     li.className = 'trow';
+    // Step U.7 (CONTRACT-U.7.md §1): staggered opacity-only fade-in — the
+    // CSS keyframe/animation-delay live in styles.css
+    // (section.home[data-home-state="ready"] .trow), keyed off this custom
+    // property. Capped at 12 so a long list doesn't leave the last cards
+    // waiting seconds to appear.
+    li.style.setProperty('--i', String(Math.min(index, 12)));
     li.dataset.trackableId = model.id;
     li.dataset.shape = model.shape;
     li.dataset.state = model.state;
@@ -341,9 +347,9 @@ export function createHomeView({ store, today } = {}) {
     if (vis.length > 0) {
       const ul = document.createElement('ul');
       ul.className = 'tlist';
-      for (const t of vis) {
-        ul.appendChild(buildRow(t));
-      }
+      vis.forEach((t, index) => {
+        ul.appendChild(buildRow(t, index));
+      });
       section.appendChild(ul);
 
       // Step 2.2: always-visible way to reach #/new once the list is
@@ -364,14 +370,32 @@ export function createHomeView({ store, today } = {}) {
     }
 
     if (homeState === 'empty') {
+      // Step U.7 (CONTRACT-U.7.md §0 follow-up 5, §2): the shared `.empty`
+      // component (glyph + text + optional action) wraps this element's
+      // EXISTING classes/text rather than replacing them — `.home-empty`
+      // stays (so `.home-empty a` still matches) and the anchor's own
+      // href/text are unchanged.
       const p = document.createElement('p');
-      p.className = 'home-empty';
-      p.appendChild(document.createTextNode('Nothing tracked yet. '));
+      p.className = 'home-empty empty';
+      const glyph = document.createElement('span');
+      glyph.className = 'empty__glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = uiIconSvg('plus');
+      p.appendChild(glyph);
+      const textSpan = document.createElement('span');
+      textSpan.className = 'empty__text';
+      // Step U.7 fix (found in this step's own screenshot review): a bare
+      // trailing text node as a direct child of `.empty` (display:flex,
+      // column) became its own anonymous flex item — a stray line with
+      // just a period under the button. The period moves into this span
+      // instead, so `.empty` has exactly two flex children (text, action).
+      textSpan.textContent = 'Nothing tracked yet.';
+      p.appendChild(textSpan);
       const a = document.createElement('a');
+      a.className = 'empty__action';
       a.href = '#/new';
       a.textContent = 'Add your first trackable';
       p.appendChild(a);
-      p.appendChild(document.createTextNode('.'));
       section.appendChild(p);
     }
 

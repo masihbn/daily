@@ -412,3 +412,42 @@ test('S-T6 — signed out: compact title "Sign in", #title-back hidden, #nav hid
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.7.md §4/§6 — two theme-color metas (dark/light) and the
+// manifest's theme_color/icon purpose fields. The implementation is being
+// written in parallel from the same contract and is not visible here.
+// ===========================================================================
+
+test('U7-4 — index.html has dark/light theme-color metas with the right contents, and manifest.json has theme_color "#0b0b0e" with purpose on every icon', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html');
+
+  const metas = page.locator('meta[name="theme-color"]');
+  await expect(metas).toHaveCount(2);
+
+  const darkMeta = page.locator('meta[name="theme-color"][media*="dark"]');
+  const lightMeta = page.locator('meta[name="theme-color"][media*="light"]');
+  await expect(darkMeta).toHaveCount(1);
+  await expect(lightMeta).toHaveCount(1);
+  await expect(darkMeta).toHaveAttribute('content', '#0b0b0e');
+  await expect(lightMeta).toHaveAttribute('content', '#f2f2f7');
+
+  const manifestResponse = await page.request.get('/manifest.json');
+  expect(manifestResponse.ok()).toBe(true);
+  const manifest = await manifestResponse.json();
+  expect(manifest.theme_color).toBe('#0b0b0e');
+  expect(Array.isArray(manifest.icons)).toBe(true);
+  expect(manifest.icons.length).toBeGreaterThan(0);
+  for (const icon of manifest.icons) {
+    expect(icon.purpose).toBeTruthy();
+  }
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

@@ -1836,3 +1836,60 @@ test('G3 — with prefers-reduced-motion: reduce, #view has no animation applied
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.7.md §1/§6 — staggered card fade: buildRow sets --i per li.trow
+// in list order. The implementation is being written in parallel from the
+// same contract and is not visible here.
+// ===========================================================================
+
+test('U7-1 — with three trackables, the li.trow elements carry inline --i values 0, 1, 2 in list order', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL, T_CUM, T_STATE]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.home')).toHaveAttribute('data-home-state', 'ready');
+
+  const rows = page.locator('li.trow');
+  await expect(rows).toHaveCount(3);
+  const values = await rows.evaluateAll((els) => els.map((el) => el.style.getPropertyValue('--i').trim()));
+  expect(values).toEqual(['0', '1', '2']);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-U.7.md §2/§6 — the .empty component wraps Home's empty state.
+// Existing classes/text stay on the same elements (`.home-empty` gains
+// `empty` as a second class; `.home-empty a` still matches) — only a glyph
+// wrapper is added. The implementation is being written in parallel from the
+// same contract and is not visible here.
+// ===========================================================================
+
+test('U7-2 — the empty state is p.home-empty.empty, contains .empty__glyph svg, and still contains a[href="#/new"] with its existing text', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, []);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.home')).toHaveAttribute('data-home-state', 'empty');
+
+  const empty = page.locator('p.home-empty.empty');
+  await expect(empty).toHaveCount(1);
+  await expect(empty.locator('.empty__glyph svg')).toHaveCount(1);
+
+  const link = empty.locator('a[href="#/new"]');
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveText('Add your first trackable');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

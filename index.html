@@ -20,7 +20,11 @@
      the true bottom of the screen. Restoring "black-translucent" for
      aesthetics will silently reintroduce the bug. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="theme-color" content="#111111">
+<!-- Step U.7 (CONTRACT-U.7.md §4): two scheme-scoped theme-color tags,
+     replacing the single pre-design-system #111111 value — the browser
+     picks whichever `media` matches the OS scheme. -->
+<meta name="theme-color" content="#0b0b0e" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>

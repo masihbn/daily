@@ -109,8 +109,8 @@ const DARK_REQUIRED_TOKENS = [
   '--accent', '--accent-fg',
   // semantics
   '--good', '--good-bg', '--bad', '--bad-bg', '--warn', '--focus', '--shadow',
-  // legacy aliases
-  '--bg-elevated', '--fg-muted', '--border', '--danger',
+  // legacy aliases --bg-elevated/--fg-muted/--border/--danger removed per
+  // CONTRACT-U.7.md §0.3 (retired, not just redefined) — see T3 below.
   // type
   '--font', '--t-lg-title', '--t-title', '--t-head', '--t-body', '--t-sub',
   '--t-cap', '--t-micro',
@@ -174,25 +174,42 @@ describe('T2 — @media (prefers-color-scheme: light) { :root {} } defines every
 });
 
 // ===========================================================================
-// T3 — legacy alias tokens present with their exact var() values.
+// T3 — legacy alias tokens are ABSENT. CONTRACT change (CONTRACT-U.7.md
+// §0.3, ordered by the orchestrator): U.0 originally kept these four names as
+// var() aliases; U.7 requires every remaining use in css/** and js/charts/**
+// to be replaced with the real token name first, then the aliases deleted
+// outright. This flips the assertion from "present with this value" to
+// "absent everywhere" — the test itself (and its subject, the four legacy
+// names) is unchanged from T3's original intent, only the expected outcome.
 // ===========================================================================
 
-describe('T3 — legacy alias tokens (CONTRACT-U.0.md §1 decision 3, §7)', () => {
-  it('--bg-elevated: var(--surface)', () => {
-    assert.match(css, /--bg-elevated\s*:\s*var\(\s*--surface\s*\)/);
-  });
+// The intent is "the custom PROPERTY is neither defined nor used" — a plain
+// substring search (`css.includes('--danger')`) also matches the unrelated
+// BEM class `.btn--danger` (which T6 requires to exist), giving a false
+// positive. So check specifically for a declaration (`--name:`, not preceded
+// by a word/hyphen character, so `.btn--danger` itself doesn't count as
+// declaring `--danger`) or a var() usage (`var(--name`, with the name not
+// immediately continued by another word/hyphen character, so e.g.
+// `--danger-foo` wouldn't false-match `--danger`), on the comment-stripped
+// CSS (orchestrator ruling, correcting the original T3).
+function declaresOrUsesCustomProperty(cssText, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declRe = new RegExp(`(?<![\\w-])${escaped}\\s*:`);
+  const usageRe = new RegExp(`var\\(\\s*${escaped}(?![\\w-])`);
+  return declRe.test(cssText) || usageRe.test(cssText);
+}
 
-  it('--fg-muted: var(--fg-2)', () => {
-    assert.match(css, /--fg-muted\s*:\s*var\(\s*--fg-2\s*\)/);
-  });
+describe('T3 — legacy alias tokens are absent (CONTRACT-U.7.md §0.3, §6 — flips CONTRACT-U.0.md §1 decision 3)', () => {
+  const LEGACY_ALIASES = ['--bg-elevated', '--fg-muted', '--border', '--danger'];
 
-  it('--border: var(--hairline)', () => {
-    assert.match(css, /--border\s*:\s*var\(\s*--hairline\s*\)/);
-  });
-
-  it('--danger: var(--bad)', () => {
-    assert.match(css, /--danger\s*:\s*var\(\s*--bad\s*\)/);
-  });
+  for (const name of LEGACY_ALIASES) {
+    it(`${name} has no declaration and no var() usage anywhere in styles.css`, () => {
+      assert.ok(
+        !declaresOrUsesCustomProperty(css, name),
+        `expected ${name} to have no declaration or var() usage in css/styles.css`
+      );
+    });
+  }
 });
 
 // ===========================================================================
@@ -352,5 +369,27 @@ describe('T10 — dark :root defines the CONTRACT-U.4b.md §1 smaller type scale
     const match = darkRoot && darkRoot.match(/--t-lg-title\s*:\s*([^;]+);/);
     assert.ok(match, 'expected the dark :root {} block to define --t-lg-title');
     assert.match(match[1], /30px/, `expected --t-lg-title to contain 30px, got: ${match[1]}`);
+  });
+});
+
+// ===========================================================================
+// T11 — the card-in keyframe and the .empty component exist
+// (CONTRACT-U.7.md §1 motion, §2 states, §6).
+// ===========================================================================
+
+describe('T11 — @keyframes card-in and the .empty component exist (CONTRACT-U.7.md §1, §2, §6)', () => {
+  it('@keyframes card-in exists', () => {
+    assert.match(css, /@keyframes\s+card-in\s*\{/);
+  });
+
+  it('.empty appears as a selector', () => {
+    assert.ok(hasSelectorToken(css, '.empty'), 'expected .empty to appear as a selector in css/styles.css');
+  });
+
+  it('.empty__glyph appears as a selector', () => {
+    assert.ok(
+      hasSelectorToken(css, '.empty__glyph'),
+      'expected .empty__glyph to appear as a selector in css/styles.css'
+    );
   });
 });

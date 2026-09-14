@@ -851,3 +851,35 @@ test('HU-1 — a logged day\'s .hm-fill is a disc: border-radius resolves to ~50
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// HU-T1 — CONTRACT-U.7.md §0(2)/§6: the calendar's "today" ring. The cell
+// whose data-date is TODAY carries data-today="true" and a visible (non-none)
+// box-shadow; no other cell carries data-today="true". The implementation is
+// being written in parallel from the same contract and is not visible here.
+// ===========================================================================
+
+test('HU-T1 — the cell whose data-date is today has data-today="true" and a non-none computed box-shadow; no other cell has data-today="true"', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+
+  const todayCell = page.locator(`.hm-cell[data-date="${TODAY}"]`);
+  await expect(todayCell).toHaveCount(1);
+  await expect(todayCell).toHaveAttribute('data-today', 'true');
+
+  const boxShadow = await todayCell.evaluate((el) => getComputedStyle(el).boxShadow);
+  expect(boxShadow).not.toBe('none');
+
+  const markedToday = page.locator('.hm-cell[data-today="true"]');
+  await expect(markedToday).toHaveCount(1);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

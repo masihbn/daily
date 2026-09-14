@@ -301,9 +301,19 @@ export function createSettingsView({ store, auth, today } = {}) {
     const visible = visibleTrackables(st.getTrackables());
 
     if (visible.length === 0) {
+      // Step U.7 (CONTRACT-U.7.md §0 follow-up 5, §2): the shared `.empty`
+      // component — existing class/text kept, just wrapped.
       const emptyP = document.createElement('p');
-      emptyP.className = 'settings-order-empty';
-      emptyP.textContent = 'No trackables yet.';
+      emptyP.className = 'settings-order-empty empty';
+      const glyph = document.createElement('span');
+      glyph.className = 'empty__glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = uiIconSvg('plus');
+      emptyP.appendChild(glyph);
+      const textSpan = document.createElement('span');
+      textSpan.className = 'empty__text';
+      textSpan.textContent = 'No trackables yet.';
+      emptyP.appendChild(textSpan);
       block.appendChild(emptyP);
       return block;
     }
@@ -385,9 +395,19 @@ export function createSettingsView({ store, auth, today } = {}) {
     );
 
     if (archived.length === 0) {
+      // Step U.7 (CONTRACT-U.7.md §0 follow-up 5, §2): the shared `.empty`
+      // component — existing class/text kept, just wrapped.
       const emptyP = document.createElement('p');
-      emptyP.className = 'settings-archived-empty';
-      emptyP.textContent = 'Nothing archived.';
+      emptyP.className = 'settings-archived-empty empty';
+      const glyph = document.createElement('span');
+      glyph.className = 'empty__glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.innerHTML = uiIconSvg('check');
+      emptyP.appendChild(glyph);
+      const textSpan = document.createElement('span');
+      textSpan.className = 'empty__text';
+      textSpan.textContent = 'Nothing archived.';
+      emptyP.appendChild(textSpan);
       block.appendChild(emptyP);
       return block;
     }

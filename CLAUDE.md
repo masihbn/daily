@@ -28,11 +28,10 @@ indicator. Routes: `#/`, `#/t/:id`, `#/t/:id/edit`, `#/new`, `#/compare`,
 `#/settings`, and since U.4 `#/t/:id/chart/:kind` (full-screen chart,
 `kind` = `trend` | `range`) and `#/compare/chart` (U.5).
 
-**Next work: the design pass — `docs/DESIGN_PLAN.md`** (Phase U, started
-2026-09-14). Find the first step there that is not `DONE` and run it
-under `docs/ORCHESTRATION.md` exactly like a `BUILD_PLAN.md` step. It
-restyles every screen (neutral accent, one component kit) and adds
-full-screen sideways-scrolling charts; no data-flow changes.
+**Next work: the Phase U gate in `docs/DESIGN_PLAN.md`.** Every design
+step U.0–U.7 is `DONE` (2026-09-14); the gate is the user's phone
+walk-through of every screen in dark and light, portrait and full
+screen. Fold their feedback in as U.8+ steps under the same contract;
 `BUILD_PLAN.md` itself has no open step.
 
 **Three things that will bite an unwary session during the park:**
@@ -60,7 +59,7 @@ full-screen sideways-scrolling charts; no data-flow changes.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4733 tests as of Step U.6** (4418 unit, 54 integration, 261 e2e). See
+**4739 tests as of Step U.7** (4419 unit, 54 integration, 266 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
