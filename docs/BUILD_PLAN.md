@@ -5516,9 +5516,10 @@ _(To be filled in by the executing session.)_
 
 ## Step 5.4 — Real-device verification & docs close-out
 
-**Status:** IN PROGRESS — 2026-09-14. Docs sweep done (below); the two
-device items no earlier check covered (charts offline from the worker
-cache; a log over cellular) are with the user.
+**Status:** DONE (2026-09-14) — device-verified ("works"): charts draw
+offline from the worker cache (after the `ignoreVary` fix found by this
+very check), a value logs over cellular. Docs swept. **v1 is built.**
+Suite **4168 green** (3905 unit, 54 integration, 209 e2e), `daily-v44`.
 
 **Goal.** The whole thing is confirmed working on the actual iPhone, and
 the docs describe reality.
@@ -5568,10 +5569,12 @@ the Test log attempt that records it* (`docs/PROJECT_NOTES.md`):
 - Face ID lock: enable, lock on cold launch, auto-prompt, background
   without re-prompt, "Sign out instead" — Step 5.2's device check.
 
-*Left for this step's own phone pass:* charts rendering while offline
-(the CDN scripts served from the worker cache, never exercised before —
-Attempt 17 checked Home only) and a log over cellular rather than
-Wi-Fi. Result recorded in Attempt 18.
+*This step's own phone pass (Attempt 18):* charts offline **failed
+first** — none drew — which exposed the `Vary: Accept-Encoding` cache
+miss in the worker's CDN branch (fixed as `daily-v44`, see Step 5.1's
+Test Subjects); on the retry all three charts drew in airplane mode. A
+value logged over cellular saved. Also found here: the Face ID passkey
+needs a network connection (Step 5.2's note; user accepted).
 
 *Docs close-out (2026-09-14):* `CLAUDE.md` status rewritten to "v1
 built, in daily use"; `docs/DATA_MODEL.md` heading "How the planned

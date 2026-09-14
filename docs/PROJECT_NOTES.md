@@ -312,6 +312,31 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 18 — 2026-09-14, Steps 5.2 + 5.4: Face ID, offline charts, v1 closed
+
+**5.2, Face ID lock** (`daily-v41` → `v43`): enable, cold-launch lock,
+Face ID, background without re-prompt, "Sign out instead" — all worked.
+Two findings. (1) Two taps before Face ID (Unlock, then Apple's "Use
+passkey" sheet): the app now prompts on launch by itself; the sheet is
+Apple's and stays. (2) **In airplane mode the sheet appears but Face ID
+never comes up**; with Wi-Fi back it works — iOS's passkey flow needs a
+network connection. Offered a PIN fallback; user: "That's assumed that
+we're always gonna have Wi-Fi, so it's okay." UI texts say so now.
+
+**5.4, the last two device items.** Charts offline: **none drew.**
+Diagnosed in a real browser: both jsDelivr scripts were in the worker
+cache, but the CDN sends `Vary: Accept-Encoding` and WebKit's lookup for
+the page's own script request did not match the entry the install-time
+fetch stored; the miss fell through to a fetch that rejected offline
+with no catch. Fixed with `ignoreVary: true` on the CDN lookup (pinned
+immutable URLs) and an explicit offline-miss path (`daily-v44`). Retry:
+all three charts drew in airplane mode; a value logged over cellular
+saved. "works."
+
+**v1 is built.** Every step of `docs/BUILD_PLAN.md` is `DONE`.
+4,168 tests. Fourteen build steps and three gates in two days, all
+under the orchestration loop.
+
 ### Attempt 17 — 2026-09-14, Step 5.1: the update path, proven
 
 The reworked worker (`daily-v39`) still had to cross the OLD worker's

@@ -57,7 +57,7 @@ next.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4166 tests as of Step 5.2** (3903 unit, 54 integration, 209 e2e). See
+**4168 tests as of v1 (Step 5.4)** (3905 unit, 54 integration, 209 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
