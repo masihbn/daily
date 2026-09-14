@@ -2807,3 +2807,144 @@ button.hm-cell {
   color: var(--fg-3);
   font: var(--t-cap);
 }
+
+/* Full-screen chart (Step U.4, CONTRACT-U.4.md §7) --------------------------
+   Opened from a detail card's Expand button, at the real hash route
+   `#/t/:id/chart/:kind` (js/views/fullscreen.js). `data-rotated="true"` is
+   the app rotating the section itself 90° clockwise when the phone is held
+   portrait (js/router.js decodes the route; the view itself reads
+   matchMedia('(orientation: portrait)')) — the phone is never asked to
+   rotate. Safe-area insets follow the notch: normal padding on all four
+   sides when landscape/unrotated, and top/bottom-only (the notch is now on
+   the visual left after the 90° turn) when rotated. */
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.fullscreen[data-rotated="true"] {
+  inset: auto;
+  top: 0;
+  left: 0;
+  width: 100vh;
+  height: 100vw;
+  /* Progressive enhancement: a browser without dvh/dvw support drops these
+     two invalid declarations and keeps the vh/vw pair right above. */
+  width: 100dvh;
+  height: 100dvw;
+  transform-origin: top left;
+  transform: rotate(90deg) translateY(-100%);
+  padding: 0 env(safe-area-inset-bottom, 0px) 0 env(safe-area-inset-top, 0px);
+}
+
+.fs-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  min-height: 52px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fs-title {
+  font: var(--t-head);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-controls {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s2);
+}
+
+.fs-controls .seg {
+  min-width: 200px;
+}
+
+.fs-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 0 0 var(--s2);
+}
+
+.fs-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.fs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.fs-track {
+  height: 100%;
+  min-width: 100%;
+}
+
+/* Inside .fs-track, the chart's own canvas keeps drawing its y axis; the
+   pinned copy (.fs-axis, js/charts/scroll.js#pinnedAxisPlugin) sits over
+   the same pixels at scroll 0 and stays put after — height:100% is what
+   lets the chrome:false canvas wrap (js/charts/weekly.js/bounds.js) fill
+   the track instead of the card's own fixed pixel height. */
+.fs-track .weekly,
+.fs-track .bounds,
+.fs-track .weekly-canvas-wrap,
+.fs-track .bounds-canvas-wrap {
+  height: 100%;
+}
+
+.fs-axis {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: var(--bg);
+}
+
+.fs-axis[data-side="left"] {
+  left: 0;
+}
+
+.fs-axis[data-side="right"] {
+  right: 0;
+}
+
+.fs-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+.fs-status[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fullscreen {
+    animation: fs-in 0.2s ease-out;
+  }
+
+  @keyframes fs-in {
+    from {
+      opacity: 0;
+    }
+  }
+}

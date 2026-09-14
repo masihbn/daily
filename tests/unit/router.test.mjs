@@ -197,6 +197,66 @@ describe('parseHash — non-string input must never throw and must return notfou
   }
 });
 
+describe('parseHash — the fullscreen chart route (CONTRACT-U.4.md §1, added for Step U.4)', () => {
+  // segments.length === 4 && segments[0] === 't' && segments[2] === 'chart'
+  // -> { name: 'chart', params: { id, kind } } where kind is EXACTLY 'trend'
+  // or 'range' (no other value, no case-insensitivity). id is percent-
+  // decoded exactly the way the existing detail/edit routes decode it.
+  // Every fixture from CONTRACT-U.4.md §9's R-C1..R-C8 is asserted below.
+
+  it("R-C1 — '#/t/5/chart/trend' -> {name:'chart', params:{id:'5', kind:'trend'}}", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/trend'), { name: 'chart', params: { id: '5', kind: 'trend' } });
+  });
+
+  it("R-C2 — '#/t/5/chart/range' -> {name:'chart', params:{id:'5', kind:'range'}}", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/range'), { name: 'chart', params: { id: '5', kind: 'range' } });
+  });
+
+  it("R-C3 — an unknown kind ('nope') -> notfound", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/nope'), { name: 'notfound', params: {} });
+  });
+
+  it("R-C3 — a wrong-case kind ('Trend') -> notfound (kind is an exact-string match, not case-insensitive)", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/Trend'), { name: 'notfound', params: {} });
+  });
+
+  it("R-C3 — an empty kind -> notfound. Reached via a doubled trailing slash ('#/t/5/chart//'): the router's single generic trailing-slash strip (shared by every route, see the '#/settings/'/'#/t/5/' cases above) removes exactly ONE trailing '/', turning '/t/5/chart//' into '/t/5/chart/' — which still splits into FOUR segments ['t','5','chart',''], the last one empty. A single trailing slash ('#/t/5/chart/trend/', see R-C5) is the trailing-slash-EQUIVALENCE case; this is deliberately the one-slash-further edge that actually produces kind === ''.", () => {
+    assert.deepEqual(parseHash('#/t/5/chart//'), { name: 'notfound', params: {} });
+  });
+
+  it("R-C4 — an empty id ('#/t//chart/trend') -> notfound", () => {
+    assert.deepEqual(parseHash('#/t//chart/trend'), { name: 'notfound', params: {} });
+  });
+
+  it("R-C5 — a trailing slash is tolerated: '#/t/5/chart/trend/' -> same as without it", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/trend/'), { name: 'chart', params: { id: '5', kind: 'trend' } });
+  });
+
+  it("R-C6 — '#/t/a%20b/chart/range' -> id 'a b' (percent-decoded), kind 'range'", () => {
+    assert.deepEqual(parseHash('#/t/a%20b/chart/range'), { name: 'chart', params: { id: 'a b', kind: 'range' } });
+  });
+
+  it("R-C7 — five segments ('#/t/5/chart/trend/extra') -> notfound", () => {
+    assert.deepEqual(parseHash('#/t/5/chart/trend/extra'), { name: 'notfound', params: {} });
+  });
+
+  it('R-C8 — the returned params object is fresh: mutating one call\'s result does not affect a later call', () => {
+    const a = parseHash('#/t/5/chart/trend');
+    a.name = 'mutated';
+    a.params.id = 'mutated';
+    a.params.kind = 'mutated';
+    const b = parseHash('#/t/5/chart/trend');
+    assert.deepEqual(b, { name: 'chart', params: { id: '5', kind: 'trend' } });
+
+    // Same reference guarantee already established for the other routes
+    // above (parseHash — fresh object guarantee): two calls never share an
+    // object or a params object.
+    const c = parseHash('#/t/5/chart/trend');
+    assert.notEqual(b, c);
+    assert.notEqual(b.params, c.params);
+  });
+});
+
 describe('parseHash — fresh object guarantee', () => {
   it('two calls with the same input do not return the same object reference', () => {
     const a = parseHash('#/');

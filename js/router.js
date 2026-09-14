@@ -97,5 +97,35 @@ export function parseHash(hash) {
     return fresh({ name: 'edit', params: { id } });
   }
 
+  // Step U.4 (CONTRACT-U.4.md §1): #/t/:id/chart/:kind — a real hash route
+  // for the full-screen chart view, so the iOS back gesture and the browser
+  // Back button close it. The literal third segment must be 'chart'; `kind`
+  // is validated against the exact two legal strings AFTER decoding, so a
+  // bad percent-encoding in that position falls to notfound the same way an
+  // unrecognized kind does, rather than being treated as a third, distinct
+  // failure mode.
+  if (segments.length === 4 && segments[0] === 't' && segments[2] === 'chart') {
+    const rawId = segments[1];
+    if (rawId === '') {
+      return fresh(NOTFOUND);
+    }
+    let id;
+    try {
+      id = decodeURIComponent(rawId);
+    } catch {
+      return fresh(NOTFOUND);
+    }
+    let kind;
+    try {
+      kind = decodeURIComponent(segments[3]);
+    } catch {
+      return fresh(NOTFOUND);
+    }
+    if (kind !== 'trend' && kind !== 'range') {
+      return fresh(NOTFOUND);
+    }
+    return fresh({ name: 'chart', params: { id, kind } });
+  }
+
   return fresh(NOTFOUND);
 }

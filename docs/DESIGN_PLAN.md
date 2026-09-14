@@ -555,6 +555,58 @@ nav hidden on the fullscreen route), `js/views/fullscreen.js` (new),
 
 ---
 
+## Step U.4b — Device feedback after U.0–U.3: type scale, centred glyphs, first motion, shorter hints
+
+**Status:** TODO
+
+**Goal.** The four things the user reported from the phone on
+2026-09-14 after U.3 went live are fixed: (1) the check/plus glyph in
+Home's round Log button is not centred on iOS; (2) "all the text is
+weirdly big"; (3) "everything happens instantly — I want to see some
+animations"; (4) Home's hint "Today: 1750 kcal · tap to change" wraps
+awkwardly on a 390px phone.
+
+**Preconditions.** U.4 (shares `css/styles.css` and `js/main.js`).
+
+**Deliverables.** `css/styles.css`, `js/views/home-model.js` (hint
+text), `js/main.js` (transition hook), `sw.js` bump; tests updated for
+the hint contract change; a unit case per new hint string.
+
+**Implementation notes.**
+- **Type scale down one step** (tokens only): `--t-lg-title 30px`,
+  `--t-title 20px`, `--t-head 16px`, `--t-body 15px`, `--t-sub 14px`,
+  `--t-cap 12px`, `--t-micro 11px`; Home value 20px, hero name 26px.
+  Inputs stay ≥16px (iOS zoom rule) — `.input` keeps `font-size: 16px`.
+  The user's phone renders `-apple-system` larger than the Windows
+  screenshots suggest; take the phone as the truth.
+- **Centred glyphs**: every `.btn--icon`-style control (`.trow-log`,
+  `.detail-edit`, `.chart-expand`, `.fs-close`, `.hm-nav`,
+  `.settings-move`) gets `display: inline-flex; align-items: center;
+  justify-content: center; line-height: 0` and its inner icon span
+  `display: flex`; the SVG `display: block`. The `.visually-hidden`
+  text must stay absolutely positioned so it cannot shift the flex
+  centre.
+- **Hints shorter** (contract change, tests follow): `relogHint` →
+  boolean logged `Tap to clear`, boolean unlogged `Tap to log`, numeric
+  logged `Tap to change`, numeric unlogged `Tap to log`. The value is
+  already shown in `.trow-value`, so the old "Today: 320 kcal ·" prefix
+  was a duplicate.
+- **First motion** (all disabled under `prefers-reduced-motion`):
+  route change → `#app` gets `data-transition="in"` re-applied on each
+  render (remove + force reflow + add) and CSS animates `#view` from
+  `opacity 0; translateY(6px)` over 180ms ease-out; every `.btn`, chip,
+  segmented item, card row and calendar cell gets `:active { transform:
+  scale(.97) }` with a 120ms transition; `.chart-slot-loading`,
+  `.compare-loading` and the Home `data-home-state="loading"` section
+  get a shimmer (`.skeleton` class: surface-2 base, a moving
+  surface-3 highlight, 1.2s linear infinite); the fullscreen open
+  animation from U.4 stays.
+- U.7 keeps the rest (empty states, light audit, icon, dead CSS).
+
+**Test Subjects.** _(filled by the executing session)_
+
+---
+
 ## Step U.5 — Compare screen
 
 **Status:** TODO
@@ -696,3 +748,6 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
   weekly/range charts, hero header, disc calendar, overlay picker moved
   into the Range card, expand buttons in place (hidden until U.4).
   overlay.js theming dropped (pinned tests). Suite 4661 green.
+- **2026-09-14** — Device feedback after U.3 recorded as **U.4b**
+  (type scale down, centred glyphs, first motion, shorter Home hints).
+  The user also asked for a screenshot audit at the end — that is U.7.

@@ -45,6 +45,9 @@ import {
 // annotation-label fragments, replacing this file's own (now-deleted)
 // private cssVar.
 import { cssVar, chartFont, xAxisTheme, yAxisTheme, tooltipTheme, annotationLabelTheme, lineSeriesTheme } from './theme.js';
+// Step U.4 (CONTRACT-U.4.md §3): see weekly.js's identical import comment —
+// only consulted when the caller passes opts.trackWidth.
+import { maxTicksFor } from './scroll.js';
 
 // --- §2.1 constants ------------------------------------------------------
 
@@ -712,8 +715,22 @@ export function destroyBounds() {
 // Chart.js instance, tracked at module scope above. No innerHTML anywhere
 // in this function — built with createElement/textContent/setAttribute
 // only.
-export function renderBounds(model) {
+//
+// Step U.4 (CONTRACT-U.4.md §3): `opts` — see renderWeekly()'s identical
+// header comment for the shape and defaults; every field defaults to
+// exactly the pre-U.4 behaviour. `opts.chrome: false` (the fullscreen
+// view) drops the summary pill, the granularity control and the meaning
+// line — the fullscreen bar draws its own controls, and there is a real
+// canvas to show instead of the summary once this is reached at all (the
+// fullscreen view never calls this with a non-'ok' status — see
+// js/views/fullscreen.js's own empty-state handling).
+export function renderBounds(model, opts = {}) {
   destroyBounds();
+
+  const chrome = opts.chrome !== false;
+  const trackWidthPx =
+    typeof opts.trackWidth === 'number' && Number.isFinite(opts.trackWidth) ? opts.trackWidth : null;
+  const extraPlugins = Array.isArray(opts.plugins) ? opts.plugins : [];
 
   const root = document.createElement('div');
   root.className = 'bounds';
@@ -724,48 +741,50 @@ export function renderBounds(model) {
   // overlay datasets has actually been constructed.
   root.dataset.overlays = '0';
 
-  const zone = model && typeof model === 'object' && typeof model.todayZone === 'string' ? model.todayZone : 'unknown';
-  const summary = document.createElement('p');
-  summary.className = 'bounds-summary';
-  summary.dataset.zone = zone;
-  summary.textContent = summaryText(model);
-  root.appendChild(summary);
-
   const activePeriod =
     model && typeof model === 'object' && PERIOD_MEANING[model.period] ? model.period : 'day';
 
-  // Step 3.3b — the granularity control. Rendered for EVERY status,
-  // including insufficient/invalid/empty, so the lens stays changeable
-  // even when there is nothing to draw. Styled by the same CSS rules as
-  // the trend chart's .trend-periods (the user asked for "just like the
-  // one above"); the distinct data-bounds-period attribute is what lets
-  // detail.js's single delegated listener tell the two controls apart.
-  // Attaches NO listeners here — detail.js owns that.
-  const periods = document.createElement('div');
-  periods.className = 'bounds-periods trend-periods';
-  periods.setAttribute('role', 'group');
-  periods.setAttribute('aria-label', 'Granularity');
-  for (const p of PERIODS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'bounds-period trend-period';
-    btn.dataset.boundsPeriod = p.key;
-    btn.setAttribute('aria-pressed', String(p.key === activePeriod));
-    btn.textContent = p.label;
-    periods.appendChild(btn);
-  }
-  root.appendChild(periods);
+  if (chrome) {
+    const zone = model && typeof model === 'object' && typeof model.todayZone === 'string' ? model.todayZone : 'unknown';
+    const summary = document.createElement('p');
+    summary.className = 'bounds-summary';
+    summary.dataset.zone = zone;
+    summary.textContent = summaryText(model);
+    root.appendChild(summary);
 
-  // States plainly that the dots are averages while the band remains the
-  // daily range — see the Step 3.3b block for why the band does not move.
-  const meaning = document.createElement('p');
-  meaning.className = 'bounds-meaning';
-  meaning.textContent = boundsMeaningText(
-    activePeriod,
-    model && typeof model === 'object' ? model.unit : null,
-    model && typeof model === 'object' ? model.bounds : null
-  );
-  root.appendChild(meaning);
+    // Step 3.3b — the granularity control. Rendered for EVERY status,
+    // including insufficient/invalid/empty, so the lens stays changeable
+    // even when there is nothing to draw. Styled by the same CSS rules as
+    // the trend chart's .trend-periods (the user asked for "just like the
+    // one above"); the distinct data-bounds-period attribute is what lets
+    // detail.js's single delegated listener tell the two controls apart.
+    // Attaches NO listeners here — detail.js owns that.
+    const periods = document.createElement('div');
+    periods.className = 'bounds-periods trend-periods';
+    periods.setAttribute('role', 'group');
+    periods.setAttribute('aria-label', 'Granularity');
+    for (const p of PERIODS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'bounds-period trend-period';
+      btn.dataset.boundsPeriod = p.key;
+      btn.setAttribute('aria-pressed', String(p.key === activePeriod));
+      btn.textContent = p.label;
+      periods.appendChild(btn);
+    }
+    root.appendChild(periods);
+
+    // States plainly that the dots are averages while the band remains the
+    // daily range — see the Step 3.3b block for why the band does not move.
+    const meaning = document.createElement('p');
+    meaning.className = 'bounds-meaning';
+    meaning.textContent = boundsMeaningText(
+      activePeriod,
+      model && typeof model === 'object' ? model.unit : null,
+      model && typeof model === 'object' ? model.bounds : null
+    );
+    root.appendChild(meaning);
+  }
 
   const status = model && typeof model === 'object' ? model.status : undefined;
   // Every non-'ok' status renders only the summary above — no canvas, no
@@ -783,6 +802,11 @@ export function renderBounds(model) {
 
   const wrap = document.createElement('div');
   wrap.className = 'bounds-canvas-wrap';
+  // Step U.4 (CONTRACT-U.4.md §3): see renderWeekly()'s identical block.
+  if (trackWidthPx !== null) {
+    wrap.style.width = `${trackWidthPx}px`;
+    wrap.style.height = '100%';
+  }
   const canvas = document.createElement('canvas');
   canvas.className = 'bounds-canvas';
   wrap.appendChild(canvas);
@@ -997,8 +1021,13 @@ export function renderBounds(model) {
   // — never beginAtZero, both bounds framed strictly inside. See its own
   // comment for why.
   const axis = boundsAxisFor(model);
+  const xTheme = xAxisTheme();
+  // Step U.4 (CONTRACT-U.4.md §3): see renderWeekly()'s identical block.
+  if (trackWidthPx !== null) {
+    xTheme.ticks = { ...xTheme.ticks, maxTicksLimit: maxTicksFor(trackWidthPx) };
+  }
   const scales = {
-    x: { type: 'category', ...xAxisTheme() },
+    x: { type: 'category', ...xTheme },
     y: {
       ...yAxisTheme(),
       suggestedMin: axis.suggestedMin,
@@ -1077,6 +1106,9 @@ export function renderBounds(model) {
         scales,
         plugins,
       },
+      // Step U.4 (CONTRACT-U.4.md §3): opts.plugins — see renderWeekly()'s
+      // identical comment on the two different `plugins` keys.
+      plugins: extraPlugins,
     });
     // Only set once construction actually succeeds — the rule that
     // data-overlays is 0 "whenever no canvas is drawn" includes a

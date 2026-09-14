@@ -7,6 +7,7 @@ import { parseHash } from './router.js';
 import { createHomeView } from './views/home.js';
 import { createTrackableView } from './views/trackable.js';
 import { createDetailView } from './views/detail.js';
+import { createFullscreenView } from './views/fullscreen.js';
 import { createCompareView } from './views/compare.js';
 import { createSignInView } from './views/signin.js';
 import { createSettingsView } from './views/settings.js';
@@ -237,7 +238,21 @@ async function render() {
   // render to start wins the nav state too — matching data-route.
   updateNav(route.name);
 
-  if (route.name === 'home') {
+  // Step U.4 (CONTRACT-U.4.md §5): the fullscreen chart route hides both
+  // the tab bar and the per-route title bar — the fullscreen view draws
+  // its own close button and title in its own bar. Every other route
+  // keeps the title bar visible; the tab bar's own visibility for every
+  // other route is already governed by the signed-in gate's `nav.hidden =
+  // !signedIn` above and is left untouched here.
+  const titleBarEl = document.getElementById('title-bar');
+  if (titleBarEl) titleBarEl.hidden = route.name === 'chart';
+  if (route.name === 'chart' && nav) nav.hidden = true;
+
+  if (route.name === 'chart') {
+    app.innerHTML = '<div id="view"></div>';
+    currentView = createFullscreenView({ id: route.params.id, kind: route.params.kind });
+    await currentView.mount(document.getElementById('view'));
+  } else if (route.name === 'home') {
     setTitle(VIEW_TITLES.home, { size: 'large', sub: longDateLabel(todayLocal()) });
     app.innerHTML = '<div id="view"></div>';
     currentView = createHomeView();

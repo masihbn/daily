@@ -1139,7 +1139,7 @@ test('DU-1b — .detail-today reads "Not logged today" when there is no entry fo
 // DU-2 — .chart-slot-head / .chart-expand per slot
 // ===========================================================================
 
-test('DU-2 — every .chart-slot has .chart-slot-head > .chart-slot-title; weekly/bounds carry a hidden .chart-expand with the right data-expand; heatmap does not', async ({
+test('DU-2 — every .chart-slot has .chart-slot-head > .chart-slot-title; weekly/bounds carry a VISIBLE .chart-expand with the right data-expand (Step U.4, CONTRACT-U.4.md §6: the buttons are unhidden); heatmap does not', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -1169,14 +1169,14 @@ test('DU-2 — every .chart-slot has .chart-slot-head > .chart-slot-title; weekl
   await expect(weeklyExpand).toHaveAttribute('type', 'button');
   await expect(weeklyExpand).toHaveAttribute('data-expand', 'trend');
   await expect(weeklyExpand).toHaveAttribute('aria-label', 'Expand Weekly trend');
-  await expect(weeklyExpand).toBeHidden();
+  await expect(weeklyExpand).toBeVisible();
 
   const boundsExpand = page.locator('.chart-slot[data-slot="bounds"] > .chart-slot-head > .chart-expand');
   await expect(boundsExpand).toHaveCount(1);
   await expect(boundsExpand).toHaveAttribute('type', 'button');
   await expect(boundsExpand).toHaveAttribute('data-expand', 'range');
   await expect(boundsExpand).toHaveAttribute('aria-label', 'Expand Range');
-  await expect(boundsExpand).toBeHidden();
+  await expect(boundsExpand).toBeVisible();
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);

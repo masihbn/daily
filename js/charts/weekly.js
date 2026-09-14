@@ -14,6 +14,12 @@ import { isoWeeksInRange, isoWeekKey, monthsInRange, rangeDays } from '../dates.
 // label look, plus the line/bar dataset fragments, now come from the shared
 // theme module rather than this file's own (now-deleted) private cssVar.
 import { cssVar, xAxisTheme, yAxisTheme, tooltipTheme, annotationLabelTheme, lineSeriesTheme, barSeriesTheme } from './theme.js';
+// Step U.4 (CONTRACT-U.4.md §3): maxTicksFor() sizes the x-axis tick
+// budget to the fullscreen track's actual pixel width — only consulted
+// when the caller passes opts.trackWidth (the fullscreen view); the
+// default (no opts) path never imports anything from window/document via
+// this, so this import alone changes nothing about pre-U.4 callers.
+import { maxTicksFor } from './scroll.js';
 
 // §0(b): rollup(), fillSeries() and the ISO-week helpers in js/dates.js are
 // the SINGLE implementation of rollup/grouping math. This module imports
@@ -645,38 +651,66 @@ export function destroyWeekly() {
 // Chart.js instance, tracked at module scope above. No innerHTML anywhere
 // in this function — built with createElement/textContent/setAttribute
 // only.
-export function renderWeekly(model) {
+//
+// Step U.4 (CONTRACT-U.4.md §3): `opts` is new and every field defaults to
+// exactly the pre-U.4 behaviour — an omitted second argument (every
+// pre-U.4 caller) reproduces today's output byte-for-byte.
+//   opts.chrome     default true. false suppresses the meaning line and the
+//                   granularity control — used by the fullscreen view,
+//                   which draws its own controls in its own bar. The
+//                   isEmpty/"chart unavailable" fallback text is NOT part
+//                   of this "chrome" — those keep rendering regardless, or
+//                   an empty/offline fullscreen chart would show nothing
+//                   at all where its explanation belongs.
+//   opts.trackWidth default null. A number sizes the canvas wrap to an
+//                   explicit CSS pixel width (100% height) instead of the
+//                   card's own fixed height, and tightens the x-axis tick
+//                   budget to what that width can actually hold — the
+//                   fullscreen view's sideways-scrolling track.
+//   opts.plugins    default []. Extra Chart.js plugin instances (e.g. the
+//                   pinned-axis plugin) registered on this chart only.
+export function renderWeekly(model, opts = {}) {
   destroyWeekly();
+
+  const chrome = opts.chrome !== false;
+  const trackWidthPx =
+    typeof opts.trackWidth === 'number' && Number.isFinite(opts.trackWidth) ? opts.trackWidth : null;
+  const extraPlugins = Array.isArray(opts.plugins) ? opts.plugins : [];
 
   const root = document.createElement('div');
   root.className = 'weekly';
 
-  const meaning = document.createElement('p');
-  meaning.className = 'weekly-meaning';
-  meaning.textContent = modelMeaningText(model);
-  root.appendChild(meaning);
+  if (chrome) {
+    const meaning = document.createElement('p');
+    meaning.className = 'weekly-meaning';
+    meaning.textContent = modelMeaningText(model);
+    root.appendChild(meaning);
 
-  // Step 3.2c §3.1 — the granularity control lives ON the chart it governs.
-  // The 3M/6M/1Y/All range control deliberately stays global at the top of
-  // the detail screen because it also bounds the heatmap's navigable months
-  // and its 'before' cutoff; bucketing affects only this chart, so it sits
-  // here. Attaches NO listeners — detail.js owns the one delegated click
-  // listener, exactly as the heatmap's month nav does.
-  const periods = document.createElement('div');
-  periods.className = 'trend-periods';
-  periods.setAttribute('role', 'group');
-  periods.setAttribute('aria-label', 'Granularity');
-  const activePeriod = model.period || 'week';
-  for (const p of PERIODS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'trend-period';
-    btn.dataset.period = p.key;
-    btn.setAttribute('aria-pressed', String(p.key === activePeriod));
-    btn.textContent = p.label;
-    periods.appendChild(btn);
+    // Step 3.2c §3.1 — the granularity control lives ON the chart it
+    // governs. The 3M/6M/1Y/All range control deliberately stays global at
+    // the top of the detail screen because it also bounds the heatmap's
+    // navigable months and its 'before' cutoff; bucketing affects only
+    // this chart, so it sits here. Attaches NO listeners — detail.js owns
+    // the one delegated click listener, exactly as the heatmap's month nav
+    // does. Step U.4: the fullscreen view draws its own granularity
+    // control in its own bar instead (opts.chrome: false), so this block
+    // is skipped there.
+    const periods = document.createElement('div');
+    periods.className = 'trend-periods';
+    periods.setAttribute('role', 'group');
+    periods.setAttribute('aria-label', 'Granularity');
+    const activePeriod = model.period || 'week';
+    for (const p of PERIODS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'trend-period';
+      btn.dataset.period = p.key;
+      btn.setAttribute('aria-pressed', String(p.key === activePeriod));
+      btn.textContent = p.label;
+      periods.appendChild(btn);
+    }
+    root.appendChild(periods);
   }
-  root.appendChild(periods);
 
   if (model.isEmpty) {
     const p = document.createElement('p');
@@ -696,6 +730,13 @@ export function renderWeekly(model) {
 
   const wrap = document.createElement('div');
   wrap.className = 'weekly-canvas-wrap';
+  // Step U.4 (CONTRACT-U.4.md §3): an explicit track width (the fullscreen
+  // sideways-scrolling view) replaces the card's fixed CSS height with a
+  // 100% that fills whatever height .fs-track gives it.
+  if (trackWidthPx !== null) {
+    wrap.style.width = `${trackWidthPx}px`;
+    wrap.style.height = '100%';
+  }
   const canvas = document.createElement('canvas');
   canvas.className = 'weekly-canvas';
   wrap.appendChild(canvas);
@@ -772,8 +813,16 @@ export function renderWeekly(model) {
   // each of the three device defects traced back to this one gap.
   const bounds = axisBoundsFor(model);
   const yTheme = yAxisTheme();
+  const xTheme = xAxisTheme();
+  // Step U.4 (CONTRACT-U.4.md §3): an explicit track width tightens the tick
+  // budget to what that width can actually hold — otherwise Chart.js's own
+  // xAxisTheme() cap (6) would leave most of a year-wide daily track blank
+  // between labels.
+  if (trackWidthPx !== null) {
+    xTheme.ticks = { ...xTheme.ticks, maxTicksLimit: maxTicksFor(trackWidthPx) };
+  }
   const scales = {
-    x: { type: 'category', ...xAxisTheme() },
+    x: { type: 'category', ...xTheme },
     y: { ...yTheme },
   };
   if (bounds.beginAtZero) scales.y.beginAtZero = true;
@@ -816,6 +865,13 @@ export function renderWeekly(model) {
         scales,
         plugins,
       },
+      // Step U.4 (CONTRACT-U.4.md §3): opts.plugins — extra INLINE plugin
+      // instances (e.g. scroll.js's pinned-axis plugin) registered on this
+      // chart only, via Chart.js's top-level `plugins` array. This is a
+      // different mechanism from `options.plugins` above (per-registered-
+      // plugin CONFIG, e.g. legend/tooltip/annotation) — an empty default
+      // array here is a no-op, so every pre-U.4 caller is unaffected.
+      plugins: extraPlugins,
     });
   } catch {
     // A construction failure must not break the whole detail screen —

@@ -126,6 +126,20 @@ for (const scheme of ['dark', 'light']) {
   await shot(page3, p + 'lock', false);
   await ctx3.close();
 }
+// Full-screen chart routes (U.4): portrait (the app rotates itself) and a
+// physically landscape viewport, dark only.
+for (const [label, vw, vh] of [['portrait', 390, 844], ['landscape', 844, 390]]) {
+  const ctxF = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, colorScheme: 'dark', serviceWorkers: 'block' });
+  const pageF = await ctxF.newPage();
+  await seedSession(pageF);
+  await pageF.addInitScript(() => localStorage.setItem('daily.detail.overlay.v1', JSON.stringify({ 2: [1] })));
+  await wire(pageF);
+  await pageF.goto(BASE + '/index.html#/t/2/chart/range');
+  await shot(pageF, `fullscreen-range-${label}`, false);
+  await pageF.goto(BASE + '/index.html#/t/1/chart/trend');
+  await shot(pageF, `fullscreen-trend-${label}`, false);
+  await ctxF.close();
+}
 // Landscape detail, to see what the charts do today when the phone rotates.
 const ctxL = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, colorScheme: 'dark', serviceWorkers: 'block' });
 const pageL = await ctxL.newPage();

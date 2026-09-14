@@ -204,12 +204,18 @@ export function calendarFrom(entries, today) {
 // DOM + network wiring
 // =============================================================================
 
-const RANGE_STORAGE_KEY = 'daily.detail.range.v1';
-const PERIOD_STORAGE_KEY = 'daily.detail.period.v1';
+// Step U.4 (CONTRACT-U.4.md §6): exported so js/views/fullscreen.js reads
+// and writes the SAME keys this view does — the fullscreen chart opens
+// with whatever range/period the card last showed, and a change made in
+// fullscreen is what the card shows on return. Nothing about their
+// meaning changes; only their visibility widens from module-private to
+// exported.
+export const RANGE_STORAGE_KEY = 'daily.detail.range.v1';
+export const PERIOD_STORAGE_KEY = 'daily.detail.period.v1';
 // Step 3.3b: a SEPARATE key from the trend chart's. The two charts answer
 // different questions and their lenses are independent — daily bounds
 // alongside a monthly trend is a perfectly reasonable thing to want.
-const BOUNDS_PERIOD_STORAGE_KEY = 'daily.detail.boundsPeriod.v1';
+export const BOUNDS_PERIOD_STORAGE_KEY = 'daily.detail.boundsPeriod.v1';
 
 // Step 3.2c: Daily is capped at 3 months (recorded user decision,
 // 2026-08-24). 365 daily marks on a 390px screen is unreadable, so
@@ -777,7 +783,9 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
         expandBtn.type = 'button';
         expandBtn.className = 'chart-expand';
         expandBtn.dataset.expand = expandKind;
-        expandBtn.hidden = true;
+        // Step U.4 (CONTRACT-U.4.md §6): unhidden now that the fullscreen
+        // route exists — U.3 rendered this `hidden` because there was
+        // nowhere for it to navigate to yet.
         expandBtn.setAttribute('aria-label', `Expand ${SLOT_TITLES[slot]}`);
         // Own constant SVG markup only (js/ui-icons.js) — same rule as
         // iconSpan's innerHTML above.
@@ -1260,6 +1268,32 @@ export function createDetailView({ id, store, api, today, onTitle } = {}) {
       if (cellBtn && sectionEl.contains(cellBtn)) {
         if (entriesLoading || dayInFlight) return;
         openDayEditor(cellBtn.dataset.date);
+        return;
+      }
+
+      // Step U.4 (CONTRACT-U.4.md §6): the Expand buttons U.3 put in place
+      // (rendered hidden until this step) navigate to the real fullscreen
+      // route — data-expand carries the exact 'trend'/'range' kind the
+      // route expects, so there is nothing to translate here.
+      //
+      // Contract amendment (post-U.4, fixing F4): a plain `location.hash =`
+      // is indistinguishable, from fullscreen.js's own Close handler, from
+      // a cold launch / direct URL — `history.length` is NOT a usable
+      // signal for "did the user get here from within the app" (a fresh
+      // tab already reports length 2 before this app ever runs a single
+      // navigation, while a cold-launched PWA can report 1). pushState
+      // instead, stamping `{ fromApp: true }` into the new entry's own
+      // state, so Close can tell the two cases apart by reading
+      // history.state rather than guessing from history.length.
+      // pushState() does not fire 'hashchange' (only user-driven navigation
+      // and location.hash assignment do), so it is dispatched by hand —
+      // main.js's existing 'hashchange' listener (bootstrap()) renders the
+      // new route exactly as it would for a real one.
+      const expandBtn = target.closest('button.chart-expand[data-expand]');
+      if (expandBtn && sectionEl.contains(expandBtn)) {
+        const hash = `#/t/${encodeURIComponent(idStr)}/chart/${expandBtn.dataset.expand}`;
+        history.pushState({ fromApp: true }, '', hash);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
         return;
       }
 
