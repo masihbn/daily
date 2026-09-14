@@ -1,37 +1,86 @@
-/* Dark-mode-first: the app is opened at night. Colors live as custom
-   properties on :root so there's one place to change them; the light
-   scheme is an override, not the default. */
+/* Design tokens (Step U.0, docs/DESIGN_PLAN.md §0-§1). Dark is the value
+   set directly on :root; the light scheme below overrides EVERY token —
+   the app is opened at night as often as in daylight, so neither scheme
+   is allowed to fall back to the other's value for anything.
+   --accent is written as a literal hex in BOTH blocks (never var(--fg))
+   because js/charts/*.js reads it with getComputedStyle(...).getPropertyValue
+   at render time — a var() reference would still resolve for chart code,
+   but the literal is what the contract pins so the two can never drift
+   apart from what a human reviewing this file sees.
+   --bg-elevated, --fg-muted, --border, --danger are legacy names kept as
+   aliases of the new tokens for this step only (docs/DESIGN_PLAN.md §0
+   decision 3) — they are removed in U.7 once nothing references them. */
 :root {
-  --bg: #111111;
-  --bg-elevated: #1c1c1e;
-  --fg: #f2f2f2;
-  --fg-muted: #9a9a9a;
-  --accent: #3478f6;
-  --border: #2e2e30;
+  /* surfaces */
+  --bg: #0b0b0e;
+  --surface: #151518;
+  --surface-2: #1f1f24;
+  --surface-3: #2b2b31;
+  /* text */
+  --fg: #f5f5f7;
+  --fg-2: #a1a1aa;
+  --fg-3: #6e6e78;
+  --hairline: rgba(255, 255, 255, 0.08);
+  /* accent = neutral (docs/DESIGN_PLAN.md §0 decision 1: no more iOS
+     blue — trackable colours and the good/bad verdict are the only
+     saturated colours left) */
+  --accent: #f5f5f7;
+  --accent-fg: #0b0b0e;
+  /* semantics */
+  --good: #30d158;
+  --good-bg: rgba(48, 209, 88, 0.14);
+  --bad: #ff453a;
+  --bad-bg: rgba(255, 69, 58, 0.14);
+  --warn: #ffb340;
+  --focus: rgba(245, 245, 247, 0.45);
+  --shadow: none;
+  /* legacy aliases (removed in U.7) */
+  --bg-elevated: var(--surface);
+  --fg-muted: var(--fg-2);
+  --border: var(--hairline);
+  --danger: var(--bad);
+  /* type */
+  --font: -apple-system, system-ui, "SF Pro Text", "Segoe UI", sans-serif;
+  --t-lg-title: 700 34px/1.15 var(--font);
+  --t-title: 700 22px/1.2 var(--font);
+  --t-head: 600 17px/1.3 var(--font);
+  --t-body: 400 17px/1.4 var(--font);
+  --t-sub: 400 15px/1.4 var(--font);
+  --t-cap: 500 13px/1.35 var(--font);
+  --t-micro: 600 11px/1.2 var(--font);
+  /* space, radius */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --r-ctl: 10px;
+  --r-card: 16px;
+  --r-sheet: 22px;
+  --r-pill: 999px;
   --nav-height: 56px;
-  --danger: #ff6b6b;
-  /* Step 2.1b: "good"/"bad" verdict colours (CONTRACT-2.1b.md §5). --bad
-     is an alias for --danger, not a duplicate literal, so the two colours
-     can never drift apart. Neutral reuses the existing --fg-muted — no
-     new token needed for it. */
-  --good: #34c759;
-  --bad: var(--danger);
-  --good-bg: rgba(52, 199, 89, 0.18);
-  --bad-bg: rgba(255, 107, 107, 0.18);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f5f5f7;
-    --bg-elevated: #ffffff;
-    --fg: #111111;
-    --fg-muted: #6b6b6f;
-    --accent: #3478f6;
-    --border: #dcdcdf;
-    --danger: #d9362e;
+    --bg: #f2f2f7;
+    --surface: #ffffff;
+    --surface-2: #f2f2f5;
+    --surface-3: #e5e5ea;
+    --fg: #0b0b0e;
+    --fg-2: #5c5c66;
+    --fg-3: #8e8e96;
+    --hairline: rgba(0, 0, 0, 0.08);
+    --accent: #0b0b0e;
+    --accent-fg: #ffffff;
     --good: #1f9c46;
-    --good-bg: rgba(31, 156, 70, 0.14);
-    --bad-bg: rgba(217, 54, 46, 0.14);
+    --good-bg: rgba(31, 156, 70, 0.12);
+    --bad: #d9362e;
+    --bad-bg: rgba(217, 54, 46, 0.12);
+    --warn: #b26a00;
+    --focus: rgba(11, 11, 14, 0.35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.05);
   }
 }
 
@@ -50,75 +99,68 @@ html, body {
    underneath it; and `height: 100%` resolves against the layout viewport,
    which under `viewport-fit=cover` can be shorter than the physical screen,
    leaving a gap beyond it that paints as canvas color. Giving `html` the
-   *elevated* color (matching #nav's background) makes that gap invisible
+   *surface* color (matching #nav's background) makes that gap invisible
    instead of a seam. This is a hypothesis pending device re-verification —
    #nav's own rules (fixed position, safe-area padding) are already correct
    and were ruled out as the cause. If banding persists after this, look at
    the layout-viewport height itself next (e.g. `100dvh` or
    `-webkit-fill-available` on `html, body`), not the nav rules. */
 html {
-  background: var(--bg-elevated);
+  background: var(--surface);
 }
 
 body {
   background: var(--bg);
   color: var(--fg);
-  font-family: -apple-system, system-ui, sans-serif;
+  font: var(--t-body);
+  -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
   min-height: 100%;
 }
 
 header {
-  padding: 16px;
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
-  padding-left: calc(16px + env(safe-area-inset-left, 0px));
-  padding-right: calc(16px + env(safe-area-inset-right, 0px));
-  border-bottom: 1px solid var(--border);
+  padding: var(--s4);
+  padding-top: calc(var(--s4) + env(safe-area-inset-top, 0px));
+  padding-left: calc(var(--s4) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--s4) + env(safe-area-inset-right, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
 }
 
 header h1 {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font: var(--t-head);
 }
 
 /* Step D.6 — global "unsent writes" indicator. Sits under the title in the
    shell so it is visible from every route, including the detail screens
    where an offline log is most likely to be made.
    `[hidden]` needs the explicit display:none because the rule below would
-   otherwise win on specificity. */
+   otherwise win on specificity. Amber (--warn), not red: nothing is lost —
+   the write is queued and persisted, it just has not reached the server
+   yet. Red would read as an error and invite the user to re-log a value
+   that is already safely captured. */
 .outbox-status {
   margin: 6px 0 0;
   font-size: 13px;
   font-weight: 500;
-  /* Amber, not red: nothing is lost — the write is queued and persisted, it
-     just has not reached the server yet. Red would read as an error and
-     invite the user to re-log a value that is already safely captured. */
-  color: #b26a00;
+  color: var(--warn);
 }
 
 .outbox-status[hidden] {
   display: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  .outbox-status {
-    color: #ffb340;
-  }
-}
-
 /* Step 5.1 — offline indicator, same placement/shape rules as
    .outbox-status above (it sits directly below it in the shell). Muted
    rather than alarming: it states a fact ("showing last saved data"), not
-   an error — nothing is broken and nothing is lost. Uses the existing
-   --fg-muted token (already flips for the light-scheme override above),
-   so no new custom property or dark-mode block is needed. */
+   an error — nothing is broken and nothing is lost. */
 .net-status {
   margin: 6px 0 0;
   font-size: 13px;
   font-weight: 500;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .net-status[hidden] {
@@ -127,19 +169,31 @@ header h1 {
 
 #app {
   flex: 1;
-  padding: 16px;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 16px);
-  padding-left: calc(16px + env(safe-area-inset-left, 0px));
-  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  padding: var(--s4);
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + var(--s4));
+  padding-left: calc(var(--s4) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--s4) + env(safe-area-inset-right, 0px));
 }
 
 #app h1 {
-  font-size: 22px;
-  margin: 0 0 12px;
+  font: var(--t-lg-title);
+  margin: 0 0 var(--s4);
 }
 
+/* Step U.0: the app's own chrome carries no colour of its own any more
+   (docs/DESIGN_PLAN.md §0 decision 1) — every in-app link inherits the
+   surrounding text colour and draws its own look via its component class
+   instead of reading as "a blue link". The two exceptions that are
+   genuinely prose (the empty-state and not-found copy — plain <p> tags
+   with an unclassed <a> inside, see js/views/home.js and js/main.js) get
+   their underline back below so they still read as text, not chrome. */
 #app a {
-  color: var(--accent);
+  color: inherit;
+  text-decoration: none;
+}
+
+#app p a {
+  text-decoration: underline;
 }
 
 /* Bottom nav: fixed to the viewport bottom, padded for the iPhone home
@@ -150,8 +204,10 @@ header h1 {
   right: 0;
   bottom: 0;
   display: flex;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
+  border-top: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
@@ -173,28 +229,304 @@ header h1 {
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  color: var(--fg-muted);
+  color: var(--fg-3);
   text-decoration: none;
-  font-size: 13px;
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 #nav a[aria-current="page"] {
-  color: var(--accent);
+  color: var(--fg);
   font-weight: 600;
 }
 
+/* Step U.0: the global button rule is now a RESET ONLY (no background, no
+   padding, no radius, no min-height) — docs/DESIGN_PLAN.md §2/§3. Every
+   button class below now carries its own full look; none of them may rely
+   on this rule for sizing any more. */
 button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  font-size: 16px;
-  padding: 12px 20px;
-  border-radius: 12px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Component kit (Step U.0, docs/DESIGN_PLAN.md §3). Additive: nothing in
+   js/ carries these class names yet — later U.1+ steps add them alongside
+   each element's existing class (never in place of it, see
+   docs/DESIGN_PLAN.md's "Selectors are an API"). Every existing component
+   below is migrated to the metrics/colours of the variant it will
+   eventually carry, but only these rules are matched by these names. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
   min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  font: var(--t-head);
+  white-space: nowrap;
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.btn:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn--secondary {
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--fg-2);
+}
+
+.btn--danger {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+/* Fix cycle (2026-09-14): docs/DESIGN_PLAN.md §1's 44pt tap-target floor
+   wins over the smaller "sm" metric the contract's kit table originally
+   gave this variant — the padding/font still read as "small", only the
+   tap height does not shrink. */
+.btn--sm {
+  min-height: 44px;
+  padding: 0 var(--s3);
+  font: var(--t-cap);
+}
+
+.btn--icon {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  border-radius: var(--r-pill);
+}
+
+.btn--block {
+  display: flex;
+  width: 100%;
+}
+
+.btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.seg {
+  display: flex;
+  padding: 4px;
+  gap: 2px;
+  background: var(--surface-2);
+  border-radius: var(--r-ctl);
+}
+
+/* Fix cycle (2026-09-14): 44pt floor wins (docs/DESIGN_PLAN.md §1) — a
+   .seg track is now 52px tall (4px padding + 44px item) instead of 44px,
+   accepted. */
+.seg__item {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 8px;
+  font: var(--t-cap);
+  color: var(--fg-2);
+}
+
+.seg__item[aria-pressed="true"] {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.seg__item:disabled {
+  opacity: 0.4;
+}
+
+/* Fix cycle (2026-09-14): 44pt floor wins (docs/DESIGN_PLAN.md §1) — a
+   chip is an interactive toggle (aria-pressed), not a status label, so it
+   gets the same tap-height floor as every other control. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-cap);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: var(--s4);
+  box-shadow: var(--shadow);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+
+.card__title {
+  font: var(--t-head);
+  margin: 0;
+}
+
+.card__sub {
+  font: var(--t-cap);
+  color: var(--fg-2);
+  margin: 2px 0 0;
+}
+
+.list {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 52px;
+  padding: var(--s2) var(--s4);
+}
+
+.list__row + .list__row {
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+
+.list__trail {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s2);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 var(--s4);
+}
+
+.field__label {
+  font: var(--t-cap);
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+}
+
+.input {
+  min-height: 48px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--hairline);
+  font: var(--t-body);
+  font-size: 17px;
+}
+
+.input:focus {
+  border-color: var(--fg-3);
+  outline: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  font: var(--t-cap);
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--fg-2);
+}
+
+.pill--good {
+  background: var(--good-bg);
+  color: var(--good);
+}
+
+.pill--bad {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.pill--warn {
+  color: var(--warn);
+}
+
+.pill svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Home: trackable list + quick-log (Step 2.1) --------------------------- */
@@ -206,13 +538,9 @@ button {
 
 .home-offline,
 .home-empty {
-  margin: 0 0 12px;
-  color: var(--fg-muted);
-  font-size: 14px;
-}
-
-.home-empty a {
-  color: var(--accent);
+  margin: 0 0 var(--s3);
+  color: var(--fg-2);
+  font: var(--t-sub);
 }
 
 .tlist {
@@ -221,7 +549,7 @@ button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--s3);
 }
 
 /* Direct children only — the DOM shape here is fixed by the interface
@@ -231,18 +559,15 @@ button {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 4px;
+  column-gap: var(--s3);
+  row-gap: var(--s1);
   width: 100%;
   min-width: 0;
-  padding: 12px 14px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  /* The verdict border-left below adds its own visible edge; a slightly
-     smaller base radius on that side keeps the tint from poking past the
-     rounded corner. */
-  border-left-width: 4px;
-  border-radius: 12px;
+  padding: 14px var(--s4);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--hairline);
+  border-radius: var(--r-card);
 }
 
 .trow[data-state="pending"] {
@@ -250,7 +575,7 @@ button {
 }
 
 .trow[data-state="failed"] {
-  border-color: var(--danger);
+  border-left-color: var(--bad);
 }
 
 /* Step 2.1b good/bad/neutral verdict (CONTRACT-2.1b.md §5). A green check
@@ -261,21 +586,16 @@ button {
    .trow-value's word and .trow-symbol's shape carry the same meaning. */
 .trow[data-verdict="good"] {
   border-left-color: var(--good);
-  background: linear-gradient(0deg, var(--good-bg), var(--good-bg)), var(--bg-elevated);
+  background: linear-gradient(0deg, var(--good-bg), var(--good-bg)), var(--surface);
 }
 
 .trow[data-verdict="bad"] {
   border-left-color: var(--bad);
-  background: linear-gradient(0deg, var(--bad-bg), var(--bad-bg)), var(--bg-elevated);
+  background: linear-gradient(0deg, var(--bad-bg), var(--bad-bg)), var(--surface);
 }
 
 .trow[data-verdict="neutral"] {
-  border-left-color: var(--border);
-}
-
-/* Failed state still wins visually over a stale verdict tint. */
-.trow[data-state="failed"] {
-  border-left-color: var(--danger);
+  border-left-color: var(--hairline);
 }
 
 /* Step 2.5: the trackable's identity colour (which thing is this),
@@ -283,17 +603,21 @@ button {
    the row border/background and .trow-symbol instead. See
    CONTRACT-2.5.md §0 "the channel rule". color is set inline per-row from
    the trackable's stored colour (home.js); when absent this falls back to
-   the same muted tone the symbol ring uses, so an uncoloured trackable
-   still reads as a coherent (if neutral) icon. */
+   the muted tone the symbol ring uses, so an uncoloured trackable still
+   reads as a coherent (if neutral) icon. Step U.0: the icon now sits in a
+   36px round well tinted from that same inline colour via color-mix(),
+   rather than showing the bare glyph on the card background. */
 .trow-icon {
   order: -1;
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--fg-muted);
+  color: var(--fg-2);
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .trow-icon svg {
@@ -310,7 +634,7 @@ button {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 2px solid var(--fg-muted);
+  border: 2px solid var(--fg-3);
   font-size: 15px;
   font-weight: 700;
   line-height: 1;
@@ -344,7 +668,7 @@ button {
    border-radius: 50% above) IS the "empty outline circle" the contract
    asks for. */
 .trow-symbol[data-symbol="empty"] {
-  border-color: var(--fg-muted);
+  border-color: var(--fg-3);
   background: transparent;
 }
 
@@ -354,7 +678,7 @@ button {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--fg);
-  font-weight: 600;
+  font: var(--t-head);
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -364,7 +688,8 @@ button {
   order: 2;
   flex: 0 0 auto;
   margin-left: auto;
-  color: var(--fg-muted);
+  color: var(--fg-2);
+  font: 700 20px/1.2 var(--font);
   font-variant-numeric: tabular-nums;
 }
 
@@ -390,31 +715,36 @@ button {
 /* Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for a bounded
    numeric's good/bad verdict. Same order as .trow-value so the two sit
    together — ties in flex `order` keep document order, and this span is
-   always appended right after .trow-value in the DOM (home.js). The
-   coloured border/background from `.trow[data-verdict]` above already
-   applies to numeric rows now that verdict() can return good/bad for
-   them; this adds the required non-colour word on top of it. */
+   always appended right after .trow-value in the DOM (home.js). Step
+   U.0: takes the kit's pill metrics/tint instead of plain coloured text. */
 .trow-status {
   order: 2;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  font: var(--t-cap);
   font-size: 12px;
   font-weight: 600;
 }
 
 .trow[data-verdict="good"] .trow-status {
+  background: var(--good-bg);
   color: var(--good);
 }
 
 .trow[data-verdict="bad"] .trow-status {
+  background: var(--bad-bg);
   color: var(--bad);
 }
 
 .trow-direction {
   order: 3;
   flex: 0 0 auto;
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-style: italic;
+  color: var(--fg-3);
+  font: var(--t-cap);
   white-space: nowrap;
 }
 
@@ -423,14 +753,30 @@ button {
   flex: 1 1 100%;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-3);
+  font: var(--t-cap);
 }
 
+/* Step U.0: the global `button` rule is a reset only now, so every one of
+   these carries its own complete look — see the comment on that rule
+   above. .trow-log = secondary/sm, .trow-save = primary/sm, .trow-cancel
+   = ghost/sm (docs/DESIGN_PLAN.md §4). Fix cycle (2026-09-14): the "sm"
+   look keeps its smaller padding/font, but every one of these is a real
+   tap target, so min-height stays at the 44pt floor (§1) regardless. */
 .trow-log {
   order: 5;
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
   min-height: 44px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
@@ -441,33 +787,58 @@ button {
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s2);
   margin: 0;
 }
 
 .trow-input {
   flex: 1 1 100px;
   min-width: 0;
-  min-height: 44px;
-  padding: 0 12px;
-  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  min-height: 48px;
+  padding: 0 var(--s3);
+  font: var(--t-body);
+  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
   color: var(--fg);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+.trow-input:focus {
+  border-color: var(--fg-3);
+  outline: none;
+}
+
 .trow-save {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-cap);
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.trow-save:active {
+  transform: scale(0.97);
+  opacity: 0.85;
 }
 
 .trow-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--t-cap);
 }
 
 .trow-error {
@@ -476,20 +847,26 @@ button {
   min-width: 0;
   overflow-wrap: anywhere;
   margin: 2px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
+/* .home-new is an <a>, so it never depended on the global button rule —
+   it already carried a full look; Step U.0 gives it the secondary/block
+   look instead of the old bare-outline one. */
 .home-new {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  width: 100%;
+  margin-top: var(--s3);
   min-height: 44px;
-  padding: 0 16px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  color: var(--accent);
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-head);
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -505,7 +882,7 @@ button {
 .tform-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--s4);
   width: 100%;
 }
 
@@ -533,29 +910,38 @@ button {
 
 .tform-field > label,
 .tform-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-muted);
+  font: var(--t-cap);
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
 }
 
 .tform-input,
 .tform-select {
   width: 100%;
-  min-height: 44px;
-  padding: 0 12px;
-  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  min-height: 48px;
+  padding: 0 var(--s3);
+  font: var(--t-body);
+  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
   color: var(--fg);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+.tform-input:focus,
+.tform-select:focus {
+  border-color: var(--fg-3);
+  outline: none;
+}
+
 .tform-select {
   /* Native select affordance; padding matches .tform-input so both line
      up when they appear back-to-back in a numeric trackable's form. */
-  padding-right: 8px;
+  padding-right: var(--s2);
 }
 
 /* DEFECT 2 fix (CONTRACT-2.4.md §4): without align-items, this defaults
@@ -576,7 +962,7 @@ button {
 .tform-radio-pair {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s2);
 }
 
 .tform-radio-group input[type="radio"] {
@@ -631,8 +1017,8 @@ button {
   max-height: 220px;
   overflow-y: auto;
   padding: 6px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
 }
 
 .tform-icon-grid input[type="radio"] {
@@ -653,9 +1039,9 @@ button {
   height: 44px;
   min-width: 44px;
   min-height: 44px;
-  border-radius: 10px;
+  border-radius: var(--r-ctl);
   border: 2px solid transparent;
-  background: var(--bg-elevated);
+  background: var(--surface-2);
   color: inherit;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -674,15 +1060,17 @@ button {
 
 /* Same unmistakable-selection treatment as the colour swatch fix in Step
    2.4 (CONTRACT-2.4.md §8) — an outline clearly separated from the option,
-   not colour alone (WCAG 1.4.1). outline-offset is 2px here (vs 3px for
-   the colour swatch) per CONTRACT-2.5.md §3.3. */
+   not colour alone (WCAG 1.4.1). Step U.0: the selected cell also picks up
+   a surface-3 fill so it reads as "chosen" even to someone not scanning
+   for the ring. */
 .tform-icon-grid input[type="radio"]:checked + .tform-icon-option {
-  outline: 3px solid var(--fg);
+  background: var(--surface-3);
+  outline: 2px solid var(--fg);
   outline-offset: 2px;
 }
 
 .tform-icon-grid input[type="radio"]:focus-visible + .tform-icon-option {
-  outline: 3px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -723,7 +1111,10 @@ button {
    colour: a ring clearly separated from the swatch (outline +
    outline-offset, not a border sitting on the edge) plus a check glyph
    centred inside it, drawn via CSS `content` — matching how
-   .trow-symbol draws its check — NOT emoji. */
+   .trow-symbol draws its check — NOT emoji. The glyph stays literal
+   white (not a token): it sits on an arbitrary saturated trackable
+   colour, not on a chrome surface, so it needs a fixed guaranteed
+   contrast regardless of scheme. */
 .tform-color-group input[type="radio"]:checked + .tform-color-swatch {
   outline: 3px solid var(--fg);
   outline-offset: 3px;
@@ -741,7 +1132,7 @@ button {
    comment on `.tform-color-group input[type="radio"]` above); the
    keyboard focus ring is drawn on the swatch it labels instead. */
 .tform-color-group input[type="radio"]:focus-visible + .tform-color-swatch {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 
@@ -757,58 +1148,109 @@ button {
   border: 0;
 }
 
-.tform-save,
-.tform-archive,
-.tform-archive-confirm,
-.tform-archive-cancel {
-  min-height: 44px;
-}
-
-.tform-cancel {
-  display: inline-flex;
+/* Step U.0: the global `button` rule is a reset only now — .tform-save
+   (primary/block), .tform-archive (ghost, danger text), the confirm
+   step's .tform-archive-confirm (danger) and .tform-archive-cancel
+   (ghost) each need their full look spelled out here; none of them may
+   rely on the base `button` rule for sizing any more. .tform-cancel is
+   an <a>, unaffected by the button reset, but keeps the same ghost/block
+   look for visual consistency with its sibling. */
+.tform-save {
+  display: flex;
+  width: 100%;
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  color: var(--fg-muted);
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.tform-save:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
+.tform-save:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.tform-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
   text-decoration: none;
+  font: var(--t-head);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .tform-archive {
-  margin-top: 16px;
+  margin-top: var(--s4);
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
   background: transparent;
-  color: var(--danger);
-  border: 1px solid var(--danger);
+  color: var(--bad);
+  font: var(--t-head);
 }
 
 .tform-confirm-archive {
-  margin-top: 16px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--danger);
+  margin-top: var(--s4);
+  padding: var(--s3);
+  border-radius: var(--r-card);
+  border: 1px solid var(--hairline);
   background: var(--bad-bg);
   color: var(--fg);
-  font-size: 14px;
+  font: var(--t-sub);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--s3);
 }
 
 .tform-confirm-archive .tform-archive-confirm {
-  background: var(--danger);
-  color: #fff;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--bad);
+  color: var(--accent-fg);
+  font: var(--t-head);
 }
 
 .tform-confirm-archive .tform-archive-cancel {
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--t-head);
 }
 
 .tform-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -823,9 +1265,9 @@ button {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  column-gap: 10px;
+  column-gap: var(--s3);
   row-gap: 6px;
-  margin: 0 0 16px;
+  margin: 0 0 var(--s4);
 }
 
 /* Step 2.5: same tinted-icon treatment as .trow-icon, at a larger size
@@ -833,7 +1275,9 @@ button {
    screen doesn't even compute a verdict, so there is nothing for it to
    conflict with. No explicit `order` needed: this is appended first in
    detail.js and detail-head's other children carry no order of their own,
-   so DOM order already puts it first. */
+   so DOM order already puts it first. Not named in CONTRACT-U.0.md §4's
+   Detail bullet, so its geometry stays as-is; only its colour moves onto
+   a token (see the report). */
 .detail-icon {
   flex: 0 0 auto;
   width: 40px;
@@ -841,7 +1285,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .detail-icon svg {
@@ -854,91 +1298,99 @@ button {
   flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 20px;
-  font-weight: 700;
+  font: 700 28px/1.15 var(--font);
 }
 
 .detail-unit,
 .detail-direction {
   flex: 0 0 auto;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-2);
+  font: var(--t-cap);
   white-space: nowrap;
 }
 
+/* .detail-edit is an <a>; Step U.0 gives it the secondary/sm look. */
 .detail-edit {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 44px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  color: var(--accent);
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-cap);
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* .detail-ranges is the segmented control's track (the buttons are its
+   direct children — no extra wrapper, see CONTRACT-U.0.md §4); .trend-
+   periods below and .bounds-periods (js/charts/bounds.js, which also
+   carries the .trend-period class on each button) share the exact same
+   track/item rules so every granularity control in the app reads as one
+   family. Fix cycle (2026-09-14): the 44pt floor (docs/DESIGN_PLAN.md §1)
+   wins over the kit's 36px seg-item metric, so the track (4px padding +
+   44px item) is 52px tall — accepted. */
 .detail-ranges {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 12px;
+  padding: 4px;
+  gap: 2px;
+  background: var(--surface-2);
+  border-radius: var(--r-ctl);
+  margin: 0 0 var(--s3);
 }
 
 .detail-range {
+  flex: 1;
   min-height: 44px;
-  min-width: 44px;
-  padding: 0 16px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 500;
+  padding: 0 var(--s2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .detail-range[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--surface-3);
+  color: var(--fg);
   font-weight: 600;
 }
 
 .detail-range:disabled {
-  opacity: 0.6;
+  opacity: 0.4;
 }
 
 .detail-count {
-  margin: 0 0 16px;
-  color: var(--fg-muted);
-  font-size: 13px;
+  margin: 0 0 var(--s4);
+  color: var(--fg-3);
+  font: var(--t-cap);
 }
 
 .chart-slot {
   width: 100%;
   min-width: 0;
-  margin: 0 0 14px;
-  padding: 16px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  margin: 0 0 var(--s3);
+  padding: var(--s4);
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
 }
 
 .chart-slot-title {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 0 0 var(--s3);
+  font: var(--t-head);
 }
 
 .chart-slot-placeholder {
   margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-3);
+  font: var(--t-cap);
 }
 
 /* Step 3.2b (CONTRACT-3.2b.md §5, fixing U1): shown instead of a slot's
@@ -953,8 +1405,8 @@ button {
   align-items: center;
   justify-content: center;
   min-height: 220px;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-3);
+  font: var(--t-cap);
 }
 
 .chart-slot[data-slot="heatmap"] .chart-slot-loading {
@@ -977,14 +1429,14 @@ button {
 }
 
 .detail-offline {
-  margin: 0 0 12px;
-  color: var(--fg-muted);
-  font-size: 14px;
+  margin: 0 0 var(--s3);
+  color: var(--fg-2);
+  font: var(--t-sub);
 }
 
 .detail-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1010,14 +1462,22 @@ button {
   margin: 0 0 10px;
 }
 
+/* Step U.0: .hm-nav = the kit's secondary icon-button look. Fix cycle
+   (2026-09-14): the contract originally called for 36px here, but the
+   44pt floor (docs/DESIGN_PLAN.md §1) wins over every interactive
+   control, this one included. */
 .hm-nav {
-  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
   min-width: 44px;
-  padding: 0 10px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  min-height: 44px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
   color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   font-size: 18px;
   line-height: 1;
   touch-action: manipulation;
@@ -1031,8 +1491,7 @@ button {
 .hm-month {
   flex: 1 1 auto;
   text-align: center;
-  font-size: 14px;
-  font-weight: 600;
+  font: var(--t-head);
   color: var(--fg);
 }
 
@@ -1045,8 +1504,8 @@ button {
 
 .hm-weekday {
   text-align: center;
-  font-size: 11px;
-  color: var(--fg-muted);
+  font: var(--t-micro);
+  color: var(--fg-3);
 }
 
 .hm-grid {
@@ -1062,7 +1521,7 @@ button {
   border: none;
   border-radius: 8px;
   padding: 0;
-  background: var(--bg);
+  background: var(--surface-2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1122,8 +1581,7 @@ button.hm-cell {
 .hm-cell[data-cell-state="outside"] .hm-day,
 .hm-cell[data-cell-state="future"] .hm-day,
 .hm-cell[data-cell-state="before"] .hm-day {
-  color: var(--fg-muted);
-  opacity: 0.5;
+  color: var(--fg-3);
 }
 
 /* Day editor (Step 3.1) --------------------------------------------------
@@ -1132,16 +1590,15 @@ button.hm-cell {
    every control here is disabled while the write is in flight. */
 
 .day-editor {
-  margin: 12px 0 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
+  margin: var(--s3) 0 0;
+  padding: var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
 }
 
 .day-editor-date {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 var(--s3);
+  font: var(--t-cap);
   font-weight: 600;
   color: var(--fg);
 }
@@ -1149,43 +1606,60 @@ button.hm-cell {
 .day-form {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--s2);
 }
 
 .day-input {
   flex: 1 1 100px;
   min-width: 0;
-  min-height: 44px;
-  padding: 0 12px;
-  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  min-height: 48px;
+  padding: 0 var(--s3);
+  font: var(--t-body);
+  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
   color: var(--fg);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
-.day-mark,
-.day-save,
-.day-clear,
-.day-cancel {
-  min-height: 44px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  font-size: 14px;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
+/* Step U.0: the global `button` rule is a reset only now — .day-mark and
+   .day-save take the primary look, .day-clear danger, .day-cancel ghost
+   (CONTRACT-U.0.md §4); each needs its full metrics spelled out below. */
 .day-mark,
 .day-save {
-  border-color: var(--accent);
-  color: var(--accent);
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-cap);
   font-weight: 600;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.day-clear {
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
+  color: var(--bad);
+  font: var(--t-cap);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.day-cancel {
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--t-cap);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .day-mark:disabled,
@@ -1197,7 +1671,7 @@ button.hm-cell {
 
 .day-error {
   margin: 8px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1216,8 +1690,8 @@ button.hm-cell {
 
 .weekly-meaning {
   margin: 0 0 10px;
-  font-size: 13px;
-  color: var(--fg-muted);
+  font: var(--t-cap);
+  color: var(--fg-2);
 }
 
 .weekly-canvas-wrap {
@@ -1234,8 +1708,8 @@ button.hm-cell {
 .weekly-empty,
 .weekly-unavailable {
   margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-2);
+  font: var(--t-cap);
 }
 
 /* Trend granularity control (Step 3.2c) ---------------------------------
@@ -1243,31 +1717,33 @@ button.hm-cell {
    and the trend chart (Step D.6b follow-up, 2026-09-04) rather than at
    the top of the screen, because it governs only the trend and range
    charts, not the heatmap — see js/views/detail.js's comment above where
-   rangesDiv is built. Same visual idiom as .detail-range so the two read
-   as controls of the same family. */
+   rangesDiv is built. Same seg track/item look as .detail-ranges/
+   .detail-range above so the two read as controls of the same family. */
 
 .trend-periods {
   display: flex;
-  gap: 8px;
+  padding: 4px;
+  gap: 2px;
+  background: var(--surface-2);
+  border-radius: var(--r-ctl);
   margin: 0 0 10px;
 }
 
 .trend-period {
   flex: 1 1 0;
   min-height: 44px;
-  padding: 0 10px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg-muted);
-  font-size: 13px;
+  padding: 0 var(--s2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-2);
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .trend-period[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--surface-3);
+  color: var(--fg);
   font-weight: 600;
 }
 
@@ -1290,9 +1766,9 @@ button.hm-cell {
 
 .bounds-summary {
   margin: 0 0 10px;
-  font-size: 13px;
+  font: var(--t-cap);
   font-weight: 600;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .bounds-summary[data-zone="in"] {
@@ -1317,8 +1793,8 @@ button.hm-cell {
 
 .bounds-unavailable {
   margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
+  color: var(--fg-2);
+  font: var(--t-cap);
 }
 
 /* Step 3.3b — the Range chart's granularity control reuses the trend
@@ -1329,16 +1805,15 @@ button.hm-cell {
 .bounds-meaning {
   margin: 0 0 8px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 /* Correlation overlay picker (Step 3.4) -----------------------------------
    Rendered in the 'overlay' chart slot (js/views/detail.js) — this is NOT
    a chart, it's the control that adds/removes marker rows on the Range
-   chart above. .overlay-chip reuses the .trend-period/.bounds-period pill
-   idiom (same border/background/pressed treatment) so every button group
-   on this screen reads as one family; the ::before dot is the one thing
-   unique to this control — it lets a chip carry its own trackable's
+   chart above. .overlay-chip takes the kit's chip look so every button
+   group on this screen reads as one family; the ::before dot is the one
+   thing unique to this control — it lets a chip carry its own trackable's
    colour, matching the marker colour drawn on the chart. */
 
 .overlay-picker {
@@ -1348,7 +1823,7 @@ button.hm-cell {
 .overlay-hint {
   margin: 0 0 10px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .overlay-chips {
@@ -1357,17 +1832,22 @@ button.hm-cell {
   gap: 8px;
 }
 
+/* Fix cycle (2026-09-14): 44pt floor wins (docs/DESIGN_PLAN.md §1) — same
+   reasoning as the kit's .chip rule above (this is an interactive
+   toggle, not a status label). This class also carries .compare-chip via
+   the combined className in js/views/compare.js, so that chip picks up
+   the same fix with no separate rule needed. */
 .overlay-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg-muted);
-  font-size: 13px;
+  padding: 0 14px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--fg-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1378,12 +1858,12 @@ button.hm-cell {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--chip-color, var(--fg-muted));
+  background: var(--chip-color, var(--fg-2));
 }
 
 .overlay-chip[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--surface-3);
+  color: var(--fg);
   font-weight: 600;
 }
 
@@ -1415,7 +1895,7 @@ button.hm-cell {
 .compare-hint {
   margin: 0 0 10px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .compare-chips {
@@ -1427,7 +1907,7 @@ button.hm-cell {
 .compare-meaning {
   margin: 0 0 10px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .compare-canvas-wrap {
@@ -1445,7 +1925,7 @@ button.hm-cell {
 .compare-unavailable,
 .compare-loading {
   margin: 0;
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 13px;
 }
 
@@ -1460,7 +1940,7 @@ button.hm-cell {
 
 .compare-skipped {
   margin: 10px 0 0;
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 12px;
 }
 
@@ -1491,7 +1971,7 @@ button.hm-cell {
 }
 
 .compare-key-range {
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 /* Sign-in gate (Step D.7) -------------------------------------------------
@@ -1519,41 +1999,60 @@ button.hm-cell {
   width: 100%;
   font-size: 13px;
   font-weight: 600;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .signin-field input {
-  min-height: 44px;
-  padding: 0 12px;
-  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  min-height: 48px;
+  padding: 0 var(--s3);
+  font: var(--t-body);
+  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
   color: var(--fg);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Show/Hide toggle (2026-09-13, device feedback) — sits under the password
-   field, before the submit button (see js/views/signin.js). Secondary
-   look, same treatment as .signout below, so it reads as an auxiliary
-   action rather than competing with .signin-submit. */
+.signin-field input:focus {
+  border-color: var(--fg-3);
+  outline: none;
+}
+
+/* Step U.0: the global `button` rule is a reset only now — .signin-toggle
+   (secondary) and .signin-submit (primary/block) need their full look
+   spelled out below. */
 .signin-toggle {
   width: 100%;
   min-height: 44px;
-  background: transparent;
-  color: var(--fg-muted);
-  border: 1px solid var(--fg-muted);
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-head);
 }
 
 .signin-submit {
   width: 100%;
   min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.signin-submit:active {
+  transform: scale(0.97);
+  opacity: 0.85;
 }
 
 .signin-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1565,7 +2064,7 @@ button.hm-cell {
 
 .signin-as {
   margin: 0 0 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 14px;
 }
 
@@ -1574,15 +2073,24 @@ button.hm-cell {
   font-weight: 600;
 }
 
+/* .signout (#signout-btn) is a <button>; the global reset means it needs
+   its full look here too — Step U.0 gives it the danger/block look. */
 .signout {
-  background: transparent;
-  color: var(--fg-muted);
-  border: 1px solid var(--fg-muted);
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--bad-bg);
+  color: var(--bad);
+  font: var(--t-head);
 }
 
 .signout-warning {
   margin: 0 0 12px;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1594,10 +2102,7 @@ button.hm-cell {
    Rendered by js/views/lock.js in place of every route's own view while
    signed in with the app lock enabled and this session not yet unlocked
    (see main.js's render()). Styled like .signin* just above — both are
-   full-screen gates with nothing else on the page until they resolve —
-   and .lock-signout reuses .signout's transparent/muted "secondary text
-   button" treatment for the same reason .signout itself uses it: this is
-   an escape hatch, not the primary action on the screen. */
+   full-screen gates with nothing else on the page until they resolve. */
 
 .lock {
   display: block;
@@ -1606,23 +2111,41 @@ button.hm-cell {
 
 .lock-title {
   margin: 0 0 8px;
-  font-size: 18px;
-  font-weight: 600;
+  font: var(--t-title);
 }
 
 .lock-help {
   margin: 0 0 16px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 13px;
 }
 
+/* Step U.0: the global `button` rule is a reset only now — .lock-unlock
+   (primary/block) and .lock-signout (ghost — an escape hatch, not the
+   primary action on the screen, so it stays content-width, not block)
+   need their full look spelled out below. */
 .lock-unlock {
+  display: flex;
   width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.lock-unlock:active {
+  transform: scale(0.97);
+  opacity: 0.85;
 }
 
 .lock-error {
   margin: 12px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1635,19 +2158,24 @@ button.hm-cell {
 }
 
 .lock-signout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
   background: transparent;
-  color: var(--fg-muted);
-  border: 1px solid var(--fg-muted);
+  color: var(--fg-2);
+  font: var(--t-head);
 }
 
 /* Settings screen (Step 4.1, CONTRACT-4.1.md §6) ---------------------------
-   .settings-block groups (window / order / archived / account) get the same
-   card-ish spacing rhythm as .chart-slot on the detail screen, but without
-   a border — this screen is a list of preferences, not a set of charts.
-   .settings-order / .settings-archived reuse the flex-row-with-growing-name
-   idiom already established by .compare-key-item. .settings-move /
-   .settings-unarchive reuse the 44px pill treatment of .trend-period /
-   .bounds-period so every button group across the app reads as one family. */
+   .settings-block groups (window / order / archived / account) get the
+   kit's card look; .settings-order / .settings-archived reuse the
+   flex-row-with-growing-name idiom already established by
+   .compare-key-item. .settings-move / .settings-unarchive take the kit's
+   secondary icon-button / secondary-sm looks so every button group across
+   the app reads as one family. */
 
 .settings {
   display: block;
@@ -1655,7 +2183,11 @@ button.hm-cell {
 }
 
 .settings-block {
-  margin: 0 0 24px;
+  margin: 0 0 var(--s4);
+  padding: var(--s4);
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
 }
 
 .settings-block:last-of-type {
@@ -1663,15 +2195,14 @@ button.hm-cell {
 }
 
 .settings-title {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 0 0 var(--s3);
+  font: var(--t-head);
 }
 
 .settings-help {
   margin: 0 0 10px;
   font-size: 12px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .settings-field {
@@ -1680,7 +2211,7 @@ button.hm-cell {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .settings-window-form {
@@ -1690,31 +2221,41 @@ button.hm-cell {
 }
 
 .settings-window-input {
-  width: 8ch;
-  min-height: 44px;
-  padding: 0 10px;
-  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  width: 96px;
+  min-height: 48px;
+  padding: 0 var(--s3);
+  font: var(--t-body);
+  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
   color: var(--fg);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Step U.0: the global `button` rule is a reset only now —
+   .settings-window-save takes the primary look; it needs its full
+   metrics spelled out below (it previously relied on the base `button`
+   rule for everything but min-height). */
 .settings-window-save {
   min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
 }
 
 .settings-window-status {
   margin: 8px 0 0;
   font-size: 13px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .settings-window-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1750,47 +2291,67 @@ button.hm-cell {
 .settings-order-empty,
 .settings-archived-empty {
   margin: 0;
-  color: var(--fg-muted);
+  color: var(--fg-2);
   font-size: 13px;
 }
 
-.settings-move,
-.settings-unarchive {
+/* .settings-move (the up/down reorder arrows) takes the kit's secondary
+   icon-button look (CONTRACT-U.0.md §4 called for 40px; fix cycle
+   2026-09-14: the 44pt floor, docs/DESIGN_PLAN.md §1, wins instead);
+   .settings-unarchive is a text-labelled secondary/sm button instead, so
+   it shares its rule with the Export block's own secondary/sm buttons
+   below. */
+.settings-move {
   flex: 0 0 auto;
-  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
   min-width: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  min-height: 44px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
   color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--hairline);
   font-size: 14px;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
-.settings-move:disabled,
-.settings-unarchive:disabled {
+.settings-move:disabled {
   opacity: 0.4;
 }
 
 .settings-error {
   margin: 12px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
 /* Export (Step 4.2, CONTRACT-4.2.md §3) -----------------------------------
    .settings-export-list/-item/-name mirror .settings-archived's own rules
    exactly (same row-with-growing-name idiom); .settings-export-one/-select
-   reuse the .settings-unarchive pill; .settings-export-all is a primary,
-   full-width action like .signin-submit, since it is the one button this
-   whole block exists for. */
+   take the kit's secondary/sm look, same as .settings-unarchive above;
+   .settings-export-all is a primary/block action, since it is the one
+   button this whole block exists for. */
 
+/* Step U.0: the global `button` rule is a reset only now —
+   .settings-export-all needs its full metrics spelled out below (it
+   previously relied on the base `button` rule for everything but
+   min-height/width). */
 .settings-export-all {
+  display: flex;
   width: 100%;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
+  padding: 0 var(--s4);
   margin: 0 0 12px;
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
 }
 
 .settings-export-list {
@@ -1815,21 +2376,24 @@ button.hm-cell {
   color: var(--fg);
 }
 
+/* Fix cycle (2026-09-14): 44pt floor wins (docs/DESIGN_PLAN.md §1) over
+   the "sm" 36px this trio originally took. */
+.settings-unarchive,
 .settings-export-one,
 .settings-export-select {
   flex: 0 0 auto;
   min-height: 44px;
-  min-width: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  padding: 0 var(--s3);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
   color: var(--fg);
-  font-size: 14px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+.settings-unarchive:disabled,
 .settings-export-one:disabled,
 .settings-export-all:disabled {
   opacity: 0.4;
@@ -1838,12 +2402,12 @@ button.hm-cell {
 .settings-export-status {
   margin: 8px 0 0;
   font-size: 13px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .settings-export-error {
   margin: 4px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
@@ -1864,37 +2428,54 @@ button.hm-cell {
   width: 100%;
   min-height: 120px;
   margin: 8px 0;
-  padding: 10px 12px;
+  padding: 10px var(--s3);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
   color: var(--fg);
 }
 
 /* App lock (Step 5.2, CONTRACT-5.2 §5) -------------------------------------
    Sits between Export and Account (js/views/settings.js's render()).
-   .settings-applock-toggle takes the plain base `button` sizing with no
-   extra overrides, same as .settings-window-save; status/error lines
-   mirror .settings-window-status/-error exactly. */
+   Step U.0: the global `button` rule is a reset only now, so
+   .settings-applock-toggle (primary look) needs its full metrics spelled
+   out below; status/error lines mirror .settings-window-status/-error
+   exactly. */
 
 .settings-applock-status {
   margin: 0 0 10px;
   font-size: 13px;
-  color: var(--fg-muted);
+  color: var(--fg-2);
 }
 
 .settings-applock-toggle {
   margin: 0 0 4px;
+  min-height: 44px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: var(--t-head);
 }
 
 .settings-applock-error {
   margin: 8px 0 0;
-  color: var(--danger);
+  color: var(--bad);
   font-size: 13px;
 }
 
 .settings-applock-error[hidden] {
   display: none;
+}
+
+/* Footer line under the Account block (js/views/settings.js) — the
+   running cache name once requestAppVersion() settles. Not itself a
+   button; --fg-3 is the "tertiary, barely-there" tone the token table
+   reserves for exactly this kind of aside. */
+.settings-version {
+  margin: 12px 0 0;
+  color: var(--fg-3);
+  font: var(--t-cap);
 }

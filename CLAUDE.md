@@ -27,10 +27,12 @@ caches only app assets and updates after one relaunch, and an offline
 indicator. Routes: `#/`, `#/t/:id`, `#/t/:id/edit`, `#/new`, `#/compare`,
 `#/settings`.
 
-**Next work: there is no open step.** New scope goes into
-`BUILD_PLAN.md` as a new numbered step with the same contract, executed
-under `docs/ORCHESTRATION.md`. The user decides what, if anything, is
-next.
+**Next work: the design pass — `docs/DESIGN_PLAN.md`** (Phase U, started
+2026-09-14). Find the first step there that is not `DONE` and run it
+under `docs/ORCHESTRATION.md` exactly like a `BUILD_PLAN.md` step. It
+restyles every screen (neutral accent, one component kit) and adds
+full-screen sideways-scrolling charts; no data-flow changes.
+`BUILD_PLAN.md` itself has no open step.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -57,7 +59,7 @@ next.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4168 tests as of v1 (Step 5.4)** (3905 unit, 54 integration, 209 e2e). See
+**4599 tests as of Step U.0** (4336 unit, 54 integration, 209 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -162,6 +164,8 @@ js/store.js          In-memory cache + localStorage mirror + an outbox
 js/outbox-sync.js    Replays the outbox on reconnect / visibility /
                       interval (D.6). Flushes are gated on isSignedIn().
 js/icons.js          Icon set for trackables (Step 2.5).
+js/ui-icons.js       U.0: the app's own chrome icons (tabs, back, expand,
+                      close, …) — inline SVG, currentColor only.
 js/export-csv.js     CSV export (4.2): pure row/CSV builders plus the
                       share → download → textarea delivery chain.
 js/net-status.js     5.1: the global offline indicator (navigator.onLine +
@@ -198,7 +202,9 @@ js/aggregate.js      PURE rollup/normalization/bound math (Step 1.2):
 icons/               PWA icons
 supabase/migrations/ one .sql file per schema change, applied in order
                       (0001 … 0010 as of D.7) — see docs/DATA_MODEL.md
-scripts/             NOT deployed. backup.mjs / restore.mjs (D.3; the
+scripts/             NOT deployed. screenshots.mjs (U.0: every screen at
+                      phone size, dark + light, from fixtures — the design
+                      pass's visual check). backup.mjs / restore.mjs (D.3; the
                       private backup repo checks this repo out and runs
                       backup.mjs daily), import-csv.mjs (D.5, one-off),
                       bootstrap-test-project.sql (D.4; recreates the
@@ -216,6 +222,9 @@ docs/                 all notes/reference docs live here (see below)
   ORCHESTRATION.md     HOW SESSIONS RUN — top-tier orchestrator, Sonnet
                         subagents, the implement→test→fix loop, phase
                         gates. Read before executing any build step.
+  DESIGN_PLAN.md       THE DESIGN PASS (Phase U, 2026-09-14 →) — tokens,
+                        kit, per-screen restyle steps U.0–U.7, full-screen
+                        charts (U.4). Same step contract as BUILD_PLAN.md.
   BUILD_PLAN.md        THE EXECUTION PLAN — numbered, ordered steps from
                         today's placeholder to shipped v1. Read this to
                         find out what to build next. Update step statuses
