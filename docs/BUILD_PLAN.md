@@ -4623,7 +4623,7 @@ the build parked.**
 the first device check; 3.4b device-verified 2026-09-13** ("Nice. I like
 that."). `PROJECT_NOTES.md` Test log, Attempt 14. **3.4c added the same
 evening** (continuous trackables as line overlays; `CACHE` →
-`daily-v32`), suite-verified, awaiting device check.
+`daily-v32`), **device-verified 2026-09-13** ("That works. Move forward.").
 Started the day the Phase D gate passed, because the user ended the
 park: "there's no reason for us to stop things". Executed under the
 ORCHESTRATION.md loop twice: 3.4 (`CONTRACT-3.4.md`, markers) then 3.4b
@@ -4839,6 +4839,7 @@ trackables.
 *Not verifiable here:* whether a dashed weight line behind a solid
 calorie line reads as two things at 390px, and whether the right-axis
 kg ticks crowd the chart.
+**Device verdict 2026-09-13: "That works."**
 
 ---
 
