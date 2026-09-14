@@ -4986,8 +4986,9 @@ Phase 4.**
 
 ## Step 4.1 — Settings screen
 
-**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
-check**. Executed under the ORCHESTRATION.md loop with a fresh
+**Status:** DONE (2026-09-13) — suite-verified, **device-verified
+2026-09-14** ("works, move forward"). Executed under the
+ORCHESTRATION.md loop with a fresh
 Implementer and Test Author from `CONTRACT-4.1.md`; one fix cycle,
 entirely test-side (see Test Subjects). `sw.js` `CACHE` → `daily-v35`.
 
@@ -5090,7 +5091,8 @@ the account block reads right at the bottom.
 
 ## Step 4.2 — CSV export
 
-**Status:** TODO
+**Status:** IN PROGRESS — started 2026-09-14. Contract: `CONTRACT-4.2.md`
+(session scratchpad).
 
 **Goal.** The user can get all their data out. Scoped as a real v1
 feature, not "someday."
