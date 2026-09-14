@@ -18,7 +18,14 @@
 
 import { getStore } from '../store.js';
 import { getAuth } from '../auth.js';
+import { todayLocal } from '../dates.js';
 import { visibleTrackables } from './home-model.js';
+// Step 4.2 (CONTRACT-4.2.md §2): the CSV builder/delivery pieces live in
+// their own leaf-ish module (js/export-csv.js) rather than here — its pure
+// half (exportRows/buildCsv/exportFilename) is unit-tested with no DOM at
+// all, and deliverCsv() is the one function in this whole screen that
+// touches navigator/Blob/File/URL.
+import { exportRows, buildCsv, exportFilename, deliverCsv } from '../export-csv.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -88,14 +95,17 @@ const WINDOW_VALIDATION_ERROR = 'Enter a whole number from 14 to 730.';
 const WINDOW_LOAD_ERROR = 'Could not load settings.';
 const ORDER_SAVE_ERROR = 'Could not save. Check your connection and try again.';
 const OFFLINE_TEXT = 'You appear to be offline — showing the last saved data.';
+// Step 4.2 (CONTRACT-4.2.md §2).
+const EXPORT_LOAD_ERROR = 'Could not load your data. Check your connection and try again.';
+const EXPORT_FALLBACK_HELP = 'Your browser did not offer a download. Select all, copy, and paste into a file.';
 
 export function createSettingsView({ store, auth, today } = {}) {
   const st = store || getStore();
   const au = auth || getAuth();
-  // `today` is accepted per the interface contract, for symmetry with
-  // ./detail.js's injectable-dependency shape — nothing on this screen is
-  // date-dependent, so it is never read.
-  void today;
+  // Step 4.2: `today` is now actually used, by exportFilename() — injected
+  // per the interface contract, same as ./detail.js's `today`, so tests can
+  // pin the date in an exported filename without mocking the clock.
+  const day = today || todayLocal();
 
   let container = null;
   let sectionEl = null;
@@ -131,6 +141,16 @@ export function createSettingsView({ store, auth, today } = {}) {
   let settingsError = null; // last move/unarchive failure, or null
 
   let signoutWarningText = '';
+
+  // Step 4.2 (CONTRACT-4.2.md §2). Shares `busy` above with reorder/
+  // unarchive (both kinds of action are mutually exclusive on this
+  // screen). The three pieces of export state survive re-renders (kept
+  // here, re-applied by buildExportBlock() on every render) rather than
+  // living only inside the handler's local scope, since the block is
+  // rebuilt from scratch every render like order/archived/account.
+  let exportStatus = ''; // '' | 'Preparing…' | `Exported ${n} rows.` | 'Export cancelled.' | 'Nothing to export.'
+  let exportError = null; // string | null
+  let exportFallbackText = null; // the CSV text, only non-null after a 'fallback' outcome
 
   // --- render ----------------------------------------------------------
 
@@ -327,6 +347,108 @@ export function createSettingsView({ store, auth, today } = {}) {
     return block;
   }
 
+  // Step 4.2 (CONTRACT-4.2.md §2): "Export everything" plus one "Export"
+  // button per NON-archived trackable (an archived trackable is only ever
+  // reachable through "everything" — see handleExportAll()/exportRows()'s
+  // own archived-rows-after-visible ordering). Rebuilt fresh every render,
+  // same as order/archived/account — the status/error/fallback lines are
+  // driven entirely by the module-level state above, not by anything the
+  // textarea itself holds (a fresh textarea with the same .value on every
+  // render is indistinguishable from a persistent one here, since nothing
+  // types into it).
+  function buildExportBlock() {
+    const block = document.createElement('section');
+    block.className = 'settings-block';
+    block.dataset.block = 'export';
+
+    const h3 = document.createElement('h3');
+    h3.className = 'settings-title';
+    h3.textContent = 'Export';
+    block.appendChild(h3);
+
+    const help = document.createElement('p');
+    help.className = 'settings-help';
+    help.textContent = 'A CSV with one row per logged day: trackable, unit, date, value, note, source.';
+    block.appendChild(help);
+
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'settings-export-all';
+    allBtn.dataset.action = 'export-all';
+    allBtn.disabled = busy;
+    allBtn.textContent = 'Export everything (CSV)';
+    block.appendChild(allBtn);
+
+    const visible = visibleTrackables(st.getTrackables());
+    if (visible.length > 0) {
+      const ul = document.createElement('ul');
+      ul.className = 'settings-export-list';
+      for (const t of visible) {
+        const idStr = String(t.id);
+
+        const li = document.createElement('li');
+        li.className = 'settings-export-item';
+        li.dataset.id = idStr;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'settings-export-name';
+        nameSpan.textContent = typeof t.name === 'string' ? t.name : '';
+        li.appendChild(nameSpan);
+
+        const oneBtn = document.createElement('button');
+        oneBtn.type = 'button';
+        oneBtn.className = 'settings-export-one';
+        oneBtn.dataset.action = 'export-one';
+        oneBtn.dataset.id = idStr;
+        oneBtn.disabled = busy;
+        oneBtn.textContent = 'Export';
+        li.appendChild(oneBtn);
+
+        ul.appendChild(li);
+      }
+      block.appendChild(ul);
+    }
+
+    const statusP = document.createElement('p');
+    statusP.className = 'settings-export-status';
+    statusP.setAttribute('role', 'status');
+    statusP.textContent = exportStatus;
+    block.appendChild(statusP);
+
+    const errorP = document.createElement('p');
+    errorP.className = 'settings-export-error';
+    errorP.setAttribute('role', 'alert');
+    errorP.hidden = exportError === null;
+    errorP.textContent = exportError === null ? '' : exportError;
+    block.appendChild(errorP);
+
+    const fallbackDiv = document.createElement('div');
+    fallbackDiv.className = 'settings-export-fallback';
+    fallbackDiv.hidden = exportFallbackText === null;
+
+    const fallbackHelp = document.createElement('p');
+    fallbackHelp.className = 'settings-help';
+    fallbackHelp.textContent = EXPORT_FALLBACK_HELP;
+    fallbackDiv.appendChild(fallbackHelp);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'settings-export-text';
+    textarea.readOnly = true;
+    textarea.setAttribute('aria-label', 'CSV export');
+    textarea.value = exportFallbackText === null ? '' : exportFallbackText;
+    fallbackDiv.appendChild(textarea);
+
+    const selectBtn = document.createElement('button');
+    selectBtn.type = 'button';
+    selectBtn.className = 'settings-export-select';
+    selectBtn.dataset.action = 'export-select';
+    selectBtn.textContent = 'Select all';
+    fallbackDiv.appendChild(selectBtn);
+
+    block.appendChild(fallbackDiv);
+    return block;
+  }
+
   // Step D.7's sign-out block, moved here unchanged in DOM/texts — see
   // handleSignOutClick() below for the moved logic. Rebuilt fresh every
   // render (unlike the window block above) because nothing here holds live
@@ -412,6 +534,7 @@ export function createSettingsView({ store, auth, today } = {}) {
 
     section.appendChild(buildOrderBlock());
     section.appendChild(buildArchivedBlock());
+    section.appendChild(buildExportBlock());
     section.appendChild(buildAccountBlock());
 
     if (settingsError !== null) {
@@ -513,6 +636,127 @@ export function createSettingsView({ store, auth, today } = {}) {
     render();
   }
 
+  // Step 4.2 (CONTRACT-4.2.md §2). Shares `busy` with reorder/unarchive —
+  // ignored while any of those is in flight, and sets `busy` for its own
+  // duration so those, in turn, are disabled while an export runs.
+  async function handleExportAll() {
+    if (busy) return;
+
+    busy = true;
+    exportStatus = 'Preparing…';
+    exportError = null;
+    exportFallbackText = null;
+    render();
+
+    // "Everything" means the whole history of every trackable — an
+    // unfiltered loadEntries() (js/store.js) pages through every entry the
+    // account owns, not just what happens to already be cached.
+    const result = await st.loadEntries({});
+    if (disposed) return;
+    if (result.error !== null) {
+      // A partial CSV built from a stale cache would be silently wrong in
+      // a way the user has no way to notice — refuse instead.
+      exportError = EXPORT_LOAD_ERROR;
+      exportStatus = '';
+      busy = false;
+      render();
+      return;
+    }
+
+    const trackables = st.getTrackables();
+    const entries = st.getEntries({});
+    const rows = exportRows({ trackables, entries });
+    if (rows.length === 0) {
+      exportStatus = 'Nothing to export.';
+      busy = false;
+      render();
+      return;
+    }
+
+    const text = buildCsv({ trackables, entries });
+    const filename = exportFilename({ today: day, trackable: null });
+    const outcome = await deliverCsv({ filename, text });
+    if (disposed) return;
+
+    if (outcome === 'cancelled') {
+      exportStatus = 'Export cancelled.';
+    } else {
+      exportStatus = `Exported ${rows.length} rows.`;
+      if (outcome === 'fallback') {
+        exportFallbackText = text;
+      }
+    }
+    busy = false;
+    render();
+  }
+
+  // Same shape as handleExportAll() above, scoped to one trackable — see
+  // that function's comments for the shared reasoning. `id` must name a
+  // currently-visible (non-archived) trackable; a stale button click
+  // (e.g. the trackable was archived elsewhere between render and click)
+  // is silently ignored rather than exporting the wrong thing.
+  async function handleExportOne(id) {
+    if (busy) return;
+
+    const idStr = String(id);
+    const trackable = visibleTrackables(st.getTrackables()).find((t) => String(t.id) === idStr);
+    if (!trackable) return;
+
+    busy = true;
+    exportStatus = 'Preparing…';
+    exportError = null;
+    exportFallbackText = null;
+    render();
+
+    const result = await st.loadEntries({ trackableIds: [idStr] });
+    if (disposed) return;
+    if (result.error !== null) {
+      exportError = EXPORT_LOAD_ERROR;
+      exportStatus = '';
+      busy = false;
+      render();
+      return;
+    }
+
+    // `trackables: [trackable]` is what scopes exportRows()'s output to
+    // just this one id — see export-csv.js#exportRows's own comment on
+    // dropping entries whose trackable_id matches nothing in the list.
+    const entries = st.getEntries({ trackableIds: [idStr] });
+    const rows = exportRows({ trackables: [trackable], entries });
+    if (rows.length === 0) {
+      exportStatus = 'Nothing to export.';
+      busy = false;
+      render();
+      return;
+    }
+
+    const text = buildCsv({ trackables: [trackable], entries });
+    const filename = exportFilename({ today: day, trackable });
+    const outcome = await deliverCsv({ filename, text });
+    if (disposed) return;
+
+    if (outcome === 'cancelled') {
+      exportStatus = 'Export cancelled.';
+    } else {
+      exportStatus = `Exported ${rows.length} rows.`;
+      if (outcome === 'fallback') {
+        exportFallbackText = text;
+      }
+    }
+    busy = false;
+    render();
+  }
+
+  // The fallback textarea is rebuilt fresh every render (see
+  // buildExportBlock()), so this queries for it at click time rather than
+  // holding a stale reference.
+  function handleExportSelect() {
+    const textarea = sectionEl ? sectionEl.querySelector('.settings-export-text') : null;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.select();
+  }
+
   // Step D.7's handleSignOutClick(), moved from js/main.js verbatim in
   // spirit (same refusal-while-outbox-non-empty rule, same warning texts,
   // same store.clear() then auth.signOut() sequence) — see
@@ -601,6 +845,12 @@ export function createSettingsView({ store, auth, today } = {}) {
           handleMove(id, 'down');
         } else if (action === 'unarchive') {
           handleUnarchive(id);
+        } else if (action === 'export-all') {
+          handleExportAll();
+        } else if (action === 'export-one') {
+          handleExportOne(id);
+        } else if (action === 'export-select') {
+          handleExportSelect();
         }
       }
     } catch {
@@ -669,6 +919,9 @@ export function createSettingsView({ store, auth, today } = {}) {
     busy = false;
     settingsError = null;
     signoutWarningText = '';
+    exportStatus = '';
+    exportError = null;
+    exportFallbackText = null;
   }
 
   return { mount, unmount };

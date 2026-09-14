@@ -1,4 +1,4 @@
-const CACHE = 'daily-v35';
+const CACHE = 'daily-v36';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/auth.js',
   './js/api.js',
   './js/store.js',
+  './js/export-csv.js',
   './js/outbox-sync.js',
   './js/dates.js',
   './js/aggregate.js',

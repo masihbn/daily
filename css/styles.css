@@ -1712,3 +1712,96 @@ button.hm-cell {
   color: var(--danger);
   font-size: 13px;
 }
+
+/* Export (Step 4.2, CONTRACT-4.2.md §3) -----------------------------------
+   .settings-export-list/-item/-name mirror .settings-archived's own rules
+   exactly (same row-with-growing-name idiom); .settings-export-one/-select
+   reuse the .settings-unarchive pill; .settings-export-all is a primary,
+   full-width action like .signin-submit, since it is the one button this
+   whole block exists for. */
+
+.settings-export-all {
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 12px;
+}
+
+.settings-export-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-export-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-export-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.settings-export-one,
+.settings-export-select {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 14px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-export-one:disabled,
+.settings-export-all:disabled {
+  opacity: 0.4;
+}
+
+.settings-export-status {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.settings-export-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.settings-export-error[hidden] {
+  display: none;
+}
+
+.settings-export-fallback {
+  margin: 10px 0 0;
+}
+
+.settings-export-fallback[hidden] {
+  display: none;
+}
+
+.settings-export-text {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+}

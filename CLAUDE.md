@@ -28,8 +28,8 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 4.2
-as of 2026-09-13, then the Phase 4 gate). Nothing in Phase D changed
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (the Phase
+4 gate as of 2026-09-14, then Phase 5). Nothing in Phase D changed
 what 3.4 onward need to do.
 
 **Three things that will bite an unwary session during the park:**
@@ -57,7 +57,7 @@ what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4029 tests as of Step 4.1** (3785 unit, 54 integration, 190 e2e). See
+**4070 tests as of Step 4.2** (3819 unit, 54 integration, 197 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -159,6 +159,8 @@ js/store.js          In-memory cache + localStorage mirror + an outbox
 js/outbox-sync.js    Replays the outbox on reconnect / visibility /
                       interval (D.6). Flushes are gated on isSignedIn().
 js/icons.js          Icon set for trackables (Step 2.5).
+js/export-csv.js     CSV export (4.2): pure row/CSV builders plus the
+                      share → download → textarea delivery chain.
 js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       compare.js (3.5: #/compare, normalised multi-series),

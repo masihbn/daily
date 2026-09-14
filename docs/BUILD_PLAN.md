@@ -5091,8 +5091,10 @@ the account block reads right at the bottom.
 
 ## Step 4.2 — CSV export
 
-**Status:** IN PROGRESS — started 2026-09-14. Contract: `CONTRACT-4.2.md`
-(session scratchpad).
+**Status:** DONE (2026-09-14) — suite-verified, **awaiting the Phase 4
+gate** (the iOS download path cannot be verified from this machine —
+see below). Same Implementer/Test Author as 4.1, from
+`CONTRACT-4.2.md`; one test-side fix cycle. `sw.js` `CACHE` → `daily-v36`.
 
 **Goal.** The user can get all their data out. Scoped as a real v1
 feature, not "someday."
@@ -5121,7 +5123,58 @@ feature, not "someday."
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **4070 green** — 3819 unit (+34), 54 integration,
+197 e2e (+7). New: `js/export-csv.js`, `tests/unit/export-csv.test.mjs`,
+`tests/e2e/export.test.mjs`; changed: `js/views/settings.js`,
+`css/styles.css`, `sw.js`.
+
+*Design decisions taken at execution time:*
+
+- **Two modes on the Settings screen**: "Export everything (CSV)" and
+  one Export button per non-archived trackable (archived rows are in
+  "everything").
+- **The CSV is a lossless dump a human can read**: columns
+  `trackable_id, trackable, unit, value_shape, entry_date, value, note,
+  source`, RFC 4180 quoting (quote iff `,` `"` CR or LF; doubled
+  quotes), CRLF line endings, a UTF-8 BOM so Excel opens accented notes
+  correctly, rows ordered by trackable (visible order, then archived by
+  id) then date. Orphan entries are dropped, never invented.
+- **Delivery chain, decided at run time** (`deliverCsv`, injectable and
+  unit-tested with fakes): Web Share with a File when `canShare` says so
+  (the reliable path in an installed iOS PWA: Save to Files / AirDrop /
+  Mail) → anchor download of a Blob URL with `revokeObjectURL` in a
+  `finally` → a read-only textarea with "Select all" when neither
+  exists or the download path throws. A share dismissed by the user is
+  "Export cancelled.", not an error.
+- **Data comes from the store, fresh**: an export loads the whole
+  history first (`loadEntries({})`, paged) and aborts with an error line
+  if that fails — a partial CSV from a stale cache is worse than none.
+- Filenames `daily-export-<date>.csv` / `daily-<slug>-<date>.csv`.
+
+*The fix cycle.* E5 (textarea fallback) split the textarea's value on
+CRLF and got one line: a textarea's value setter normalises CRLF to LF
+by the HTML spec, in every browser. The CSV itself is unaffected (the
+file paths never round-trip through a textarea). Test split changed to
+accept either; assertion unchanged; product code untouched.
+
+*Unit (34):* field quoting table, line join, slug rules incl.
+truncation, filenames, row join/order/orphans/nulls, BOM + header +
+CRLF + round-trip, and all seven delivery outcomes with fakes (share
+ok, cancelled, share error → download, no share, createObjectURL
+throws, click throws but revoke still runs, no APIs at all → fallback;
+never rejects).
+
+*E2E (7, chromium, anchor path since headless has no `navigator.share`):*
+block renders with archived excluded from "one"; export everything →
+one unfiltered entries GET, a real download whose file starts with the
+BOM, has the exact header, all three trackables and a correctly quoted
+note; export one → filtered GET and scoped content; GET 500 → error and
+no download; `createObjectURL` removed → textarea fallback and Select
+all; no entries → "Nothing to export."; buttons disabled mid-flight.
+
+*Not verifiable from this machine — the Phase 4 gate exists for this:*
+the share sheet in the **installed home-screen app** (not a Safari tab)
+and whether Save to Files produces a readable CSV there.
 
 ---
 
@@ -5479,3 +5532,8 @@ unwind than to ask about.
   placeholder made no requests; their plumbing was updated, their
   expectations not. Suite 4029 green. `CACHE` → `daily-v35`. Device
   check pending; 4.2 next, then the Phase 4 gate.
+- **2026-09-14** — **Step 4.2 executed.** CSV export on the Settings
+  screen: everything or one trackable; RFC 4180 with BOM and CRLF;
+  delivery = share sheet → anchor download → textarea, decided at run
+  time. One test-side fix (textarea CRLF normalisation). Suite 4070
+  green. `CACHE` → `daily-v36`. Phase 4 gate next.
