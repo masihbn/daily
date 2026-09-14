@@ -9,6 +9,7 @@ import { createTrackableView } from './views/trackable.js';
 import { createDetailView } from './views/detail.js';
 import { createCompareView } from './views/compare.js';
 import { createSignInView } from './views/signin.js';
+import { createSettingsView } from './views/settings.js';
 import { createOutboxSync, renderOutboxStatus } from './outbox-sync.js';
 import { getStore } from './store.js';
 import { getAuth } from './auth.js';
@@ -29,24 +30,9 @@ const VIEW_TITLES = {
 let currentView = null;
 
 function renderView(route) {
-  const { name, params } = route;
+  const { name } = route;
 
   switch (name) {
-    case 'settings': {
-      // Step D.7: sign-out lives on the settings placeholder body rather
-      // than in its own view — there is nothing else here yet to justify
-      // a dedicated module, and the whole block is wired up by
-      // wireSignOutButton() right after this markup lands in the DOM.
-      const session = getAuth().getSession();
-      const email = session && session.user && session.user.email ? session.user.email : 'unknown';
-      return {
-        title: VIEW_TITLES.settings,
-        body: `<p>App settings will go here.</p>
-<p class="signin-as">Signed in as <span class="signin-email">${escapeHtml(email)}</span></p>
-<p class="signout-warning" hidden></p>
-<button type="button" class="signout" id="signout-btn">Sign out</button>`,
-      };
-    }
     case 'notfound':
     default:
       return {
@@ -164,60 +150,16 @@ async function render() {
     app.innerHTML = '<h1>Compare</h1><div id="view"></div>';
     currentView = createCompareView();
     await currentView.mount(document.getElementById('view'));
+  } else if (route.name === 'settings') {
+    // Step 4.1: the real settings view supersedes the Step D.7 placeholder
+    // (which held only the sign-out control, now moved into
+    // js/views/settings.js — see that file's handleSignOutClick()).
+    app.innerHTML = '<h1>Settings</h1><div id="view"></div>';
+    currentView = createSettingsView();
+    await currentView.mount(document.getElementById('view'));
   } else {
     const { title, body } = renderView(route);
     app.innerHTML = `<h1>${escapeHtml(title)}</h1>${body}`;
-    if (route.name === 'settings') wireSignOutButton();
-  }
-}
-
-// Step D.7 — the Settings placeholder's sign-out button. A fresh element is
-// created on every render() (app.innerHTML is fully replaced above), so in
-// the normal case there is nothing to double-bind; the dataset guard exists
-// for the defensive case of this function running twice against the same
-// element before the next render replaces it.
-function wireSignOutButton() {
-  const btn = document.getElementById('signout-btn');
-  if (!btn || btn.dataset.bound === 'true') return;
-  btn.dataset.bound = 'true';
-  btn.addEventListener('click', handleSignOutClick);
-}
-
-async function handleSignOutClick() {
-  try {
-    const store = getStore();
-    const warningEl = document.querySelector('.signout-warning');
-    const pending = store.getOutbox().length;
-
-    if (pending > 0) {
-      // Refuse: signing out clears the localStorage mirror below, and that
-      // mirror is where a queued write actually lives until it reaches the
-      // server. Signing out here would destroy it, not just hide it.
-      if (warningEl) {
-        warningEl.textContent =
-          pending === 1
-            ? '1 log not yet saved. Get online and wait for them to send before signing out.'
-            : `${pending} logs not yet saved. Get online and wait for them to send before signing out.`;
-        warningEl.hidden = false;
-      }
-      return;
-    }
-
-    if (warningEl) {
-      warningEl.hidden = true;
-      warningEl.textContent = '';
-    }
-
-    // The localStorage mirror holds personal data (trackables/entries) and
-    // must not outlive the session it belongs to — the next person to open
-    // this browser must not see it before anyone signs in again.
-    store.clear();
-    await getAuth().signOut();
-    // getAuth().onChange() (subscribed once in bootstrap()) fires from
-    // signOut()'s own setSession(null) and re-renders to the gate; no
-    // explicit render() call is needed here.
-  } catch {
-    // A Settings click handler must never crash the app.
   }
 }
 

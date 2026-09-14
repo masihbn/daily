@@ -61,8 +61,25 @@ export function fakeSession({ expiresInS = 3600, ...overrides } = {}) {
 // Seeds localStorage BEFORE any page script runs, so js/main.js's first
 // render() sees a session already on hydration — exactly the cold-relaunch
 // case a standalone PWA hits every time it reopens.
+//
+// CONTRACT-4.1.md §0.7 / §9: in the SAME init script, also seed the
+// `daily.cache.v1` blob with a default `settings` field
+// ({ rolling_window_days: 90 }) and empty trackables/entries, BEFORE the
+// session key is set. Without this, every pre-4.1 e2e test that never
+// seeded its own cache blob would start issuing an unexpected
+// `app_settings` GET the moment detail.js's mount gains
+// `if (st.getSettings() === null) await st.loadSettings();`. A test that
+// seeds its own cache blob afterwards (via its own addInitScript, or via
+// this file's seedCache()-style helpers duplicated in other e2e files)
+// still wins, because Playwright runs addInitScript scripts in
+// registration order and each one just overwrites the same localStorage
+// key — "last one registered wins" is the only contract callers need.
 export async function seedSession(page, session = fakeSession()) {
   await page.addInitScript((s) => {
+    localStorage.setItem(
+      'daily.cache.v1',
+      JSON.stringify({ v: 1, trackables: [], entries: [], settings: { rolling_window_days: 90 } })
+    );
     localStorage.setItem('daily.auth.v1', JSON.stringify(s));
   }, session);
 }

@@ -1,4 +1,4 @@
-const CACHE = 'daily-v34';
+const CACHE = 'daily-v35';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -28,6 +28,7 @@ const ASSETS = [
   './js/views/detail.js',
   './js/views/compare.js',
   './js/views/signin.js',
+  './js/views/settings.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
 ];

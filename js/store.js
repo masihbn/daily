@@ -10,6 +10,10 @@
 // enqueueOp(): at most one pending op per (trackable_id, entry_date).
 
 import * as defaultApi from './api.js';
+// Step 4.1 (CONTRACT-4.1.md §1): a leaf module (no imports of its own), so
+// importing it here creates no cycle with api.js — same reasoning api.js's
+// own header comment gives for importing auth.js.
+import { ValidationError } from './errors.js';
 
 export const CACHE_KEY = 'daily.cache.v1';
 export const OUTBOX_KEY = 'daily.outbox.v1';
@@ -126,6 +130,25 @@ function isInWindow(entry, { trackableIds, from, to } = {}) {
   return true;
 }
 
+// Step 4.1 (CONTRACT-4.1.md §1): the one shape `settings` is ever allowed to
+// hold, both in memory and in the cache blob — only `rolling_window_days`,
+// and only when it is a finite number. Shared by hydrate() and the two
+// network-derived setters (loadSettings()/saveSettings()) so the acceptance
+// rule can't drift between "loaded from disk" and "loaded from the
+// network".
+function normalizeSettings(value) {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof value.rolling_window_days === 'number' &&
+    Number.isFinite(value.rolling_window_days)
+  ) {
+    return { rolling_window_days: value.rolling_window_days };
+  }
+  return null;
+}
+
 // --- factory -----------------------------------------------------------
 
 export function createStore({ api = defaultApi, storage = defaultStorage(), now = Date.now } = {}) {
@@ -133,9 +156,13 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
   let entries = [];
   let outbox = [];
   let opCounter = 0;
+  // Step 4.1 (CONTRACT-4.1.md §0 rule 1): the global rolling-window
+  // preference. Lives here, not just in the DB, so a relaunch has it
+  // before any request — see hydrate()/persistCache() below.
+  let settings = null;
 
   function persistCache() {
-    safeSetItem(storage, CACHE_KEY, JSON.stringify({ v: 1, trackables, entries }));
+    safeSetItem(storage, CACHE_KEY, JSON.stringify({ v: 1, trackables, entries, settings }));
   }
 
   // Step D.6: subscribers are notified whenever the outbox changes, so the
@@ -182,6 +209,11 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
       ) {
         trackables = Array.isArray(parsed.trackables) ? parsed.trackables : [];
         entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+        // Step 4.1 (CONTRACT-4.1.md §1): accepted iff a plain object whose
+        // rolling_window_days is a finite number; anything else (missing,
+        // wrong shape, NaN) hydrates as null rather than throwing or
+        // dragging garbage into the in-memory copy.
+        settings = normalizeSettings(parsed.settings);
       } else {
         safeRemoveItem(storage, CACHE_KEY);
       }
@@ -263,6 +295,13 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     return outbox.map((op) => ({ ...op }));
   }
 
+  // Step 4.1 (CONTRACT-4.1.md §1): a copy, never the internal object — same
+  // defensive-copy guarantee as getTrackables()/getEntries(), so a caller
+  // mutating the result can't corrupt the cache.
+  function getSettings() {
+    return settings === null ? null : { ...settings };
+  }
+
   // --- async operations ---------------------------------------------------
 
   async function loadTrackables({ includeArchived = false } = {}) {
@@ -275,6 +314,26 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
       return { data: getTrackables(), source: 'network', error: null };
     } catch (error) {
       return { data: getTrackables(), source: 'cache', error };
+    }
+  }
+
+  // Step 4.1 (CONTRACT-4.1.md §1). Settings writes are online-only (§0 rule
+  // 3 — a global preference is not a log, and queueing it would make
+  // "Saved." a lie), but a READ still falls back to whatever is cached, the
+  // same as loadTrackables()/loadEntries() above — an offline Settings
+  // screen should still show the last-known window, not nothing.
+  async function loadSettings() {
+    try {
+      const row = await api.getSettings();
+      const n = Number(row && row.rolling_window_days);
+      if (!Number.isFinite(n)) {
+        throw new ValidationError('app_settings.rolling_window_days is not a number');
+      }
+      settings = { rolling_window_days: n };
+      persistCache();
+      return { data: getSettings(), source: 'network', error: null };
+    } catch (error) {
+      return { data: getSettings(), source: 'cache', error };
     }
   }
 
@@ -409,6 +468,47 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     }
   }
 
+  // Step 4.1 (CONTRACT-4.1.md §1, §0 rule 3): no outbox, no optimistic
+  // update — a failed write leaves `settings` and the cache blob exactly as
+  // they were, so an offline/failed save never lies about what is actually
+  // saved server-side. Never rejects.
+  async function saveSettings(patch) {
+    try {
+      const row = await api.updateSettings(patch);
+      const n = Number(row && row.rolling_window_days);
+      if (!Number.isFinite(n)) {
+        throw new ValidationError('app_settings.rolling_window_days is not a number');
+      }
+      settings = { rolling_window_days: n };
+      persistCache();
+      return { status: 'saved', data: getSettings() };
+    } catch (error) {
+      return { status: 'failed', error };
+    }
+  }
+
+  // Step 4.1 (CONTRACT-4.1.md §1): used by the Settings screen for both
+  // reordering (sort_order) and Unarchive (archived: false). Same
+  // replace-or-append + persist pattern as saveEntry()'s success path, but
+  // with no optimistic update and no outbox — a reorder/unarchive that
+  // fails must not leave the list showing a move that didn't happen. Never
+  // rejects.
+  async function updateTrackable(id, patch) {
+    try {
+      const row = await api.updateTrackable(id, patch);
+      const idx = trackables.findIndex((t) => sameId(t.id, id));
+      if (idx === -1) {
+        trackables.push(row);
+      } else {
+        trackables[idx] = row;
+      }
+      persistCache();
+      return { status: 'saved', data: { ...row } };
+    } catch (error) {
+      return { status: 'failed', error };
+    }
+  }
+
   // Step D.6: flushOutbox() is now triggered from several places — app
   // start, the `online` event, returning to the foreground, and the Home
   // view's mount. Two of those can easily fire together (unlocking the
@@ -490,6 +590,10 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     entries = [];
     outbox = [];
     opCounter = 0;
+    // Step 4.1 (CONTRACT-4.1.md §1): a signed-out user must not have the
+    // next person to open this browser see even the rolling-window
+    // preference — same reasoning as clearing trackables/entries above.
+    settings = null;
     safeRemoveItem(storage, CACHE_KEY);
     safeRemoveItem(storage, OUTBOX_KEY);
   }
@@ -499,11 +603,15 @@ export function createStore({ api = defaultApi, storage = defaultStorage(), now 
     getEntries,
     getEntry,
     getOutbox,
+    getSettings,
     onOutboxChange,
     loadTrackables,
     loadEntries,
+    loadSettings,
     saveEntry,
     removeEntry,
+    saveSettings,
+    updateTrackable,
     flushOutbox,
     clear,
   };

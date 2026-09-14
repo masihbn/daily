@@ -28,9 +28,9 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (the Phase
-3 gate as of 2026-09-13, then Phase 4). Nothing in Phase D changed what
-3.4 onward need to do.
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 4.2
+as of 2026-09-13, then the Phase 4 gate). Nothing in Phase D changed
+what 3.4 onward need to do.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -57,7 +57,7 @@ wired to `js/api.js` / `js/store.js`.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3972 tests as of Step 3.5** (3738 unit, 54 integration, 180 e2e). See
+**4029 tests as of Step 4.1** (3785 unit, 54 integration, 190 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -153,14 +153,17 @@ js/store.js          In-memory cache + localStorage mirror + an outbox
                       (Step 1.1). Network is the source of truth; the
                       cache never overwrites a server value. Injectable
                       via createStore({api, storage, now}); getStore() is
-                      the app-facing singleton.
+                      the app-facing singleton. Since 4.1 also holds the
+                      app_settings row (rolling window; writes are
+                      online-only) and updateTrackable().
 js/outbox-sync.js    Replays the outbox on reconnect / visibility /
                       interval (D.6). Flushes are gated on isSignedIn().
 js/icons.js          Icon set for trackables (Step 2.5).
 js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       compare.js (3.5: #/compare, normalised multi-series),
-                      signin.js (email + password, Show/Hide toggle).
+                      settings.js (4.1: rolling window, reorder, archived,
+                      sign out), signin.js (email + password, Show/Hide).
 js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
                       builders over Chart.js; overlay.js (3.4–3.4c) —
                       one other trackable on the bounds chart's right

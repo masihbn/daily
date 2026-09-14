@@ -28,7 +28,7 @@ import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/week
 // Step 3.4c (CONTRACT-3.4c.md §3): boundsFor() is imported here too — a
 // 'line'-kind overlay (a continuous reading, e.g. Weight) needs its own
 // band, computed the SAME way the metric's own Range chart computes one.
-import { renderBounds, destroyBounds, boundsModel, boundsFor } from '../charts/bounds.js';
+import { renderBounds, destroyBounds, boundsModel, boundsFor, DEFAULT_ROLLING_WINDOW_DAYS } from '../charts/bounds.js';
 // Step 3.4 (CONTRACT-3.4.md §3): the overlay picker and its pure selection/
 // bucketing helpers. This view owns the localStorage access (via the
 // injected-storage pattern below), the network load, and the render-time
@@ -423,6 +423,20 @@ export function createDetailView({ id, store, api, today } = {}) {
   // and overlayCandidates() are both pure/cheap), never cached, so a
   // trackable that gets archived or edited elsewhere is reflected without
   // this view needing its own invalidation logic.
+  // Step 4.1 (CONTRACT-4.1.md §3): the one place this view reads the global
+  // rolling-window setting. Falls back to the hardcoded default for
+  // anything not a finite integer in 14..730 (missing/never-loaded
+  // settings, a stale/garbage cached value, etc.) — never throws, and
+  // never blocks a chart on a network round trip of its own (mount() loads
+  // settings at most once; see its own comment).
+  function windowDays() {
+    const s = st.getSettings();
+    const n = s && s.rolling_window_days;
+    return typeof n === 'number' && Number.isInteger(n) && n >= 14 && n <= 730
+      ? n
+      : DEFAULT_ROLLING_WINDOW_DAYS;
+  }
+
   function overlayCandidateList() {
     return overlayCandidates(visibleTrackables(st.getTrackables()), idStr);
   }
@@ -687,7 +701,7 @@ export function createDetailView({ id, store, api, today } = {}) {
         );
       } else if (slot === 'bounds') {
         const { from, to } = resolveRange(rangeKey, day);
-        const bm = boundsModel({ trackable, entries: entriesForRange, from, to, period: boundsPeriodKey });
+        const bm = boundsModel({ trackable, entries: entriesForRange, from, to, period: boundsPeriodKey, windowDays: windowDays() });
         // Step 3.4 (CONTRACT-3.4.md §3): each selected overlay is rebuilt
         // from ALREADY-LOADED entries (overlayEntriesFor() is a synchronous
         // cache read) and bucketed to bm.dates/bm.period — the SAME lens
@@ -717,7 +731,7 @@ export function createDetailView({ id, store, api, today } = {}) {
             // judged against, since it has a band, not a target. Harmless
             // to compute for a 'bar'-kind overlay too: overlayModel() only
             // consults `bounds` for kind 'line'.
-            const overlayBounds = boundsFor(t, overlayEntriesFor(oid));
+            const overlayBounds = boundsFor(t, overlayEntriesFor(oid), windowDays());
             return overlayModel({
               trackable: t,
               entries: overlayEntriesFor(oid),
@@ -1195,6 +1209,15 @@ export function createDetailView({ id, store, api, today } = {}) {
         // Never issue the entries request for an id that doesn't exist.
         return;
       }
+
+      // Step 4.1 (CONTRACT-4.1.md §3): load the rolling-window setting
+      // exactly once per mount, only when nothing is cached yet — a
+      // relaunch that already has it (or a settings save made earlier in
+      // this session) must not re-issue the GET on every detail visit. The
+      // result is ignored: a failure just means windowDays() falls back to
+      // the hardcoded default, which is not fatal to this screen.
+      if (st.getSettings() === null) await st.loadSettings();
+      if (disposed) return;
 
       // Step 3 (Step D.6b): load the trackable's WHOLE history exactly
       // once — not range-scoped. See loadAllEntries()'s comment.

@@ -41,6 +41,17 @@ async function routeEmptyRest(page, { events } = {}) {
     if (events) events.push(`rest:GET:entries`);
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
+  // Step 4.1: #/settings now mounts a real view that GETs app_settings on
+  // mount (js/views/settings.js). This file's interest is the sign-in gate,
+  // not that view's content, so fulfil it with an uneventful row.
+  await page.route('**/rest/v1/app_settings*', async (route) => {
+    if (events) events.push(`rest:GET:app_settings`);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, rolling_window_days: 90 }]),
+    });
+  });
 }
 
 // A sequence of responses for GET /rest/v1/trackables*, one per call (the

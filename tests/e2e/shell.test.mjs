@@ -62,6 +62,16 @@ async function routeEmptyRest(page) {
   await page.route('**/rest/v1/entries*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
+  // Step 4.1: #/settings now mounts a real view that GETs app_settings on
+  // mount (js/views/settings.js). This file's interest is shell/nav
+  // behaviour, not that view's content, so fulfil it with an uneventful row.
+  await page.route('**/rest/v1/app_settings*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, rolling_window_days: 90 }]),
+    });
+  });
 }
 
 test('index.html loads: 200, title "Daily", no uncaught page errors', async ({ page }) => {

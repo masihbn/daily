@@ -1572,3 +1572,143 @@ button.hm-cell {
 .signout-warning[hidden] {
   display: none;
 }
+
+/* Settings screen (Step 4.1, CONTRACT-4.1.md §6) ---------------------------
+   .settings-block groups (window / order / archived / account) get the same
+   card-ish spacing rhythm as .chart-slot on the detail screen, but without
+   a border — this screen is a list of preferences, not a set of charts.
+   .settings-order / .settings-archived reuse the flex-row-with-growing-name
+   idiom already established by .compare-key-item. .settings-move /
+   .settings-unarchive reuse the 44px pill treatment of .trend-period /
+   .bounds-period so every button group across the app reads as one family. */
+
+.settings {
+  display: block;
+  width: 100%;
+}
+
+.settings-block {
+  margin: 0 0 24px;
+}
+
+.settings-block:last-of-type {
+  margin-bottom: 0;
+}
+
+.settings-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-help {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.settings-window-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.settings-window-input {
+  width: 8ch;
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-window-save {
+  min-height: 44px;
+}
+
+.settings-window-status {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+.settings-window-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.settings-window-error[hidden] {
+  display: none;
+}
+
+.settings-order,
+.settings-archived {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-order-item,
+.settings-archived-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-order-name,
+.settings-archived-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.settings-order-empty,
+.settings-archived-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.settings-move,
+.settings-unarchive {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 14px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-move:disabled,
+.settings-unarchive:disabled {
+  opacity: 0.4;
+}
+
+.settings-error {
+  margin: 12px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}

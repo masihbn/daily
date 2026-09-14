@@ -1312,17 +1312,23 @@ test('ICON3 — a trackable with an unknown icon key ("bogus") also renders .tro
 // already-finished render painted.
 //
 // render#1 (#/) suspends at `await mount()` while the trackables request is
-// deliberately delayed below. Before it resolves, we jump to #/settings:
-// render#2 has no network step, so it runs synchronously to completion,
-// paints data-route="settings" plus the Settings nav link, AND — critically
-// — unmounts render#1's still-live home view instance (main.js's render()
-// tears down `currentView` at the top of every call). That flips the home
-// view's internal `disposed` flag, so when render#1's mount() resumes after
-// the delayed trackables fetch, its own `if (disposed) return;` guard (step
-// 2 in js/views/home.js) makes it bail out immediately — it never goes on
-// to request entries. So there is no second network call to key a wait off
-// of; the only network event render#1 produces at all is the one delayed
-// trackables response.
+// deliberately delayed below. Before it resolves, we jump to #/nope (an
+// unknown route): render#2's target used to be #/settings, back when
+// Settings was a static placeholder with no mount()/network step of its
+// own — but Step 4.1 gave it a real view that GETs app_settings and
+// trackables on mount, so it is no longer synchronous and would no longer
+// isolate this race. #/nope (data-route="notfound") is still rendered
+// synchronously by main.js — there is no view module, no mount(), nothing
+// to await — so it keeps this test's premise intact: render#2 runs
+// synchronously to completion, paints data-route="notfound", AND —
+// critically — unmounts render#1's still-live home view instance (main.js's
+// render() tears down `currentView` at the top of every call). That flips
+// the home view's internal `disposed` flag, so when render#1's mount()
+// resumes after the delayed trackables fetch, its own
+// `if (disposed) return;` guard (step 2 in js/views/home.js) makes it bail
+// out immediately — it never goes on to request entries. So there is no
+// second network call to key a wait off of; the only network event
+// render#1 produces at all is the one delayed trackables response.
 //
 // Why the wait can't just be `await expect(...).toHaveAttribute(...)` fired
 // right after the hash switch: that assertion retries until it matches, so
@@ -1341,7 +1347,7 @@ test('ICON3 — a trackable with an unknown icon key ("bogus") also renders .tro
 // look at the DOM. Nothing after step (a) involves another network round
 // trip or timer, so this buffer only has to cover promise-microtask
 // plumbing, not another slow operation.
-test('NAV-RACE — a render suspended on #/ must not clobber the nav after a later render to #/settings has already painted it', async ({
+test('NAV-RACE — a render suspended on #/ must not clobber the nav after a later render to #/nope has already painted it', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -1377,13 +1383,15 @@ test('NAV-RACE — a render suspended on #/ must not clobber the nav after a lat
   // it.)
   await page.goto('/index.html#/');
 
-  // render#2: navigate to settings before render#1's fetch resolves.
-  // Settings has no mount()/network step, so this runs synchronously and
-  // paints data-route="settings" plus the settings nav link immediately.
+  // render#2: navigate to an unknown route before render#1's fetch
+  // resolves. The notfound route has no mount()/network step, so this runs
+  // synchronously and paints data-route="notfound" (and clears the nav's
+  // aria-current, since no link's data-route matches 'notfound')
+  // immediately.
   await page.evaluate(() => {
-    window.location.hash = '#/settings';
+    window.location.hash = '#/nope';
   });
-  await expect(page.locator('#app')).toHaveAttribute('data-route', 'settings');
+  await expect(page.locator('#app')).toHaveAttribute('data-route', 'notfound');
 
   // Now let render#1 actually resume and run its (short) continuation out
   // fully: wait for the delayed trackables response to be delivered to the
@@ -1397,10 +1405,13 @@ test('NAV-RACE — a render suspended on #/ must not clobber the nav after a lat
   await page.waitForTimeout(200);
 
   // Only now assert — after render#1's stale continuation has had every
-  // opportunity to clobber the nav, if it was going to.
-  await expect(page.locator('#app')).toHaveAttribute('data-route', 'settings');
-  await expect(page.locator('#nav a[href="#/settings"]')).toHaveAttribute('aria-current', 'page');
+  // opportunity to clobber the nav, if it was going to. On the buggy build,
+  // render#1's stale updateNav('home') would re-mark the '#/' link current;
+  // asserting data-route AND that no nav link (in particular '#/') regained
+  // aria-current is what catches that.
+  await expect(page.locator('#app')).toHaveAttribute('data-route', 'notfound');
   await expect(page.locator('#nav a[href="#/"]')).not.toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#nav a[href="#/settings"]')).not.toHaveAttribute('aria-current', 'page');
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);

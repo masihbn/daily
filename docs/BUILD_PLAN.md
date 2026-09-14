@@ -4986,7 +4986,10 @@ Phase 4.**
 
 ## Step 4.1 — Settings screen
 
-**Status:** TODO
+**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
+check**. Executed under the ORCHESTRATION.md loop with a fresh
+Implementer and Test Author from `CONTRACT-4.1.md`; one fix cycle,
+entirely test-side (see Test Subjects). `sw.js` `CACHE` → `daily-v35`.
 
 **Goal.** The global rolling-window setting is user-editable, per the
 resolved decision that it must not be a hardcoded constant.
@@ -5008,7 +5011,80 @@ auto-bounds exist).
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **4029 green** — 3785 unit (+47), 54 integration,
+190 e2e (+10). New: `js/views/settings.js`, `tests/unit/store-settings.test.mjs`,
+`tests/unit/settings-model.test.mjs`, `tests/unit/bounds-meaning.test.mjs`,
+`tests/e2e/settings.test.mjs`; changed: `js/store.js`, `js/charts/bounds.js`,
+`js/views/detail.js`, `js/main.js`, `css/styles.css`, `sw.js`,
+`tests/helpers/e2e-session.mjs`, and four pre-existing e2e tests (below).
+
+*Design decisions taken at execution time:*
+
+- **The setting lives in the store**, cached in the `daily.cache.v1` blob
+  as a `settings` field, with `getSettings` / `loadSettings` /
+  `saveSettings` (online-only: a preference is not a log, so no outbox)
+  and a general `updateTrackable` for reorder/unarchive. The Settings
+  screen always loads it on mount; the detail screen loads it once when
+  nothing is cached.
+- **The window finally drives the auto bands.** Until this step nothing
+  passed `windowDays` to `boundsModel()`/`boundsFor()`, so the DB value
+  was inert and every auto band was 90 days. detail.js now passes the
+  setting to both (metric and overlay). Nothing memoises bounds, so a
+  saved change shows on the next chart render — "invalidate cached
+  derived bounds" is satisfied by construction. The Range chart's
+  meaning line now names the window when the band is automatic
+  (`… · auto band: 10th–90th percentile of the last 30 days`), which is
+  the hint Attempt 13 asked for.
+- **Validation** = the DB check: a whole number 14–730, from a text
+  input with a numeric keypad (`parseWindowDays`, pure, unit-tested).
+- **Reorder** = Up/Down per visible trackable; `reorderPlan()` (pure)
+  renumbers 0..n−1 and patches only rows whose `sort_order` changes,
+  lowest new position first. **Unarchive** = one PATCH. Failures show
+  one error line and resync from the server.
+- **Sign out moved into the view** with its DOM, texts and refusal
+  rule unchanged, so the D.7 tests kept passing without edits to their
+  assertions.
+
+*The fix cycle — five e2e failures, all test-side.* (1) S5 relied on the
+GET returning `[]` but the new default cache seed made a value
+available, so no error showed: the test now clears the seeded settings
+first. (2–4) A10/A11 (auth) and the shell nav test navigate to
+`#/settings`, which used to be a static placeholder with no network and
+now mounts a view that loads settings; their local `routeEmptyRest`
+helpers stubbed only trackables/entries, and my contract wrongly
+claimed they answered every REST GET. They now also stub `app_settings`;
+their assertions are untouched. (5) Home's NAV-RACE test reasoned from
+"Settings has no mount()", which is no longer true; render #2 now
+targets the not-found placeholder route, which is still synchronous, so
+the race it guards (a suspended earlier render must not overwrite a
+later one's nav/data-route) is preserved. **Orchestrator ruling
+recorded: the behaviour those tests pinned changed by design, and the
+changes are to their plumbing, not their expectations.**
+
+*E2E plumbing change.* `seedSession()` now also seeds the cache blob
+with `settings: { rolling_window_days: 90 }`, so no existing detail test
+started issuing an `app_settings` GET. Tests that seed their own blob
+still win (last `addInitScript` wins).
+
+*Unit (+47):* store hydrate/persist/clear with settings; loadSettings
+and saveSettings success/failure incl. a non-numeric row and a
+retryable-shaped error that must still not queue; updateTrackable
+replace/append/failure; parseWindowDays table with boundaries;
+reorderPlan for middle/first/last/unknown/sparse orders; the meaning
+suffix for auto/ok only.
+
+*E2E (10 cases):* four blocks and the seeded values; save → one PATCH,
+then the detail screen uses 30 days with zero settings GETs and the band
+equals `deriveBounds(entries, 30)`, not 90; four invalid inputs; PATCH
+500; GET `[]` with nothing cached; reorder → two PATCHes and Home in the
+new order; unarchive; detail without cached settings issues exactly one
+GET and shows its value, with the default seed zero; trackables 500 →
+banner; sign-out covered by the unchanged D.7 tests.
+
+*Not verifiable from this machine (Phase 4 gate, with 4.2):* whether
+"Saved." then a visibly moved band on Calories convinces the user the
+setting works, whether the ↑/↓ reorder is usable at 390px, and whether
+the account block reads right at the bottom.
 
 ---
 
@@ -5393,3 +5469,11 @@ unwind than to ask about.
   entry in the window; min/max over the filled series) and one test
   baseline fix. Suite 3972 green. `CACHE` → `daily-v33`. Phase 3 gate
   next.
+- **2026-09-13** — **Step 4.1 executed.** Settings screen: rolling
+  window (14–730) in the store and finally wired into the auto bands
+  (it was inert before), reorder via ↑/↓ with minimal PATCHes,
+  archived list with Unarchive, sign-out moved into the view. One
+  test-side fix cycle: four pre-existing tests assumed the Settings
+  placeholder made no requests; their plumbing was updated, their
+  expectations not. Suite 4029 green. `CACHE` → `daily-v35`. Device
+  check pending; 4.2 next, then the Phase 4 gate.

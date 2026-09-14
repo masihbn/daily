@@ -232,9 +232,26 @@ const PERIOD_MEANING = {
   month: 'Monthly average',
 };
 
-export function boundsMeaningText(period, unit) {
+// Step 4.1 (CONTRACT-4.1.md §2): `bounds` is OPTIONAL — a third argument so
+// every existing two-argument caller/test keeps its exact prior output. When
+// given and it describes a real automatic band (mode 'auto', status 'ok',
+// windowDays a finite number), the window is named here so the rolling-
+// window SETTING is never invisible on the one chart it actually drives —
+// see CONTRACT-4.1.md §0 rule 2, "the Range chart's meaning line names the
+// window when the band is automatic."
+export function boundsMeaningText(period, unit, bounds) {
   const base = PERIOD_MEANING[period] || PERIOD_MEANING.day;
-  return typeof unit === 'string' && unit !== '' ? `${base} · ${unit}` : base;
+  let text = typeof unit === 'string' && unit !== '' ? `${base} · ${unit}` : base;
+  if (
+    bounds &&
+    typeof bounds === 'object' &&
+    bounds.mode === 'auto' &&
+    bounds.status === 'ok' &&
+    isFiniteValue(bounds.windowDays)
+  ) {
+    text += ` · auto band: 10th–90th percentile of the last ${bounds.windowDays} days`;
+  }
+  return text;
 }
 
 // Label for one bucket key: days and weeks read 'd MMM' (a week by its
@@ -727,7 +744,8 @@ export function renderBounds(model) {
   meaning.className = 'bounds-meaning';
   meaning.textContent = boundsMeaningText(
     activePeriod,
-    model && typeof model === 'object' ? model.unit : null
+    model && typeof model === 'object' ? model.unit : null,
+    model && typeof model === 'object' ? model.bounds : null
   );
   root.appendChild(meaning);
 
