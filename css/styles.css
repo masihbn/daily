@@ -2359,16 +2359,20 @@ button.hm-cell {
   opacity: 0.4;
 }
 
-/* Compare screen (Step 3.5, CONTRACT-3.5.md) -------------------------------
+/* Compare screen (Step 3.5, CONTRACT-3.5.md; restyled Step U.5,
+   CONTRACT-U.5.md §6) --------------------------------------------------
    A top-level view at #/compare, not a chart slot inside .detail — so it
    gets its own top-level block rather than living inside .chart-slot.
-   .compare-picker/.compare-hint/.compare-chips mirror the overlay picker's
-   own .overlay-picker/.overlay-hint/.overlay-chips rules (the chip itself
-   already reuses .overlay-chip's visual treatment via the shared class on
-   the button — see js/views/compare.js). .compare-meaning mirrors
-   .bounds-meaning's small muted line. The range/period controls below
-   reuse .detail-ranges/.trend-periods UNTOUCHED (js/views/compare.js
-   builds identical markup), so nothing new is needed for them here. */
+   .compare-picker/.compare-hint mirror the overlay picker's own
+   .overlay-picker/.overlay-hint rules (the chip itself already reuses
+   .overlay-chip's visual treatment via the shared class on the button —
+   see js/views/compare.js). .compare-controls (new in U.5) is the one
+   control bar: range and period .seg-look controls side by side. The
+   Chart.js legend is off now (U.5 §0 decision 1) — .compare-key is the
+   legend, moved above the chart, and each item is a real 44pt tappable
+   toggle button (.compare-key-toggle) rather than plain text. .compare
+   itself takes the same look as .card (its own root only ever carries the
+   single class "compare" — see js/charts/compare.js#renderCompare). */
 
 .compare-view {
   display: block;
@@ -2376,32 +2380,86 @@ button.hm-cell {
 }
 
 .compare-picker {
-  width: 100%;
-  margin: 0 0 16px;
+  margin-bottom: var(--s3);
 }
 
 .compare-hint {
-  margin: 0 0 10px;
-  font-size: 12px;
+  font: var(--t-cap);
   color: var(--fg-2);
+  margin: 0 0 var(--s2);
 }
 
+/* U.5 §0 decision 2: a single horizontally scrolling row instead of wrapping
+   — the negative side margins + matching padding let the row bleed to the
+   screen edges (same "bleed to the gutter" trick as other edge-to-edge
+   scrollers in this app) while the chips themselves stay inset. Scrollbar
+   hidden on every engine (a touch-scrollable chip row doesn't need one on
+   screen); native momentum/touch scrolling still works. */
 .compare-chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: var(--s2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+  margin: 0 calc(-1 * var(--s4));
+  padding-left: var(--s4);
+  padding-right: var(--s4);
+}
+
+.compare-chips::-webkit-scrollbar {
+  display: none;
+}
+
+/* U.5 §0 decision 2: range and period share one row — two children, each
+   already carrying the .seg look via .detail-ranges/.trend-periods. */
+.compare-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+/* U.5 §2: the Expand control's own row, right-aligned, same 44px .chart-
+   expand button detail.js's chart-slot head uses. */
+.compare-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--s2);
+}
+
+.compare {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: var(--s4);
+  box-shadow: var(--shadow);
+}
+
+/* Fullscreen fix (self-check, Step U.5): with chrome:false (the compare
+   fullscreen route), this root is placed directly inside .fs-track, not a
+   .chart-slot card — the card padding above put .compare-canvas-wrap out of
+   alignment with the pinned axis copy (js/charts/scroll.js), which sits
+   flush with .fs-track's own edges, leaking a sliver of the real (unpinned)
+   canvas past the copy. Bare box model here, matching .weekly/.bounds's own
+   unwrapped roots in the same fullscreen context. */
+.compare[data-chrome="false"] {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
 }
 
 .compare-meaning {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--fg-2);
+  font: var(--t-cap);
+  color: var(--fg-3);
+  margin: 0 0 var(--s3);
 }
 
 .compare-canvas-wrap {
   position: relative;
   width: 100%;
-  height: 260px;
+  height: 280px;
 }
 
 .compare-canvas {
@@ -2414,36 +2472,69 @@ button.hm-cell {
 .compare-loading {
   margin: 0;
   color: var(--fg-2);
-  font-size: 13px;
+  font: var(--t-cap);
 }
 
-/* Soft series-count warning (§0 rule 5: no hard cap, only this) — uses
-   --bad the same way .bounds-summary's out-of-range state does, but at
-   body-text weight/size since this is advisory, not a verdict. */
+/* Soft series-count warning (§0 rule 5: no hard cap, only this) — the pill
+   look every other status pill in the app uses (.pill/.pill--warn's own
+   colour), at body-caption size/weight since this is advisory text, not a
+   status badge. */
 .compare-warning {
-  margin: 10px 0 0;
-  color: var(--bad);
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--warn);
+  font: var(--t-cap);
+  margin: 0 0 var(--s2);
 }
 
 .compare-skipped {
-  margin: 10px 0 0;
-  color: var(--fg-2);
-  font-size: 12px;
+  font: var(--t-cap);
+  color: var(--fg-3);
+  margin: 0 0 var(--s2);
 }
 
 .compare-key {
-  list-style: none;
-  margin: 10px 0 0;
+  margin: 0 0 var(--s3);
   padding: 0;
-  font-size: 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .compare-key-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 0;
+  gap: var(--s2);
+  min-height: 44px;
+}
+
+/* U.5 §0 decision 1: the key list IS the legend now — each item's name/dot
+   is a real tappable button (hide/show that line), not static text. */
+.compare-key-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 44px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-ctl);
+  font: var(--t-sub);
+  font-weight: 600;
+  color: var(--fg);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.compare-key-item[data-hidden="true"] {
+  opacity: 0.45;
+}
+
+.compare-key-item[data-hidden="true"] .compare-key-toggle {
+  text-decoration: line-through;
 }
 
 .compare-key-dot {
@@ -2454,12 +2545,11 @@ button.hm-cell {
   flex: 0 0 auto;
 }
 
-.compare-key-name {
-  font-weight: 600;
-}
-
 .compare-key-range {
+  margin-left: auto;
+  font: var(--t-cap);
   color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Sign-in gate (Step D.7) -------------------------------------------------
@@ -3067,8 +3157,10 @@ button.hm-cell {
    the track instead of the card's own fixed pixel height. */
 .fs-track .weekly,
 .fs-track .bounds,
+.fs-track .compare,
 .fs-track .weekly-canvas-wrap,
-.fs-track .bounds-canvas-wrap {
+.fs-track .bounds-canvas-wrap,
+.fs-track .compare-canvas-wrap {
   height: 100%;
 }
 

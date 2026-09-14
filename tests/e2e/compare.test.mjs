@@ -936,3 +936,352 @@ test('C12 — a persisted Daily period with a 1Y range snaps the range to 3M on 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// Step U.5 (CONTRACT-U.5.md) — one control bar, the key list as an
+// interactive legend above the chart, an Expand button, and the
+// #/compare/chart fullscreen view. The implementation (js/views/compare.js,
+// js/charts/compare.js's render/opts, js/views/fullscreen.js's `kind:
+// 'compare'`, js/router.js, js/main.js) is being written in parallel by
+// another agent from CONTRACT-U.5.md and has NOT been read while writing
+// these cases. Every case below is CONTRACT-U.5.md §8's CU-1..CU-6, exactly.
+// ===========================================================================
+
+// Waits for the chart to have drawn exactly `count` datasets — the same
+// poll-on-readChartInfo idiom every case above already uses.
+async function waitForDatasetCount(page, count) {
+  await expect
+    .poll(async () => {
+      const info = await readChartInfo(page);
+      return info ? info.datasetCount : null;
+    })
+    .toBe(count);
+}
+
+// ===========================================================================
+// CU-1 — one control bar: ranges left of periods, on one row
+// ===========================================================================
+
+test('CU-1 — .compare-controls holds .detail-ranges and .trend-periods side by side on one row', async ({ page }) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+
+  const controls = page.locator('.compare-controls');
+  const ranges = controls.locator('.detail-ranges');
+  const periods = controls.locator('.trend-periods');
+  await expect(ranges).toHaveCount(1);
+  await expect(periods).toHaveCount(1);
+
+  const rangesBox = await ranges.boundingBox();
+  const periodsBox = await periods.boundingBox();
+  expect(rangesBox).not.toBeNull();
+  expect(periodsBox).not.toBeNull();
+  expect(Math.abs(rangesBox.y - periodsBox.y)).toBeLessThanOrEqual(2);
+  expect(rangesBox.x).toBeLessThan(periodsBox.x);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-2 — the chip row scrolls horizontally, all chips on one row
+// ===========================================================================
+
+test('CU-2 — with 6 candidates, all .compare-chip boxes sit on one row and .compare-chips scrolls horizontally', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+
+  const chips = page.locator('.compare-chip');
+  await expect(chips).toHaveCount(6);
+
+  const boxes = [];
+  for (let i = 0; i < 6; i += 1) {
+    const box = await chips.nth(i).boundingBox();
+    expect(box).not.toBeNull();
+    boxes.push(box);
+  }
+  const firstY = boxes[0].y;
+  for (const box of boxes) {
+    expect(Math.abs(box.y - firstY)).toBeLessThanOrEqual(2);
+  }
+
+  const overflowX = await page.locator('.compare-chips').evaluate((el) => getComputedStyle(el).overflowX);
+  expect(['auto', 'scroll']).toContain(overflowX);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-3 — the key list is the legend: ordered above the chart, tappable
+// ===========================================================================
+
+test('CU-3 — .compare-key precedes the canvas, each item is a >=44px toggle that hides/shows its series', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  const getRequests = await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+  await selectChip(page, 701, getRequests, 1);
+  await selectChip(page, 702, getRequests, 2);
+  await waitForDatasetCount(page, 2);
+
+  const order = await page.evaluate(() => {
+    const key = document.querySelector('.compare-key');
+    const wrap = document.querySelector('.compare-canvas-wrap');
+    if (!key || !wrap) return null;
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: true when `wrap` comes AFTER
+    // `key` in document order, i.e. the key precedes the canvas wrap.
+    return !!(key.compareDocumentPosition(wrap) & 4);
+  });
+  expect(order).toBe(true);
+
+  const items = page.locator('.compare-key-item');
+  await expect(items).toHaveCount(2);
+
+  const firstItem = items.first();
+  const firstToggle = firstItem.locator('.compare-key-toggle');
+  await expect(firstItem).toHaveAttribute('data-hidden', 'false');
+  await expect(firstToggle).toHaveAttribute('aria-pressed', 'true');
+  const toggleBox = await firstToggle.boundingBox();
+  expect(toggleBox).not.toBeNull();
+  expect(toggleBox.height).toBeGreaterThanOrEqual(44);
+
+  await firstToggle.click();
+  await expect(firstToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(firstItem).toHaveAttribute('data-hidden', 'true');
+  const hiddenLabel = await firstToggle.getAttribute('aria-label');
+  expect(hiddenLabel.startsWith('Show')).toBe(true);
+
+  await firstToggle.click();
+  await expect(firstToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(firstItem).toHaveAttribute('data-hidden', 'false');
+  const shownLabel = await firstToggle.getAttribute('aria-label');
+  expect(shownLabel.startsWith('Hide')).toBe(true);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-4 — the Expand button only exists once there is something to expand
+// ===========================================================================
+
+test('CU-4 — .chart-expand[data-expand="compare"] is absent with 0 selected and visible with >=1 selected', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  const getRequests = await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+
+  const expandBtn = page.locator('button.chart-expand[data-expand="compare"]');
+  await expect(expandBtn).toHaveCount(0);
+
+  await selectChip(page, 701, getRequests, 1);
+  await waitForDatasetCount(page, 1);
+
+  await expect(expandBtn).toBeVisible();
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-5 — Expand opens #/compare/chart (the U.4 fullscreen view, kind
+// 'compare'); range changes there persist to daily.compare.v1; Close
+// returns to a #/compare that reflects the change
+// ===========================================================================
+
+test('CU-5 — Expand opens the compare fullscreen view; a range change there persists and survives Close', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  const getRequests = await routeEntries(page, ENTRIES_BY_ID);
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('section.compare-view')).toHaveAttribute('data-compare-state', 'ready');
+  await selectChip(page, 701, getRequests, 1);
+  await selectChip(page, 702, getRequests, 2);
+  await waitForDatasetCount(page, 2);
+
+  const expandBtn = page.locator('button.chart-expand[data-expand="compare"]');
+  await expect(expandBtn).toBeVisible();
+  await expandBtn.click();
+
+  await page.waitForURL(/#\/compare\/chart$/);
+
+  const fsSection = page.locator('section.fullscreen[data-kind="compare"]');
+  await expect(fsSection).toHaveAttribute('data-fs-state', 'ready');
+  await expect(page.locator('#nav')).toBeHidden();
+
+  const leftAxis = page.locator('.fs-axis[data-side="left"]');
+  await expect(leftAxis).toHaveCount(1);
+  // Inside (possibly rotated) section.fullscreen — layout width via
+  // offsetWidth through evaluate, never boundingBox() (see
+  // tests/e2e/fullscreen.test.mjs's F1/F3 comments: boundingBox() is
+  // screen-space and gets swapped by the CSS rotation).
+  const leftAxisWidth = await leftAxis.evaluate((el) => el.offsetWidth);
+  expect(leftAxisWidth).toBeGreaterThan(0);
+
+  await expect(page.locator('.fs-track canvas')).toHaveCount(1);
+
+  const rangeBtn = page.locator('.fs-range[data-range="1y"]');
+  await rangeBtn.click();
+  await expect(rangeBtn).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = localStorage.getItem('daily.compare.v1');
+        return raw ? JSON.parse(raw).range : null;
+      })
+    )
+    .toBe('1y');
+
+  await page.locator('.fs-close').click();
+  await page.waitForURL(/#\/compare$/);
+
+  await expect(page.locator('section.compare-view')).toBeVisible();
+  await expect(page.locator('.detail-range[data-range="1y"]')).toHaveAttribute('aria-pressed', 'true');
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-6 — opening #/compare/chart directly with zero persisted ids renders
+// the empty state, drawing no chart
+// ===========================================================================
+
+test('CU-6 — #/compare/chart with zero persisted ids renders data-fs-state="empty" with the pick-more-trackables message', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  const getRequests = await routeEntries(page, ENTRIES_BY_ID);
+  // Exact stored shape per js/charts/compare.js's DEFAULT_COMPARE_STATE.
+  await seedCompareState(page, { ids: [], period: 'week', range: '3m' });
+
+  await page.goto('/index.html#/compare/chart');
+
+  const fsSection = page.locator('section.fullscreen[data-kind="compare"]');
+  await expect(fsSection).toHaveAttribute('data-fs-state', 'empty');
+  await expect(page.locator('.fs-status')).toHaveText('Pick two or more trackables to compare them.');
+  await expect(page.locator('.fs-track canvas')).toHaveCount(0);
+
+  // Fewer than one id means the mount never reaches its entries load step
+  // (CONTRACT-U.5.md §4: the empty-state branch returns before "load
+  // entries for the ids").
+  expect(getRequests.length).toBe(0);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CU-7 — the fullscreen canvas fills its stage without overflowing it
+// (orchestrator addition, post-U.5: a real bug seen in screenshots — the
+// canvas sized itself by Chart.js's default aspect ratio instead of the
+// stage's actual box). offsetHeight/clientHeight are LAYOUT values, so they
+// are safe to compare directly even though the portrait section is rotated
+// on screen (same reasoning as the offsetWidth reads above and in
+// tests/e2e/fullscreen.test.mjs's F1/F3 comments).
+// ===========================================================================
+
+async function assertCanvasFillsStage(page) {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, ALL_TRACKABLES);
+  await routeEntries(page, ENTRIES_BY_ID);
+  await seedCompareState(page, { ids: ['701', '702'], period: 'week', range: '3m' });
+
+  await page.goto('/index.html#/compare/chart');
+
+  const fsSection = page.locator('section.fullscreen[data-kind="compare"]');
+  await expect(fsSection).toHaveAttribute('data-fs-state', 'ready');
+
+  // Chart.js's responsive ResizeObserver resizes the canvas a frame or two
+  // after data-fs-state="ready" is set — a single read can catch the
+  // pre-resize height even when the eventual layout is correct, so poll
+  // instead of reading once.
+  async function readSizes() {
+    return page.evaluate(() => {
+      const canvas = document.querySelector('.fs-track canvas');
+      const stage = document.querySelector('.fs-stage');
+      return canvas && stage ? { canvas: canvas.offsetHeight, stage: stage.clientHeight } : null;
+    });
+  }
+
+  let lastSizes = null;
+  await expect
+    .poll(
+      async () => {
+        lastSizes = await readSizes();
+        return lastSizes ? lastSizes.canvas <= lastSizes.stage && lastSizes.canvas >= lastSizes.stage - 40 : false;
+      },
+      { timeout: 5000 }
+    )
+    .toBe(true);
+
+  // Assert the actual numbers once more with the same inequalities, so a
+  // failure here still reports the real values rather than just "expected
+  // true" from the boolean poll above.
+  expect(lastSizes).not.toBeNull();
+  expect(lastSizes.canvas).toBeLessThanOrEqual(lastSizes.stage);
+  expect(lastSizes.canvas).toBeGreaterThanOrEqual(lastSizes.stage - 40);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+}
+
+test('CU-7 — portrait viewport: the canvas height stays within 40px of the stage height, never exceeding it', async ({
+  page,
+}) => {
+  await assertCanvasFillsStage(page);
+});
+
+test.describe('CU-7 — landscape viewport', () => {
+  test.use({ viewport: { width: 844, height: 390 } });
+
+  test('the canvas height stays within 40px of the stage height, never exceeding it (not rotated)', async ({
+    page,
+  }) => {
+    await assertCanvasFillsStage(page);
+  });
+});

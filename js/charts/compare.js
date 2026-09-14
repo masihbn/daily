@@ -25,6 +25,14 @@ import { rollup, fillSeries, normalizeSeries } from '../aggregate.js';
 // same reason, per trackable, before normalizing.
 import { seriesAggregationFor, fillValueFor, periodKeysFor, periodLabel } from './weekly.js';
 import { isoWeekKey } from '../dates.js';
+// Step U.5 (CONTRACT-U.5.md §3): every colour/font/grid/tooltip look now
+// comes from the shared theme module, same as weekly.js/bounds.js/
+// overlay.js since U.3 — this file adopts it now rather than keeping its
+// own hand-rolled Chart.js option literals. maxTicksFor() sizes the x-axis
+// tick budget to the fullscreen track's actual pixel width, exactly as
+// weekly.js/bounds.js already do for their own opts.trackWidth.
+import { xAxisTheme, yAxisTheme, tooltipTheme, lineSeriesTheme, cssVar, chartFont } from './theme.js';
+import { maxTicksFor } from './scroll.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -420,8 +428,28 @@ export function compareKeyText(series) {
 // before an innerHTML wipe of its own and on unmount.
 let chartInstance = null;
 
+// Step U.5 (CONTRACT-U.5.md §0/§3): the key list IS the legend now (Chart.js's
+// own legend is turned off), so each `.compare-key-toggle` button needs a
+// click listener. Attached ONCE per render, delegated on the `ul` itself
+// (same "one delegated listener" discipline every view in this app follows
+// for its own root) — tracked at module scope, alongside the chart instance,
+// so destroyCompare() can remove it: the `ul` is wiped from the DOM by the
+// caller's innerHTML reset the same way the canvas is, which detaches it but
+// does not itself drop the listener reference this module is still holding.
+let keyEl = null;
+let keyClickHandler = null;
+
 // Idempotent — safe to call when nothing exists, never throws.
 export function destroyCompare() {
+  if (keyEl && keyClickHandler) {
+    try {
+      keyEl.removeEventListener('click', keyClickHandler);
+    } catch {
+      // A teardown call must never throw.
+    }
+  }
+  keyEl = null;
+  keyClickHandler = null;
   if (chartInstance) {
     try {
       chartInstance.destroy();
@@ -439,25 +467,125 @@ function renderUnavailable(root) {
   root.appendChild(p);
 }
 
+// Builds `.compare-key` (the legend) and wires its one delegated toggle
+// listener. `series` is in exactly the order `datasets` was built in, so a
+// key item's position among `ul`'s children IS its Chart.js dataset index —
+// no separate id->index map needed. Toggling calls
+// `chart.setDatasetVisibility`/`chart.update()` directly (§0 decision 1: the
+// key list IS the legend, so this reproduces exactly what Chart.js's own
+// legend click does) and flips `aria-pressed`/`data-hidden`/`aria-label` to
+// match the new visibility.
+function buildKeyList(series) {
+  const ul = document.createElement('ul');
+  ul.className = 'compare-key';
+
+  for (const s of series) {
+    const li = document.createElement('li');
+    li.className = 'compare-key-item';
+    li.dataset.seriesId = s.id;
+    li.dataset.hidden = 'false';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'compare-key-toggle';
+    toggle.setAttribute('aria-pressed', 'true');
+    toggle.setAttribute('aria-label', `Hide ${s.name}`);
+
+    const dot = document.createElement('span');
+    dot.className = 'compare-key-dot';
+    dot.style.backgroundColor = s.color;
+    toggle.appendChild(dot);
+
+    const name = document.createElement('span');
+    name.className = 'compare-key-name';
+    name.textContent = s.name;
+    toggle.appendChild(name);
+
+    li.appendChild(toggle);
+
+    const range = document.createElement('span');
+    range.className = 'compare-key-range';
+    range.textContent = compareKeyText(s);
+    li.appendChild(range);
+
+    ul.appendChild(li);
+  }
+
+  keyClickHandler = (event) => {
+    try {
+      const target = event.target;
+      if (!target || !target.closest) return;
+      const toggle = target.closest('button.compare-key-toggle');
+      if (!toggle || !ul.contains(toggle)) return;
+      const li = toggle.closest('li.compare-key-item[data-series-id]');
+      if (!li || !chartInstance) return;
+      const index = Array.prototype.indexOf.call(ul.children, li);
+      if (index < 0) return;
+
+      const nowVisible = !chartInstance.isDatasetVisible(index);
+      chartInstance.setDatasetVisibility(index, nowVisible);
+      chartInstance.update();
+
+      const s = series[index];
+      const name = isPlainObject(s) && typeof s.name === 'string' ? s.name : '';
+      toggle.setAttribute('aria-pressed', String(nowVisible));
+      li.dataset.hidden = String(!nowVisible);
+      toggle.setAttribute('aria-label', `${nowVisible ? 'Hide' : 'Show'} ${name}`);
+    } catch {
+      // No handler may ever let an exception escape.
+    }
+  };
+  ul.addEventListener('click', keyClickHandler);
+  keyEl = ul;
+
+  return ul;
+}
+
 // The DOM export. Returns a container element; creates at most one
 // Chart.js instance, tracked at module scope above. No innerHTML anywhere
 // in this function — built with createElement/textContent/setAttribute
 // only.
-export function renderCompare(model) {
+//
+// Step U.5 (CONTRACT-U.5.md §3): `opts` mirrors weekly.js/bounds.js's own
+// full-screen options — an omitted second argument (every pre-U.5 caller,
+// and the compare screen itself) reproduces the chrome behaviour.
+//   opts.chrome     default true. false suppresses the meaning/warning/
+//                   skipped lines AND the key list — the fullscreen view
+//                   draws its own bar and has no legend, so with
+//                   `chrome: false` the root holds only `.compare-canvas-wrap`.
+//                   The 'none'/'empty' status messages are NOT part of this
+//                   "chrome" and always render regardless (mirrors weekly.js/
+//                   bounds.js's identical isEmpty/unavailable carve-out).
+//   opts.trackWidth default null. A number sizes the canvas wrap to an
+//                   explicit CSS pixel width (100% height) and tightens the
+//                   x-axis tick budget to what that width can actually hold
+//                   — the fullscreen view's sideways-scrolling track.
+//   opts.plugins    default []. Extra Chart.js plugin instances (e.g. the
+//                   pinned-axis plugin) registered on this chart only.
+export function renderCompare(model, opts = {}) {
   destroyCompare();
+
+  const chrome = opts.chrome !== false;
+  const trackWidthPx =
+    typeof opts.trackWidth === 'number' && Number.isFinite(opts.trackWidth) ? opts.trackWidth : null;
+  const extraPlugins = Array.isArray(opts.plugins) ? opts.plugins : [];
 
   const root = document.createElement('div');
   root.className = 'compare';
-
-  // §0 rule 4: the axis is a PERCENTAGE OF EACH SERIES' OWN RANGE, and an
-  // unlabeled 0-100 axis would be read as absolute values — actively
-  // misleading (APP_CONCEPT.md's own words). This line, plus the y-axis
-  // title below, are what say so.
-  const meaning = document.createElement('p');
-  meaning.className = 'compare-meaning';
-  meaning.textContent =
-    "Each line is scaled to its own range in this window: 0% is its lowest value, 100% its highest.";
-  root.appendChild(meaning);
+  // Device defect found in this step's self-check: `.compare`'s own card
+  // padding (16px, CSS `.compare { padding: var(--s4) }` — this root is
+  // NOT wrapped in a separate `.chart-slot` card the way weekly.js/
+  // bounds.js's own bare roots are, so `.compare` carries the card look
+  // itself) shifted `.compare-canvas-wrap` 16px right/down from `.fs-track`'s
+  // own edges in the fullscreen view, while the PINNED axis copy
+  // (js/charts/scroll.js#pinnedAxisPlugin, positioned flush with `.fs-track`
+  // per CONTRACT-U.4.md) stayed at the track's real edge — a 16px
+  // misalignment between the two that let a sliver of the real canvas's own
+  // (unscrolled) axis labels show past the pinned copy. `data-chrome`
+  // (new, additive) lets CSS zero that box model only for the fullscreen
+  // (chrome: false) render, without touching the `.compare` class the
+  // top-level card view still relies on for its own look.
+  root.dataset.chrome = String(chrome);
 
   const status = isPlainObject(model) ? model.status : undefined;
 
@@ -477,25 +605,37 @@ export function renderCompare(model) {
     return root;
   }
 
-  // §0 rule 5: no hard cap, only a soft warning above RECOMMENDED_MAX_SERIES
-  // — the "toggle off without deselecting" affordance is Chart.js's native
-  // legend click, free, mentioned right in the warning text so the user
-  // knows what to do about it.
-  if (model.tooMany) {
-    const p = document.createElement('p');
-    p.className = 'compare-warning';
-    p.setAttribute('role', 'status');
-    p.textContent = 'More than 4 lines gets hard to read — tap a name in the legend to hide one.';
-    root.appendChild(p);
-  }
+  if (chrome) {
+    // §0 rule 4: the axis is a PERCENTAGE OF EACH SERIES' OWN RANGE, and an
+    // unlabeled 0-100 axis would be read as absolute values — actively
+    // misleading (APP_CONCEPT.md's own words). This line, plus the y-axis
+    // title below, are what say so.
+    const meaning = document.createElement('p');
+    meaning.className = 'compare-meaning';
+    meaning.textContent =
+      "Each line is scaled to its own range in this window: 0% is its lowest value, 100% its highest.";
+    root.appendChild(meaning);
 
-  const skipped = Array.isArray(model.skipped) ? model.skipped : [];
-  if (skipped.length > 0) {
-    const p = document.createElement('p');
-    p.className = 'compare-skipped';
-    const names = skipped.map((s) => (isPlainObject(s) && typeof s.name === 'string' ? s.name : '')).join(', ');
-    p.textContent = `No data in this range: ${names}`;
-    root.appendChild(p);
+    // §0 rule 5: no hard cap, only a soft warning above RECOMMENDED_MAX_SERIES
+    // — the "toggle off without deselecting" affordance is now the key
+    // list's own toggle (§0 decision 1), mentioned right in the warning text
+    // so the user knows what to do about it.
+    if (model.tooMany) {
+      const p = document.createElement('p');
+      p.className = 'compare-warning';
+      p.setAttribute('role', 'status');
+      p.textContent = 'More than 4 lines gets hard to read — tap a name in the legend to hide one.';
+      root.appendChild(p);
+    }
+
+    const skipped = Array.isArray(model.skipped) ? model.skipped : [];
+    if (skipped.length > 0) {
+      const p = document.createElement('p');
+      p.className = 'compare-skipped';
+      const names = skipped.map((s) => (isPlainObject(s) && typeof s.name === 'string' ? s.name : '')).join(', ');
+      p.textContent = `No data in this range: ${names}`;
+      root.appendChild(p);
+    }
   }
 
   // The pinned CDN failed and the service worker had no cached copy — a
@@ -507,39 +647,63 @@ export function renderCompare(model) {
     return root;
   }
 
+  const series = Array.isArray(model.series) ? model.series : [];
+  const activePeriod = model.period === 'day' || model.period === 'week' || model.period === 'month' ? model.period : 'week';
+
+  // §0 decision 1: the key list IS the legend now, and it moves ABOVE the
+  // chart (CONTRACT-U.5.md §3 — key BEFORE the canvas). Only built with
+  // chrome, per this function's own opts.chrome contract above.
+  if (chrome) {
+    root.appendChild(buildKeyList(series));
+  }
+
   const wrap = document.createElement('div');
   wrap.className = 'compare-canvas-wrap';
+  // Step U.5: an explicit track width (the fullscreen sideways-scrolling
+  // view) replaces the card's fixed CSS height with a 100% that fills
+  // whatever height .fs-track gives it — same as weekly.js/bounds.js.
+  if (trackWidthPx !== null) {
+    wrap.style.width = `${trackWidthPx}px`;
+    wrap.style.height = '100%';
+  }
   const canvas = document.createElement('canvas');
   canvas.className = 'compare-canvas';
   wrap.appendChild(canvas);
   root.appendChild(wrap);
 
-  const series = Array.isArray(model.series) ? model.series : [];
-  const activePeriod = model.period === 'day' || model.period === 'week' || model.period === 'month' ? model.period : 'week';
-
   // §0 rule 4: only the plotted POSITION is normalized — `data` is
   // `normalized`, never `raw`. The raw value survives in `series` itself,
   // read back out by compareTooltipLabel()'s tooltip callback below and by
-  // the key list further down.
+  // the key list above.
   const datasets = series.map((s) => ({
+    // Step U.5 (CONTRACT-U.5.md §3): the shared line-series fragment (solid
+    // 2px line, gradient fill under it) rather than this module's own
+    // hand-rolled dataset literal — the explicit fields after it override
+    // exactly what the contract calls for (fill: false — the gradient area
+    // fill reads as noise on a normalized 0-100% chart with several
+    // overlapping series; a plain colour swatch on backgroundColor instead,
+    // for the point markers).
+    ...lineSeriesTheme(s.color, { pointRadius: activePeriod === 'day' ? 0 : 3 }),
     label: s.name,
     data: s.normalized,
-    borderColor: s.color,
+    fill: false,
     backgroundColor: s.color,
     pointBackgroundColor: s.color,
-    // A daily chart with hundreds of points reads better with no point
-    // markers at all (weekly.js's own precedent for its line series);
-    // weekly/monthly get a visible marker per bucket.
-    pointRadius: activePeriod === 'day' ? 0 : 3,
-    pointHoverRadius: 4,
-    borderWidth: 2,
-    tension: 0,
     // A gap (null) is a period with no data for THIS series — bridging it
     // would draw a line implying a reading that was never taken, the same
     // rule weekly.js/bounds.js apply to their own lines.
     spanGaps: false,
-    fill: false,
   }));
+
+  const xTheme = xAxisTheme();
+  if (trackWidthPx !== null) {
+    // Step U.5: otherwise xAxisTheme()'s own cap (6) would leave most of a
+    // wide fullscreen daily track blank between labels — same reasoning as
+    // weekly.js/bounds.js's identical override.
+    xTheme.ticks = { ...xTheme.ticks, maxTicksLimit: maxTicksFor(trackWidthPx) };
+  }
+
+  const yTheme = yAxisTheme();
 
   try {
     chartInstance = new window.Chart(canvas, {
@@ -556,8 +720,9 @@ export function renderCompare(model) {
         // every time would be visible churn on a phone.
         animation: false,
         scales: {
-          x: { type: 'category' },
+          x: { type: 'category', ...xTheme },
           y: {
+            ...yTheme,
             // Device amendment: plotted range gets 5 points of headroom on
             // each side (min -5/max 105) so a point sitting exactly at 0%
             // or 100% doesn't render clipped against the chart edge — this
@@ -572,16 +737,18 @@ export function renderCompare(model) {
             afterBuildTicks: (scale) => {
               scale.ticks = [0, 25, 50, 75, 100].map((value) => ({ value }));
             },
-            ticks: { callback: (v) => `${v}%` },
-            title: { display: true, text: "% of each line's own range" },
+            ticks: { ...yTheme.ticks, callback: (v) => `${v}%` },
+            title: { display: true, text: "% of each line's own range", color: cssVar('--fg-3', '#6e6e78'), font: chartFont() },
           },
         },
         plugins: {
-          // Native legend click hides/shows a series without deselecting
-          // it in the picker above — the free "toggle off" affordance §0
-          // rule 5 asks for. No custom onClick needed.
-          legend: { display: true },
+          // §0 decision 1: Chart.js's own legend is turned off — the key
+          // list above the chart is the legend now, with its own toggle.
+          legend: { display: false },
           tooltip: {
+            // Step U.5 (CONTRACT-U.5.md §3): token-styled tooltip card; the
+            // callbacks below are unchanged.
+            ...tooltipTheme(),
             callbacks: {
               // The axis only shows the short period label — the tooltip
               // title shows the full bucket key, same pattern as
@@ -597,42 +764,20 @@ export function renderCompare(model) {
           },
         },
       },
+      // Step U.5: extra INLINE plugin instances (e.g. scroll.js's pinned-axis
+      // plugin) registered on this chart only — same mechanism U.4 added to
+      // weekly.js/bounds.js. An empty default array is a no-op.
+      plugins: extraPlugins,
     });
   } catch {
     // A construction failure must not break the whole screen — degrade to
     // the same offline-style message rather than throwing out of render().
     wrap.remove();
+    if (keyEl) keyEl.remove();
+    destroyCompare();
     renderUnavailable(root);
     return root;
   }
-
-  // The key list: what 0%/100% actually MEAN for each series, since the
-  // chart itself only ever shows a percentage (§0 rule 4's other half).
-  const ul = document.createElement('ul');
-  ul.className = 'compare-key';
-  for (const s of series) {
-    const li = document.createElement('li');
-    li.className = 'compare-key-item';
-    li.dataset.seriesId = s.id;
-
-    const dot = document.createElement('span');
-    dot.className = 'compare-key-dot';
-    dot.style.backgroundColor = s.color;
-    li.appendChild(dot);
-
-    const name = document.createElement('span');
-    name.className = 'compare-key-name';
-    name.textContent = s.name;
-    li.appendChild(name);
-
-    const range = document.createElement('span');
-    range.className = 'compare-key-range';
-    range.textContent = compareKeyText(s);
-    li.appendChild(range);
-
-    ul.appendChild(li);
-  }
-  root.appendChild(ul);
 
   return root;
 }

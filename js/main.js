@@ -261,14 +261,23 @@ async function render() {
   // keeps the title bar visible; the tab bar's own visibility for every
   // other route is already governed by the signed-in gate's `nav.hidden =
   // !signedIn` above and is left untouched here.
+  // Step U.5 (CONTRACT-U.5.md §5): 'compare-chart' gets exactly the same
+  // chrome treatment — it is the compare screen's own fullscreen route,
+  // mounted by the same view with kind: 'compare'.
+  const isFullscreenRoute = route.name === 'chart' || route.name === 'compare-chart';
   const titleBarEl = document.getElementById('title-bar');
-  if (titleBarEl) titleBarEl.hidden = route.name === 'chart';
-  if (route.name === 'chart' && nav) nav.hidden = true;
+  if (titleBarEl) titleBarEl.hidden = isFullscreenRoute;
+  if (isFullscreenRoute && nav) nav.hidden = true;
 
   if (route.name === 'chart') {
     app.innerHTML = '<div id="view"></div>';
     restartTransition(app);
     currentView = createFullscreenView({ id: route.params.id, kind: route.params.kind });
+    await currentView.mount(document.getElementById('view'));
+  } else if (route.name === 'compare-chart') {
+    app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
+    currentView = createFullscreenView({ kind: 'compare' });
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'home') {
     setTitle(VIEW_TITLES.home, { size: 'large', sub: longDateLabel(todayLocal()) });

@@ -12,7 +12,7 @@
 // Request, Response, URL, Promise, console, and never run a fetch (or any
 // other side effect) at evaluation time — only inside a listener.
 
-const CACHE = 'daily-v50';
+const CACHE = 'daily-v51';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [

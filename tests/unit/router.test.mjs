@@ -257,6 +257,32 @@ describe('parseHash — the fullscreen chart route (CONTRACT-U.4.md §1, added f
   });
 });
 
+describe('parseHash — the compare fullscreen route (CONTRACT-U.5.md §1, added for Step U.5)', () => {
+  // segments.length === 2 && segments[0] === 'compare' && segments[1] ===
+  // 'chart' -> { name: 'compare-chart', params: {} }. Every fixture from
+  // CONTRACT-U.5.md §8's RC-1..RC-4 is asserted below.
+
+  it("RC-1 — '#/compare/chart' -> {name:'compare-chart', params:{}}", () => {
+    assert.deepEqual(parseHash('#/compare/chart'), { name: 'compare-chart', params: {} });
+  });
+
+  it("RC-2 — '#/compare/chart/' -> same (trailing slash tolerated)", () => {
+    assert.deepEqual(parseHash('#/compare/chart/'), { name: 'compare-chart', params: {} });
+  });
+
+  it("RC-3 — '#/compare/chart/x' -> notfound (too many segments)", () => {
+    assert.deepEqual(parseHash('#/compare/chart/x'), { name: 'notfound', params: {} });
+  });
+
+  it("RC-3 — '#/compare/x' -> notfound (unknown second segment)", () => {
+    assert.deepEqual(parseHash('#/compare/x'), { name: 'notfound', params: {} });
+  });
+
+  it("RC-4 — '#/compare' still -> {name:'compare', params:{}} (unchanged)", () => {
+    assert.deepEqual(parseHash('#/compare'), { name: 'compare', params: {} });
+  });
+});
+
 describe('parseHash — fresh object guarantee', () => {
   it('two calls with the same input do not return the same object reference', () => {
     const a = parseHash('#/');

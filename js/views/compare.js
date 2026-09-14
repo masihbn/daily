@@ -16,6 +16,10 @@
 import { getStore } from '../store.js';
 import { todayLocal } from '../dates.js';
 import { visibleTrackables } from './home-model.js';
+// Step U.5 (CONTRACT-U.5.md §2): the Expand button uses the same chrome
+// icon set as every other Expand control in the app (js/views/detail.js's
+// own chart-slot Expand buttons) — never a second, hand-drawn glyph.
+import { uiIconSvg } from '../ui-icons.js';
 // RANGES/resolveRange are detail.js's own pure exports, reused verbatim
 // (CONTRACT-3.5.md §2) so this screen's range control shares BOTH the
 // exact behaviour (the Daily -> 3M rule) and the CSS classes
@@ -216,7 +220,13 @@ export function createCompareView({ store, today } = {}) {
     pickerDiv.appendChild(chips);
     section.appendChild(pickerDiv);
 
-    // --- range control (detail.js's own markup/classes, shared CSS) -----
+    // --- controls: range + granularity share one row (Step U.5,
+    // CONTRACT-U.5.md §0 decision 2/§2) — the two `.seg`-look controls sit
+    // side by side in one new wrapper instead of stacking full-width. Their
+    // own markup/classes are unchanged (detail.js's/weekly.js's shared CSS).
+
+    const controlsDiv = document.createElement('div');
+    controlsDiv.className = 'compare-controls';
 
     const rangesDiv = document.createElement('div');
     rangesDiv.className = 'detail-ranges';
@@ -233,9 +243,7 @@ export function createCompareView({ store, today } = {}) {
       btn.textContent = r.label;
       rangesDiv.appendChild(btn);
     }
-    section.appendChild(rangesDiv);
-
-    // --- granularity control (weekly.js's own PERIODS/markup) -----------
+    controlsDiv.appendChild(rangesDiv);
 
     const periodsDiv = document.createElement('div');
     periodsDiv.className = 'trend-periods';
@@ -250,7 +258,34 @@ export function createCompareView({ store, today } = {}) {
       btn.textContent = p.label;
       periodsDiv.appendChild(btn);
     }
-    section.appendChild(periodsDiv);
+    controlsDiv.appendChild(periodsDiv);
+
+    section.appendChild(controlsDiv);
+
+    // --- toolbar: Expand -> #/compare/chart (Step U.5, CONTRACT-U.5.md §2)
+    // Rendered only once there is something worth expanding: the picker/
+    // network state is ready (not the initial cold load with nothing cached
+    // yet) AND at least one trackable is selected — an empty selection has
+    // nothing to show fullscreen either.
+
+    if (state === 'ready' && ids.length > 0) {
+      const toolbar = document.createElement('div');
+      toolbar.className = 'compare-toolbar';
+      const expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'chart-expand';
+      expandBtn.dataset.expand = 'compare';
+      expandBtn.setAttribute('aria-label', 'Expand Compare');
+      // Own constant SVG markup only (js/ui-icons.js) — same rule detail.js's
+      // own Expand buttons follow.
+      expandBtn.innerHTML = uiIconSvg('expand');
+      const expandText = document.createElement('span');
+      expandText.className = 'visually-hidden';
+      expandText.textContent = 'Expand';
+      expandBtn.appendChild(expandText);
+      toolbar.appendChild(expandBtn);
+      section.appendChild(toolbar);
+    }
 
     // --- chart, or a loading placeholder while nothing is drawable yet --
 
@@ -361,6 +396,18 @@ export function createCompareView({ store, today } = {}) {
       const periodBtn = target.closest('button.trend-period[data-period]');
       if (periodBtn && sectionEl.contains(periodBtn)) {
         handlePeriodChange(periodBtn.dataset.period);
+        return;
+      }
+
+      // Step U.5 (CONTRACT-U.5.md §2): opens the same fullscreen view U.4
+      // built, with kind='compare' — a plain hash assignment (not the
+      // pushState+fromApp stamp detail.js's own Expand uses) is enough here:
+      // fullscreen.js's Close for this kind always falls back to '#/compare'
+      // when there is no app-originated history entry to go back to, which
+      // is the only place this route is ever reached from.
+      const expandBtn = target.closest('button.chart-expand[data-expand="compare"]');
+      if (expandBtn && sectionEl.contains(expandBtn)) {
+        location.hash = '#/compare/chart';
         return;
       }
     } catch {

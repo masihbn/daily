@@ -67,6 +67,15 @@ export function parseHash(hash) {
     }
   }
 
+  // Step U.5 (CONTRACT-U.5.md §1): #/compare/chart — the compare screen's
+  // own full-screen route, mounted by js/views/fullscreen.js with
+  // kind: 'compare' (see main.js). Exactly two literal segments; anything
+  // longer (#/compare/chart/x) or a different second segment (#/compare/x)
+  // falls to notfound, same discipline as every other route here.
+  if (segments.length === 2 && segments[0] === 'compare' && segments[1] === 'chart') {
+    return fresh({ name: 'compare-chart', params: {} });
+  }
+
   if (segments.length === 2 && segments[0] === 't') {
     const rawId = segments[1];
     if (rawId === '') {

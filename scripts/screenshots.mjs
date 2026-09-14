@@ -132,12 +132,17 @@ for (const [label, vw, vh] of [['portrait', 390, 844], ['landscape', 844, 390]])
   const ctxF = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, colorScheme: 'dark', serviceWorkers: 'block' });
   const pageF = await ctxF.newPage();
   await seedSession(pageF);
-  await pageF.addInitScript(() => localStorage.setItem('daily.detail.overlay.v1', JSON.stringify({ 2: [1] })));
+  await pageF.addInitScript(() => {
+    localStorage.setItem('daily.detail.overlay.v1', JSON.stringify({ 2: [1] }));
+    localStorage.setItem('daily.compare.v1', JSON.stringify({ ids: [2, 3, 1], period: 'week', range: '3m' }));
+  });
   await wire(pageF);
   await pageF.goto(BASE + '/index.html#/t/2/chart/range');
   await shot(pageF, `fullscreen-range-${label}`, false);
   await pageF.goto(BASE + '/index.html#/t/1/chart/trend');
   await shot(pageF, `fullscreen-trend-${label}`, false);
+  await pageF.goto(BASE + '/index.html#/compare/chart');
+  await shot(pageF, `fullscreen-compare-${label}`, false);
   await ctxF.close();
 }
 // Landscape detail, to see what the charts do today when the phone rotates.

@@ -29,18 +29,34 @@ import { renderWeekly, destroyWeekly, trendModel, PERIODS, periodKeysFor } from 
 import { renderBounds, destroyBounds, boundsModel, boundsFor, DEFAULT_ROLLING_WINDOW_DAYS } from '../charts/bounds.js';
 import { readOverlaySelection, overlayModel } from '../charts/overlay.js';
 import { trackWidth as computeTrackWidth, pinnedAxisPlugin } from '../charts/scroll.js';
+// Step U.5 (CONTRACT-U.5.md §4): the `kind: 'compare'` route reuses
+// js/charts/compare.js's own pure model/state helpers verbatim — built
+// "exactly as the compare view does" (js/views/compare.js), never a second
+// copy of its candidate/sanitize/model logic.
+import {
+  compareCandidates,
+  sanitizeCompareIds,
+  readCompareState,
+  writeCompareState,
+  compareModel,
+  renderCompare,
+  destroyCompare,
+} from '../charts/compare.js';
+import { visibleTrackables } from './home-model.js';
 
 const KIND_LABEL = { trend: 'Weekly trend', range: 'Range' };
 
 export function createFullscreenView({ id, kind, store, today } = {}) {
   const st = store || getStore();
   const idStr = String(id);
-  // Anything other than the two legal kinds is treated as 'trend' —
-  // main.js only ever mounts this view from a route js/router.js has
-  // already validated to `kind ∈ {'trend','range'}`, but this view stays
-  // total (never throws) for any input, same discipline as every pure
-  // export in detail.js.
-  const chartKind = kind === 'range' ? 'range' : 'trend';
+  // Step U.5 (CONTRACT-U.5.md §4) adds a third legal kind, 'compare' — it
+  // has no per-trackable `id` at all (main.js mounts it as
+  // `createFullscreenView({ kind: 'compare' })`, no `id`). Anything other
+  // than the three legal kinds is treated as 'trend' — main.js only ever
+  // mounts this view from a route js/router.js has already validated, but
+  // this view stays total (never throws) for any input, same discipline as
+  // every pure export in detail.js.
+  const chartKind = kind === 'range' ? 'range' : kind === 'compare' ? 'compare' : 'trend';
   const todayStr = today || todayLocal();
 
   let container = null;
@@ -57,6 +73,19 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   // to a real, non-archived trackable row.
   let overlayTrackable = null;
 
+  // Only meaningful for chartKind === 'compare': the sanitized, ordered ids
+  // from `daily.compare.v1` and the trackable rows they resolve to — this
+  // view never writes `ids` back (§4: "ids untouched"), only reads them,
+  // same as js/views/compare.js's own mount()-time reconciliation but with
+  // nowhere to persist a correction (there is no picker here to reflect it).
+  let compareIds = [];
+  let compareTrackables = [];
+  // Which specific 'empty' message applies: 'pick' for "fewer than one id"
+  // (CONTRACT-U.5.md §4's own wording), 'data' for a real compareModel()
+  // 'empty' status ("No entries in this range."). Irrelevant for the other
+  // two kinds, whose 'empty' text never varies.
+  let compareEmptyReason = 'data';
+
   let rangeKey = '3m';
   let periodKey = 'week';
 
@@ -66,7 +95,18 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   // --- storage (iOS private mode throws on getItem/setItem — every access
   // is wrapped individually, same pattern as detail.js's own accessors) ---
 
+  // Step U.5 (CONTRACT-U.5.md §4): chartKind === 'compare' reads/writes
+  // range AND period through ONE localStorage blob (`daily.compare.v1`,
+  // via charts/compare.js's own readCompareState/writeCompareState) instead
+  // of the two/three per-trackable keys the trend/range kinds use — the
+  // exact same storage shape js/views/compare.js's own screen uses, so the
+  // two stay in sync with each other (§4: "range/period changes there write
+  // to daily.compare.v1"). `ids` is always round-tripped unchanged: this
+  // view never writes a correction back (see compareIds's own comment).
   function readStoredRange() {
+    if (chartKind === 'compare') {
+      return readCompareState(overlayStorage()).range;
+    }
     try {
       const raw = localStorage.getItem(RANGE_STORAGE_KEY);
       if (typeof raw === 'string' && RANGES.some((r) => r.key === raw)) return raw;
@@ -77,6 +117,11 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   }
 
   function writeStoredRange(key) {
+    if (chartKind === 'compare') {
+      const s = readCompareState(overlayStorage());
+      writeCompareState(overlayStorage(), { ids: s.ids, period: s.period, range: key });
+      return;
+    }
     try {
       localStorage.setItem(RANGE_STORAGE_KEY, key);
     } catch {
@@ -93,6 +138,9 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   }
 
   function readStoredPeriod() {
+    if (chartKind === 'compare') {
+      return readCompareState(overlayStorage()).period;
+    }
     try {
       const raw = localStorage.getItem(periodStorageKey());
       if (typeof raw === 'string' && PERIODS.some((p) => p.key === raw)) return raw;
@@ -103,6 +151,11 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   }
 
   function writeStoredPeriod(key) {
+    if (chartKind === 'compare') {
+      const s = readCompareState(overlayStorage());
+      writeCompareState(overlayStorage(), { ids: s.ids, period: key, range: s.range });
+      return;
+    }
     try {
       localStorage.setItem(periodStorageKey(), key);
     } catch {
@@ -126,6 +179,25 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     trackable = list.find((t) => t && String(t.id) === idStr) || null;
   }
 
+  // Step U.5 (CONTRACT-U.5.md §4): "candidates via compareCandidates; ids
+  // via sanitizeCompareIds" — recomputed on every call from the store's
+  // current cache, never cached here, exactly js/views/compare.js's own
+  // candidateList()/mount()-time reconciliation (a trackable archived or
+  // edited elsewhere is reflected immediately, without this view needing
+  // its own invalidation logic). `compareTrackables` preserves SELECTION
+  // order (sanitizeCompareIds's own contract), which is what keeps a
+  // series' colour stable — compareModel() colours by position in this list.
+  function refreshCompareSelection() {
+    const all = st.getTrackables();
+    const list = Array.isArray(all) ? all : [];
+    const candidates = compareCandidates(visibleTrackables(list));
+    const stored = readCompareState(overlayStorage());
+    compareIds = sanitizeCompareIds(stored.ids, candidates);
+    compareTrackables = compareIds
+      .map((cid) => candidates.find((c) => c && String(c.id) === cid))
+      .filter(Boolean);
+  }
+
   function findOverlayTrackable(oid) {
     const all = st.getTrackables();
     const list = Array.isArray(all) ? all : [];
@@ -140,10 +212,32 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
       : DEFAULT_ROLLING_WINDOW_DAYS;
   }
 
+  // Step U.5 (CONTRACT-U.5.md §4): "model = compareModel(...) built exactly
+  // as the compare view does" — js/views/compare.js's own entriesFor()/
+  // mount() pass `from` straight from resolveRange() into compareModel()
+  // WITHOUT resolving a null 'all'-range `from` via historyFrom() first
+  // (compareModel already does that internally, across every selected
+  // trackable's entries, when `from` is null). This view's own bucketCount
+  // sizing step then reads the model's OWN `keys` back out — never a second,
+  // possibly-disagreeing periodKeysFor() call — see renderChart() below.
+  function buildCompareModel() {
+    const { from, to } = resolveRange(rangeKey, todayStr);
+    const entriesById = {};
+    for (const t of compareTrackables) {
+      const filters = { trackableIds: [String(t.id)], to };
+      if (from !== null) filters.from = from;
+      entriesById[String(t.id)] = st.getEntries(filters);
+    }
+    const model = compareModel({ trackables: compareTrackables, entriesById, from, to, period: periodKey });
+    return { kind: 'compare', model, from, to, period: periodKey };
+  }
+
   // The chart model plus the exact from/to/period it was built over — the
   // sizing step (bucketCount) must use the SAME window, or the track width
   // and the chart's own bucket count would disagree.
   function buildModel() {
+    if (chartKind === 'compare') return buildCompareModel();
+
     const { from: rawFrom, to } = resolveRange(rangeKey, todayStr);
     const allEntries = st.getEntries({ trackableIds: [id] });
     const from = rawFrom !== null ? rawFrom : historyFrom(allEntries);
@@ -252,6 +346,9 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   }
 
   function titleText() {
+    // Step U.5: there is no single trackable to name here — the bar's title
+    // is just 'Compare', matching the top-level screen's own title bar.
+    if (chartKind === 'compare') return 'Compare';
     const name = trackable && typeof trackable.name === 'string' ? trackable.name : '';
     return `${name} · ${KIND_LABEL[chartKind] || ''}`;
   }
@@ -260,7 +357,19 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     if (state === 'loading') return 'Loading…';
     if (state === 'notfound') return 'Trackable not found.';
     if (state === 'error') return (lastError && lastError.message) || 'Something went wrong.';
-    if (state === 'empty') return 'Not enough data yet.';
+    if (state === 'empty') {
+      // Step U.5 (CONTRACT-U.5.md §4): compare's 'empty' state carries one of
+      // two distinct messages depending on WHY it is empty — "fewer than one
+      // id" selected (nothing to even try loading) reads differently from a
+      // real compareModel() 'empty' status (ids selected, no entries in this
+      // window). The other two kinds' 'empty' text never varies.
+      if (chartKind === 'compare') {
+        return compareEmptyReason === 'pick'
+          ? 'Pick two or more trackables to compare them.'
+          : 'No entries in this range.';
+      }
+      return 'Not enough data yet.';
+    }
     return '';
   }
 
@@ -321,7 +430,18 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
   // `stage.clientWidth` reflects real, laid-out CSS — the whole reason the
   // stage skeleton is appended into the live document BEFORE this runs.
   function renderChart(built, stage, scroll, track) {
-    const bucketCount = periodKeysFor(built.period, built.from, built.to).length;
+    // Step U.5: compareModel() already computed its own gap-free bucket-key
+    // list (`built.model.keys`) — from a `from` that may itself be null
+    // (resolved internally, across every selected trackable's entries) — so
+    // reading it back out here is the single source of truth for the bucket
+    // count. A second, independent periodKeysFor(built.period, built.from,
+    // built.to) call would disagree whenever `built.from` is null, since
+    // this view never resolves it via historyFrom() for the compare kind
+    // (see buildCompareModel()'s own comment).
+    const bucketCount =
+      built.kind === 'compare'
+        ? (built.model && Array.isArray(built.model.keys) ? built.model.keys.length : 0)
+        : periodKeysFor(built.period, built.from, built.to).length;
     const viewportWidth = stage.clientWidth;
     const width = computeTrackWidth(bucketCount, built.period, viewportWidth);
 
@@ -352,8 +472,10 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     }
 
     const opts = { chrome: false, trackWidth: width, plugins };
-    const chartRoot =
-      built.kind === 'trend' ? renderWeekly(built.model, opts) : renderBounds(built.model, opts);
+    let chartRoot;
+    if (built.kind === 'trend') chartRoot = renderWeekly(built.model, opts);
+    else if (built.kind === 'range') chartRoot = renderBounds(built.model, opts);
+    else chartRoot = renderCompare(built.model, opts);
     track.appendChild(chartRoot);
 
     stage.appendChild(leftAxis);
@@ -370,14 +492,32 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     if (disposed || !container) return;
     destroyWeekly();
     destroyBounds();
+    destroyCompare();
 
     const section = ensureSection();
 
     let state;
     let built = null;
+    compareEmptyReason = 'data';
 
     if (!trackablesLoaded) {
       state = 'loading';
+    } else if (chartKind === 'compare') {
+      // Step U.5 (CONTRACT-U.5.md §4): candidates/ids are recomputed from
+      // the store's current cache on every render (never cached across
+      // renders) — same rule js/views/compare.js's own candidateList()
+      // follows, so a trackable archived/edited elsewhere while this screen
+      // is open is reflected immediately.
+      refreshCompareSelection();
+      if (compareIds.length < 1) {
+        state = 'empty';
+        compareEmptyReason = 'pick';
+      } else if (!entriesLoaded) {
+        state = 'loading';
+      } else {
+        built = buildModel();
+        state = isEmptyModel(built) ? 'empty' : 'ready';
+      }
     } else if (lastTrackablesError && !trackable) {
       state = 'error';
     } else if (!trackable) {
@@ -435,6 +575,15 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
       // risking `back()` leaving the app entirely.
       if (history.state && history.state.fromApp === true) {
         history.back();
+      } else if (chartKind === 'compare') {
+        // Step U.5 (CONTRACT-U.5.md §2/§4): the compare screen's own Expand
+        // button opens this route with a plain `location.hash =` (no
+        // pushState/fromApp stamp — see js/views/compare.js's own comment on
+        // why that trick isn't needed here), so this branch is really the
+        // ONLY path this kind ever takes: history.back() above never fires
+        // for it in practice, but is kept for symmetry with the other two
+        // kinds and in case a future caller ever does stamp fromApp.
+        location.hash = '#/compare';
       } else {
         location.hash = `#/t/${encodeURIComponent(idStr)}`;
       }
@@ -498,10 +647,44 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
 
     attachResponsiveListeners();
 
-    refreshTrackableFromStore();
+    if (chartKind === 'compare') {
+      refreshCompareSelection();
+    } else {
+      refreshTrackableFromStore();
+    }
     render();
 
     try {
+      // Step U.5 (CONTRACT-U.5.md §4): a completely separate load sequence
+      // for 'compare' — there is no single trackable to find-or-fetch, no
+      // rolling-window setting to read (compareModel() has no bands), and no
+      // overlay slot. Trackables are only (re)loaded when the cache has
+      // nothing to show yet, same "don't refetch what's already there" rule
+      // the trend/range branch below applies to its own single `trackable`.
+      if (chartKind === 'compare') {
+        if (compareTrackables.length === 0) {
+          const tResult = await st.loadTrackables();
+          lastTrackablesError = tResult.error;
+        }
+        trackablesLoaded = true;
+        if (disposed) return;
+        refreshCompareSelection();
+        render();
+
+        if (compareIds.length === 0) return;
+
+        // One request for every selected id's WHOLE history (D.6b: load
+        // once, range/granularity changes never refetch) — exactly
+        // js/views/compare.js's own loadHistories() contract, restated here
+        // because this view has no picker to grow that list incrementally.
+        await st.loadEntries({ trackableIds: compareIds });
+        if (disposed) return;
+        entriesLoaded = true;
+
+        render();
+        return;
+      }
+
       if (!trackable) {
         const tResult = await st.loadTrackables();
         lastTrackablesError = tResult.error;
@@ -551,6 +734,7 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     disposed = true;
     destroyWeekly();
     destroyBounds();
+    destroyCompare();
     detachResponsiveListeners();
     if (sectionEl) {
       sectionEl.removeEventListener('click', handleClick);
@@ -565,6 +749,9 @@ export function createFullscreenView({ id, kind, store, today } = {}) {
     lastTrackablesError = null;
     entriesLoaded = false;
     overlayTrackable = null;
+    compareIds = [];
+    compareTrackables = [];
+    compareEmptyReason = 'data';
   }
 
   return { mount, unmount };
