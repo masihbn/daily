@@ -310,6 +310,10 @@ function readChartInfo(page) {
       yMin: scales.y ? scales.y.min : undefined,
       yMax: scales.y ? scales.y.max : undefined,
       yTitle: scales.y && scales.y.title ? scales.y.title.text : null,
+      // The RESOLVED scale (chart.scales, not chart.options.scales) is what
+      // afterBuildTicks actually produced — the config alone can't show the
+      // fixed [0,25,50,75,100] tick set the amended contract pins.
+      yTicks: chart.scales && chart.scales.y ? chart.scales.y.ticks.map((t) => t.value) : null,
       xType: scales.x ? scales.x.type : null,
       legendDisplay:
         chart.options.plugins && chart.options.plugins.legend ? chart.options.plugins.legend.display : undefined,
@@ -435,7 +439,12 @@ test('C2 — selecting Calories then Workout draws a 2-line %-normalized chart w
   const labels = info.datasets.map((ds) => ds.label);
   expect(labels).toContain('Calories');
   expect(labels).toContain('Workout');
-  expect(info.yMax).toBe(100);
+  // CONTRACT-3.5.md §1 amendment (device feedback): the scale itself runs
+  // -5..105 so 0%/100% points aren't clipped at the axis edge, while
+  // afterBuildTicks pins the visible ticks to exactly 0/25/50/75/100.
+  expect(info.yMin).toBe(-5);
+  expect(info.yMax).toBe(105);
+  expect(info.yTicks).toEqual([0, 25, 50, 75, 100]);
   expect(info.yTitle).toContain('%');
 
   for (const ds of info.datasets) {

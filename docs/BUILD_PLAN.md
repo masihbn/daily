@@ -4954,6 +4954,14 @@ normalised lines are legible at 390px, whether the key under the chart
 makes the 0–100% axis unambiguous, and whether the chart answers the
 calories-vs-workouts-vs-weight question the user actually has.
 
+*Device feedback 2026-09-13, folded in the same evening (`daily-v34`):*
+"It's cool, but … add some padding to the top and the bottom because
+the zero and a hundred percent, there's always a point there." The y
+scale is now −5..105 with the labelled ticks pinned to 0/25/50/75/100
+via `afterBuildTicks` (deterministic, rather than trusting nice-tick
+generation with a non-zero minimum). C2 asserts the min/max and the
+exact tick values.
+
 ---
 
 ## ⛔ PHASE 3 GATE — hard stop

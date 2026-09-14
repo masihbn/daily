@@ -558,10 +558,20 @@ export function renderCompare(model) {
         scales: {
           x: { type: 'category' },
           y: {
-            // ALWAYS 0-100 — this is a percentage-of-own-range axis, not a
-            // data-driven one (§0 rule 4).
-            min: 0,
-            max: 100,
+            // Device amendment: plotted range gets 5 points of headroom on
+            // each side (min -5/max 105) so a point sitting exactly at 0%
+            // or 100% doesn't render clipped against the chart edge — this
+            // is NOT a data-driven axis (§0 rule 4 still holds: it is
+            // always a percentage of each series' own range). With a
+            // non-zero min, Chart.js's own "nice tick" generation would
+            // otherwise produce an unpredictable tick set, so the labelled
+            // ticks are pinned deterministically to exactly 0/25/50/75/100
+            // via afterBuildTicks rather than left to autogeneration.
+            min: -5,
+            max: 105,
+            afterBuildTicks: (scale) => {
+              scale.ticks = [0, 25, 50, 75, 100].map((value) => ({ value }));
+            },
             ticks: { callback: (v) => `${v}%` },
             title: { display: true, text: "% of each line's own range" },
           },
