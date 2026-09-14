@@ -59,7 +59,10 @@
   --r-card: 16px;
   --r-sheet: 22px;
   --r-pill: 999px;
-  --nav-height: 56px;
+  /* Step U.1: bumped from 56px — the tab bar is now icon-above-label
+     (49px min-height per link + top/bottom border) and the measured bar
+     is taller than the old flat value. */
+  --nav-height: 62px;
 }
 
 @media (prefers-color-scheme: light) {
@@ -128,9 +131,70 @@ header {
   border-bottom: 1px solid var(--hairline);
 }
 
-header h1 {
+/* Step U.1 (CONTRACT-U.1 §4): the per-route title bar (docs/DESIGN_PLAN.md
+   Step U.1). Sticky, not fixed — #app is the page's only scrolling region,
+   so this stays reachable at the top of a long screen without a second
+   fixed layer to account for in #app's padding. Every property here wins
+   over the plain `header {}` rule above on specificity (class beats
+   element), so that rule is now inert for #title-bar; left alone rather
+   than deleted, since dead-CSS removal is Step U.7's job, not this one's. */
+.title-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  padding: calc(var(--s2) + env(safe-area-inset-top, 0px))
+    calc(var(--s4) + env(safe-area-inset-right, 0px))
+    var(--s2)
+    calc(var(--s4) + env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--hairline);
+}
+
+.title-bar__row {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  min-height: 44px;
+}
+
+.title-bar__back {
+  grid-column: 1;
+}
+
+/* Deliberately overrides the UA [hidden] rule for THIS element only, so the
+   44px back-button column stays reserved and the title never jumps left
+   when there's no back button (large-title routes) — `pointer-events: none`
+   keeps it non-interactive/non-focusable even though it still occupies
+   space. */
+.title-bar__back[hidden] {
+  visibility: hidden;
+  display: inline-flex;
+  pointer-events: none;
+}
+
+.title-bar__title {
+  grid-column: 2;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-size="large"] .title-bar__title {
+  font: var(--t-lg-title);
+  grid-column: 1 / -1;
+  padding-top: var(--s2);
+}
+
+[data-size="large"] .title-bar__back {
+  display: none;
+}
+
+[data-size="compact"] .title-bar__title {
   font: var(--t-head);
+  text-align: center;
 }
 
 /* Step D.6 — global "unsent writes" indicator. Sits under the title in the
@@ -141,11 +205,11 @@ header h1 {
    the write is queued and persisted, it just has not reached the server
    yet. Red would read as an error and invite the user to re-log a value
    that is already safely captured. */
+/* Step U.1: sizing/colour now come from the .pill/.pill--warn kit classes
+   on the element itself (index.html) — only positioning is left here. */
 .outbox-status {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--warn);
+  margin: var(--s2) 0 0;
+  width: fit-content;
 }
 
 .outbox-status[hidden] {
@@ -155,12 +219,12 @@ header h1 {
 /* Step 5.1 — offline indicator, same placement/shape rules as
    .outbox-status above (it sits directly below it in the shell). Muted
    rather than alarming: it states a fact ("showing last saved data"), not
-   an error — nothing is broken and nothing is lost. */
+   an error — nothing is broken and nothing is lost.
+   Step U.1: sizing/colour now come from the .pill kit class on the element
+   itself (index.html) — only positioning is left here. */
 .net-status {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-2);
+  margin: var(--s2) 0 0;
+  width: fit-content;
 }
 
 .net-status[hidden] {
@@ -173,11 +237,6 @@ header h1 {
   padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + var(--s4));
   padding-left: calc(var(--s4) + env(safe-area-inset-left, 0px));
   padding-right: calc(var(--s4) + env(safe-area-inset-right, 0px));
-}
-
-#app h1 {
-  font: var(--t-lg-title);
-  margin: 0 0 var(--s4);
 }
 
 /* Step U.0: the app's own chrome carries no colour of its own any more
@@ -223,15 +282,23 @@ header h1 {
   display: none;
 }
 
+/* Step U.1: each tab link stacks an icon above its label now (main.js's
+   decorateNav()) — column layout, taller min-height for the two-line
+   content, and the plain-caption look swapped for the smaller/uppercase-off
+   micro type (tab labels read better sentence-case at this size). */
 #nav a {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  gap: 2px;
+  min-height: 49px;
   color: var(--fg-3);
   text-decoration: none;
-  font: var(--t-cap);
+  font: var(--t-micro);
+  text-transform: none;
+  letter-spacing: 0;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
@@ -239,6 +306,11 @@ header h1 {
 #nav a[aria-current="page"] {
   color: var(--fg);
   font-weight: 600;
+}
+
+.tab-bar__icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 /* Step U.0: the global button rule is now a RESET ONLY (no background, no

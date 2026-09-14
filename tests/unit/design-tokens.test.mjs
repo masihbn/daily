@@ -323,7 +323,9 @@ describe('T9 — sw.js updated for the new module (CONTRACT-U.0.md §5, §7)', (
     assert.ok(swText.includes('./js/ui-icons.js'));
   });
 
-  it("CACHE is bumped to 'daily-v45'", () => {
-    assert.match(swText, /CACHE\s*=\s*['"]daily-v45['"]/);
+  it('CACHE is at or above the U.0 floor (daily-v45) — later design steps legitimately bump it further, so the exact number is not pinned here', () => {
+    const match = swText.match(/CACHE\s*=\s*['"]daily-v(\d+)['"]/);
+    assert.ok(match, "expected a CACHE = 'daily-vN' declaration in sw.js");
+    assert.ok(Number(match[1]) >= 45, `expected CACHE number >= 45, got daily-v${match[1]}`);
   });
 });

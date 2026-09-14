@@ -24,23 +24,32 @@
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-<header>
-  <h1>Daily</h1>
+<!-- Step U.1: the permanent "Daily" header is gone — each route sets its own
+     title here via js/main.js's setTitle() (large title on the three tab
+     routes, compact + a back button on detail/new/edit; compact, no back on
+     sign-in/lock). data-size drives the large-vs-compact CSS. The back
+     button's SVG is injected at bootstrap (uiIconSvg('back')), never
+     hardcoded here — see docs/DESIGN_PLAN.md Step U.1 §0/§1. -->
+<header id="title-bar" class="title-bar" data-size="large">
+  <div class="title-bar__row">
+    <a id="title-back" class="title-bar__back btn btn--icon btn--ghost" href="#/" hidden aria-label="Back"></a>
+    <h1 id="title" class="title-bar__title">Daily</h1>
+  </div>
   <!-- Step D.6: global unsent-writes indicator. Lives in the shell, not in a
        view, because the whole point is that it is visible from every route —
        the per-row pending state on Home only helps if you are on Home. Empty
        and hidden until js/outbox-sync.js finds queued writes.
        role="status" so VoiceOver announces it without stealing focus. -->
-  <p id="outbox-status" class="outbox-status" role="status" aria-live="polite" data-count="0" hidden></p>
+  <p id="outbox-status" class="outbox-status pill pill--warn" role="status" aria-live="polite" data-count="0" hidden></p>
   <!-- Step 5.1: visible offline indicator, driven by navigator.onLine and
        the online/offline events (js/net-status.js). Different fact from
        the per-view "you appear to be offline" banners: this means "the
        browser currently believes there is no network," i.e. the app is
        serving last-known cached data. -->
-  <p id="net-status" class="net-status" role="status" aria-live="polite" data-online="true" hidden></p>
+  <p id="net-status" class="net-status pill" role="status" aria-live="polite" data-online="true" hidden></p>
 </header>
 <div id="app"></div>
-<nav id="nav">
+<nav id="nav" class="tab-bar">
   <a href="#/" data-route="home">Home</a>
   <a href="#/compare" data-route="compare">Compare</a>
   <a href="#/settings" data-route="settings">Settings</a>

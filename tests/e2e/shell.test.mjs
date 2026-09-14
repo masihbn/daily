@@ -253,3 +253,162 @@ test('the bottom nav is visible and its bounding box sits within the 390x844 vie
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// Step U.1 (CONTRACT-U.1.md §1/§2/§6): the shell gets a per-route title bar
+// (#title-bar/#title/#title-back) instead of the permanent "Daily" <h1>, and
+// tab-bar links get an icon + label. Cases S-T1..S-T6 below are exactly
+// CONTRACT-U.1.md §6's list, added to this file's existing coverage.
+// ===========================================================================
+
+// S-T6 needs a SIGNED-OUT launch, but this file's beforeEach() above
+// unconditionally seeds a session via addInitScript for every test (every
+// other case in this file needs that). Stacking a second addInitScript that
+// removes the session would not reliably win: Playwright's own docs say the
+// evaluation order between multiple addInitScript calls on the same page is
+// undefined. What IS guaranteed is that every addInitScript finishes before
+// the navigated document's own scripts run — so this rewrites index.html's
+// response to insert a synchronous inline <script> that removes the seeded
+// session, placed immediately before the deferred `type="module"` main.js
+// script tag. That inline script runs during HTML parsing, strictly after
+// all addInitScripts and strictly before main.js's bootstrap() reads
+// localStorage, giving a deterministic signed-out launch without touching
+// the shared beforeEach or any existing test.
+async function forceSignedOut(page) {
+  await page.route('**/index.html', async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    const marker = '<script type="module" src="js/main.js"></script>';
+    if (!body.includes(marker)) {
+      throw new Error('forceSignedOut: expected marker script tag not found in index.html');
+    }
+    const patched = body.replace(marker, `<script>localStorage.removeItem('daily.auth.v1');</script>${marker}`);
+    await route.fulfill({ response, body: patched, contentType: 'text/html' });
+  });
+}
+
+test('S-T1 — home: #title-bar is large, #title reads "Today", #title-back is hidden, and #app has no h1 of its own', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'large');
+  await expect(page.locator('#title')).toHaveText('Today');
+  await expect(page.locator('#title-back')).toHaveAttribute('hidden', '');
+  expect(await page.locator('#app h1').count()).toBe(0);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('S-T2 — #/settings and #/compare each show their own large title', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/settings');
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'large');
+  await expect(page.locator('#title')).toHaveText('Settings');
+
+  await page.goto('/index.html#/compare');
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'large');
+  await expect(page.locator('#title')).toHaveText('Compare');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('S-T3 — #/new: compact title "New Trackable" with a visible back button to #/ containing an svg', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/new');
+
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'compact');
+  await expect(page.locator('#title')).toHaveText('New Trackable');
+  const back = page.locator('#title-back');
+  await expect(back).not.toHaveAttribute('hidden');
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute('href', '#/');
+  await expect(back.locator('svg')).toHaveCount(1);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('S-T4 — #/nope: compact title "Not Found", back to #/, and the body still has the "Go home" link', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/nope');
+
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'compact');
+  await expect(page.locator('#title')).toHaveText('Not Found');
+  const back = page.locator('#title-back');
+  await expect(back).not.toHaveAttribute('hidden');
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute('href', '#/');
+
+  // Scoped to #app so this is unambiguously the body's own "Go home" link,
+  // distinct from the header's #title-back (also href="#/", but outside #app).
+  const homeLink = page.locator('#app a[href="#/"]');
+  await expect(homeLink).toBeVisible();
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('S-T5 — every #nav tab-bar link has an icon svg and a label span, with unchanged label text and count', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+
+  const links = page.locator('#nav a[data-route]');
+  await expect(links).toHaveCount(3);
+
+  const expectedLabels = { home: 'Home', compare: 'Compare', settings: 'Settings' };
+  const count = await links.count();
+  for (let i = 0; i < count; i += 1) {
+    const link = links.nth(i);
+    await expect(link.locator('.tab-bar__icon svg')).toHaveCount(1);
+    await expect(link.locator('.tab-bar__label')).toHaveCount(1);
+    const route = await link.getAttribute('data-route');
+    const text = (await link.textContent()).trim();
+    expect(text).toBe(expectedLabels[route]);
+  }
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('S-T6 — signed out: compact title "Sign in", #title-back hidden, #nav hidden', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await forceSignedOut(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+
+  await expect(page.locator('#app')).toHaveAttribute('data-auth', 'signed-out');
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'compact');
+  await expect(page.locator('#title')).toHaveText('Sign in');
+  await expect(page.locator('#title-back')).toHaveAttribute('hidden', '');
+  await expect(page.locator('#nav')).toBeHidden();
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

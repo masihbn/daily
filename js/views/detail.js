@@ -257,7 +257,7 @@ function overlayStorage() {
   }
 }
 
-export function createDetailView({ id, store, api, today } = {}) {
+export function createDetailView({ id, store, api, today, onTitle } = {}) {
   const st = store || getStore();
   // `api` is accepted per CONTRACT-2.3.md §3, for interface symmetry
   // with ./trackable.js (both views follow the same injectable-dependency
@@ -275,6 +275,10 @@ export function createDetailView({ id, store, api, today } = {}) {
 
   let trackable = null; // raw loaded row, or null before/if not found
   let otherTrackableCount = 0;
+  // Step U.1 (CONTRACT-U.1 §3): the last title string sent to onTitle, so
+  // render() only calls it on the state change that actually changes the
+  // header text — not on every re-render while 'ready'/'notfound' persists.
+  let lastTitleSent = null;
   // Step D.6b: two arrays instead of one. allEntries is every entry of
   // this trackable the store knows about (the whole history, loaded once
   // — see loadAllEntries()); entriesForRange is allEntries sliced to the
@@ -379,6 +383,20 @@ export function createDetailView({ id, store, api, today } = {}) {
     if (lastTrackablesError && !trackable) return 'error';
     if (!trackable) return 'notfound';
     return 'ready';
+  }
+
+  // Step U.1 (CONTRACT-U.1 §3): tells main.js what the header should say,
+  // at most once per actual text change. Never throws if onTitle is absent
+  // or itself throws — a header-styling detail must never break this view.
+  function sendTitle(text) {
+    if (text === lastTitleSent) return;
+    lastTitleSent = text;
+    if (typeof onTitle !== 'function') return;
+    try {
+      onTitle(text);
+    } catch {
+      // See above.
+    }
   }
 
   // Step D.6b: the one synchronous function that keeps allEntries and
@@ -524,6 +542,16 @@ export function createDetailView({ id, store, api, today } = {}) {
 
     const section = ensureSection();
     const state = computeState();
+
+    // Step U.1 (CONTRACT-U.1 §3): the header shows the trackable's name
+    // once it is known, or 'Not found' once that is known — main.js seeds
+    // the placeholder ('Trackable') before this view ever mounts.
+    if (state === 'ready') {
+      sendTitle(typeof trackable.name === 'string' ? trackable.name : '');
+    } else if (state === 'notfound') {
+      sendTitle('Not found');
+    }
+
     section.setAttribute('data-detail-state', state);
     section.setAttribute('data-trackable-id', idStr);
     section.setAttribute('data-range', rangeKey);

@@ -539,3 +539,32 @@ test('K10 — signed out, even with a lock seeded: the sign-in gate shows, not t
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// Step U.1 (CONTRACT-U.1.md §2/§6): the locked gate also gets a shell title
+// — "Locked", compact, no back — same per-route table as every other gate.
+// The automatic unlock attempt (present since K2) must not fire here, or the
+// screen would flip to unlocked before this test can observe the title, so
+// the fake WebAuthn get() is made to reject like K3/K5.
+// ===========================================================================
+
+test('U.1 — a locked launch shows title "Locked", compact, with the back button hidden', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await seedSession(page);
+  await seedLock(page);
+  await installFakeWebAuthn(page, { get: { ok: false, errorName: 'NotAllowedError' } });
+  const events = [];
+  await routeEmptyRest(page, { events });
+
+  await page.goto('/index.html#/settings');
+
+  await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
+  await expect(page.locator('section.lock')).toBeVisible();
+  await expect(page.locator('#title')).toHaveText('Locked');
+  await expect(page.locator('#title-bar')).toHaveAttribute('data-size', 'compact');
+  await expect(page.locator('#title-back')).toHaveAttribute('hidden', '');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

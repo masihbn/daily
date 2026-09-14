@@ -1003,3 +1003,64 @@ test('D18 — the same order holds while the charts are still loading', async ({
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// Step U.1 (CONTRACT-U.1.md §2/§3/§6): the detail view reports its title to
+// the shell's #title via an onTitle callback — the trackable's name once
+// ready, "Not found" if the id does not resolve. D-T3 covers the sibling
+// #/t/:id/edit route, which mounts js/views/trackable.js, not detail.js, but
+// belongs in this file per the contract's own case list.
+// ===========================================================================
+
+test('D-T1 — #/t/366: once ready, #title shows the trackable name and #title-back is a visible link to #/', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/366');
+
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect(page.locator('#title')).toHaveText('Calories');
+  const back = page.locator('#title-back');
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute('href', '#/');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('D-T2 — #/t/99999 (an id that does not exist): #title reads "Not found"', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/t/99999');
+
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'notfound');
+  await expect(page.locator('#title')).toHaveText('Not found');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('D-T3 — #/t/366/edit: #title reads "Edit Trackable" with #title-back linking back to #/t/366', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_NUM_BOUNDS, T_OTHER]);
+
+  await page.goto('/index.html#/t/366/edit');
+
+  await expect(page.locator('#title')).toHaveText('Edit Trackable');
+  const back = page.locator('#title-back');
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute('href', '#/t/366');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

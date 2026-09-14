@@ -258,7 +258,9 @@ header still stack (U.1).
 
 ## Step U.1 — Shell: title bar, tab bar with icons, status pills
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pending
+(pinged with U.0). Contract `CONTRACT-U.1.md`. No fix cycle. `sw.js`
+`CACHE` → `daily-v46`.
 
 **Goal.** The permanent "Daily" header is gone; each screen has its own
 title bar (large title on tabs, back button + compact title elsewhere);
@@ -297,7 +299,26 @@ bump; tests: `tests/e2e/shell.test.mjs` updated per contract,
   exported constant changes and its unit test with it.
 - View transitions: none yet (U.7).
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4609 green** — 4336 unit, 54 integration, 219
+e2e (+10). Changed: `index.html` (`#title-bar` / `#title` /
+`#title-back`, status `<p>`s as pills, `#nav.tab-bar`), `js/main.js`
+(`setTitle`, `decorateNav`, no `<h1>` in `#app` any more), `js/views/
+detail.js` (`onTitle`, sent once per text change, never throws),
+`css/styles.css`, `sw.js`.
+
+*E2E added:* shell S-T1–S-T6 (large title on the three tabs, compact +
+back on new/not-found, tab links carry an icon and a label with
+unchanged text, signed-out shows "Sign in" with the tab bar hidden);
+detail D-T1–D-T3 (title becomes the trackable name once ready, "Not
+found" for an unknown id, edit route's back points at the trackable);
+applock (locked launch shows "Locked", compact, no back).
+
+*Decisions at execution time:* status texts unchanged (they became pills
+by CSS only); the U.0 design-tokens T9 test that pinned `daily-v45`
+was changed to a floor (`daily-v(\d+)`, N ≥ 45) because every design
+step bumps the cache — a contract correction, recorded here.
 
 ---
 
@@ -604,3 +625,6 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.0 executed.** Tokens, type scale, kit, chrome
   icons, global button reset. One fix cycle: the 44pt tap floor beat the
   contract's 36px small-control metrics (code fixed, tests untouched).
+- **2026-09-14** — **U.1 executed.** Per-route title bar with back
+  button, tab bar icons, status pills; `#app` no longer holds an `<h1>`.
+  Suite 4609 green.

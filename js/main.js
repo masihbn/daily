@@ -16,8 +16,12 @@ import { startNetStatus } from './net-status.js';
 import { getStore } from './store.js';
 import { getAuth } from './auth.js';
 import { isLockEnabled, isUnlocked } from './applock.js';
+import { uiIconSvg } from './ui-icons.js';
 
 const VIEW_TITLES = {
+  home: 'Today',
+  signin: 'Sign in',
+  locked: 'Locked',
   detail: 'Trackable',
   new: 'New Trackable',
   edit: 'Edit Trackable',
@@ -45,13 +49,54 @@ function renderView(route) {
   }
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+// Step U.1 (CONTRACT-U.1 §2). Sets the shared header for the current route.
+// Every element lookup is guarded individually — a shell missing #title-bar/
+// #title/#title-back (e.g. an older cached index.html mid-deploy) must never
+// throw and must never stop the rest of render() from finishing.
+function setTitle(text, { size = 'large', back = null } = {}) {
+  try {
+    const bar = document.getElementById('title-bar');
+    if (bar) bar.setAttribute('data-size', size);
+  } catch {
+    // Never let a shell-styling detail break navigation.
+  }
+
+  try {
+    const titleEl = document.getElementById('title');
+    if (titleEl) titleEl.textContent = text;
+  } catch {
+    // See above.
+  }
+
+  try {
+    const backEl = document.getElementById('title-back');
+    if (backEl) {
+      backEl.hidden = back === null;
+      if (back !== null) backEl.setAttribute('href', back);
+    }
+  } catch {
+    // See above.
+  }
+}
+
+// Step U.1 (CONTRACT-U.1 §2). Injects an SVG icon above each tab label, once,
+// at bootstrap — before the first render() so the tab bar never flashes
+// text-only. Never duplicates the icon markup into index.html (single
+// source: js/ui-icons.js). The anchor's href/data-route are untouched and
+// its textContent stays exactly the label (the SVG contributes no text), so
+// nothing that reads link text or navigates by href is affected.
+function decorateNav() {
+  const nav = document.getElementById('nav');
+  if (!nav) return;
+  const links = nav.querySelectorAll('a[data-route]');
+  links.forEach((link) => {
+    if (link.querySelector('.tab-bar__icon')) return;
+    const label = link.textContent.trim();
+    const key = link.getAttribute('data-route');
+    link.innerHTML =
+      `<span class="tab-bar__icon" aria-hidden="true">${uiIconSvg(key)}</span>` +
+      `<span class="tab-bar__label">${label}</span>`;
+  });
 }
 
 // Step 5.2 (CONTRACT-5.2 §3). Same try/catch accessor pattern as
@@ -118,7 +163,8 @@ async function render() {
   if (nav) nav.hidden = !signedIn;
 
   if (!signedIn) {
-    app.innerHTML = '<h1>Sign in</h1><div id="view"></div>';
+    setTitle(VIEW_TITLES.signin, { size: 'compact' });
+    app.innerHTML = '<div id="view"></div>';
     currentView = createSignInView({
       auth,
       onSignedIn: () => {
@@ -153,7 +199,8 @@ async function render() {
   app.setAttribute('data-lock', locked ? 'locked' : 'unlocked');
   if (locked) {
     nav.hidden = true;
-    app.innerHTML = '<h1>Locked</h1><div id="view"></div>';
+    setTitle(VIEW_TITLES.locked, { size: 'compact' });
+    app.innerHTML = '<div id="view"></div>';
     currentView = createLockView({ auth, store: getStore(), onUnlocked: () => render() });
     currentView.mount(document.getElementById('view'));
     return;
@@ -171,12 +218,15 @@ async function render() {
   updateNav(route.name);
 
   if (route.name === 'home') {
-    app.innerHTML = '<h1>Today</h1><div id="view"></div>';
+    setTitle(VIEW_TITLES.home, { size: 'large' });
+    app.innerHTML = '<div id="view"></div>';
     currentView = createHomeView();
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'new' || route.name === 'edit') {
     const title = route.name === 'edit' ? VIEW_TITLES.edit : VIEW_TITLES.new;
-    app.innerHTML = `<h1>${escapeHtml(title)}</h1><div id="view"></div>`;
+    const back = route.name === 'edit' ? `#/t/${encodeURIComponent(route.params.id)}` : '#/';
+    setTitle(title, { size: 'compact', back });
+    app.innerHTML = '<div id="view"></div>';
     currentView =
       route.name === 'edit'
         ? createTrackableView({ mode: 'edit', id: route.params.id })
@@ -185,25 +235,35 @@ async function render() {
   } else if (route.name === 'detail') {
     // Step 2.3: the real detail view supersedes the Step 2.2 placeholder
     // (which showed just the id and an Edit link).
-    app.innerHTML = `<h1>${escapeHtml(VIEW_TITLES.detail)}</h1><div id="view"></div>`;
-    currentView = createDetailView({ id: route.params.id });
+    // Step U.1 (CONTRACT-U.1 §2/§3): 'Trackable' is only the placeholder
+    // until the view's own onTitle callback fires with the loaded
+    // trackable's name (or 'Not found') — see js/views/detail.js.
+    setTitle(VIEW_TITLES.detail, { size: 'compact', back: '#/' });
+    app.innerHTML = '<div id="view"></div>';
+    currentView = createDetailView({
+      id: route.params.id,
+      onTitle: (text) => setTitle(text, { size: 'compact', back: '#/' }),
+    });
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'compare') {
     // Step 3.5: the real compare view supersedes the placeholder that used
     // to be a `case 'compare'` branch inside renderView() below.
-    app.innerHTML = '<h1>Compare</h1><div id="view"></div>';
+    setTitle(VIEW_TITLES.compare, { size: 'large' });
+    app.innerHTML = '<div id="view"></div>';
     currentView = createCompareView();
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'settings') {
     // Step 4.1: the real settings view supersedes the Step D.7 placeholder
     // (which held only the sign-out control, now moved into
     // js/views/settings.js — see that file's handleSignOutClick()).
-    app.innerHTML = '<h1>Settings</h1><div id="view"></div>';
+    setTitle(VIEW_TITLES.settings, { size: 'large' });
+    app.innerHTML = '<div id="view"></div>';
     currentView = createSettingsView();
     await currentView.mount(document.getElementById('view'));
   } else {
     const { title, body } = renderView(route);
-    app.innerHTML = `<h1>${escapeHtml(title)}</h1>${body}`;
+    setTitle(title, { size: 'compact', back: '#/' });
+    app.innerHTML = body;
   }
 }
 
@@ -306,6 +366,14 @@ function bootstrap() {
       render();
     }
   });
+
+  // Step U.1 (CONTRACT-U.1 §2): the tab icons and the title bar's back-button
+  // glyph are injected once, before the first render() — guarded the same
+  // way updateNav()/setTitle() are, so a shell missing #title-back never
+  // breaks bootstrap().
+  decorateNav();
+  const titleBackEl = document.getElementById('title-back');
+  if (titleBackEl) titleBackEl.innerHTML = uiIconSvg('back');
 
   render();
 
