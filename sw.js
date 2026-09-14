@@ -1,4 +1,4 @@
-const CACHE = 'daily-v32';
+const CACHE = 'daily-v33';
 
 // Same-origin assets — safe to load via cache.addAll (all-or-nothing).
 const ASSETS = [
@@ -21,10 +21,12 @@ const ASSETS = [
   './js/charts/weekly.js',
   './js/charts/bounds.js',
   './js/charts/overlay.js',
+  './js/charts/compare.js',
   './js/views/home.js',
   './js/views/home-model.js',
   './js/views/trackable.js',
   './js/views/detail.js',
+  './js/views/compare.js',
   './js/views/signin.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

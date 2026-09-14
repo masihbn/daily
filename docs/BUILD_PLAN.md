@@ -4845,7 +4845,12 @@ kg ticks crowd the chart.
 
 ## Step 3.5 — Normalized multi-series comparison chart
 
-**Status:** TODO
+**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
+check** (the Phase 3 gate follows immediately, so the device check IS
+the gate). Executed under the ORCHESTRATION.md loop with a fresh
+Implementer and Test Author from `CONTRACT-3.5.md`; two contract
+amendments and one test fix, all caught inside the loop. `sw.js`
+`CACHE` → `daily-v33`.
 
 **Goal.** Chart type 4b. Any number of numeric trackables on one chart,
 each normalized to its own historical min–max, so differently-scaled
@@ -4877,7 +4882,77 @@ series (calories vs. dollars) are visually comparable.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **3972 green** — 3738 unit (+55), 54 integration,
+180 e2e (+12). New: `js/charts/compare.js`, `js/views/compare.js`,
+`tests/unit/compare.test.mjs`, `tests/e2e/compare.test.mjs`; changed:
+`js/main.js` (real view replaces the placeholder), `css/styles.css`,
+`sw.js`.
+
+*Design decisions taken at execution time:*
+
+- **Every non-archived trackable is a candidate**, booleans included —
+  a boolean's series is its per-period count, a number like any other.
+- **Pipeline per series** exactly as APP_CONCEPT resolved: `rollup`
+  with the trackable's own `seriesAggregationFor`, `fillValueFor` for
+  empty buckets (0 for count/sum, null for average/last), then
+  `normalizeSeries` — 0 = its lowest value **in the shown window**,
+  100 = its highest, flat = 50, nulls stay gaps.
+- **The axis says what it is**: y title "% of each line's own range",
+  `%` ticks, a meaning line above the chart, and a key under it listing
+  each series' min–max (what 0% and 100% mean for it). The tooltip shows
+  `Calories: 1916.4 kcal (73%)`.
+- **Decluttering**: the trackable's own colour or a fixed palette by
+  selection position (stable when one series is skipped); a soft
+  warning above 4 series; Chart.js's native legend click hides a series
+  without deselecting it.
+- **Controls** reuse detail.js's range (3M/6M/1Y/All) and granularity
+  (Daily/Weekly/Monthly) markup and classes, incl. the Daily → 3M rule;
+  selection + period + range persist together in `daily.compare.v1`.
+- **Loading follows D.6b/3.4**: a selection loads that trackable's whole
+  history once, all persisted ids load in one request on mount, range
+  and granularity are local; a failed load keeps the chip, shows the
+  offline banner, draws nothing for that id, retries on re-toggle.
+
+*Two amendments, both from inside the loop.* (1) The Implementer noted
+that "has data" derived from the filled series would draw a count
+trackable with zero entries as a flat line at 50%. Ruling: has-data
+means at least one real entry in the window; otherwise the series is
+listed under "No data in this range". (2) The Test Author then caught
+the fix over-applied — min/max computed from real entries only while
+the normalisation used the filled series, so the key line would have
+said "15 – 40" while 0% meant 0. Ruling: min/max over the filled
+series, exactly what `normalizeSeries` scales against.
+
+*One fix cycle.* C10 (navigate away and back) snapshotted its request
+baseline as soon as Home was visible; Home paints from the warm cache
+and issues its own entries request afterwards, so the baseline raced.
+The first proposed fix (wait for Home's ready state) was rejected by the
+orchestrator for the same reason; the test now waits for Home's request
+to land. Assertions unchanged; product code untouched.
+
+*Unit (55 cases, K1–K9):* candidates; state read/write with every
+malformed shape and independent per-field defaults; sanitise with no
+cap; colour fallback and palette wrap; series alignment, fills,
+normalisation ends and flat-50, gaps, dedupe, has-data both ways;
+model statuses, All-range lower bound as the earliest entry across
+series, multi-year labels, skipped list, colour index by position
+among all selected, warning threshold, RangeError on bad `to`/period;
+tooltip and key text.
+
+*E2E (12 cases, C1–C12, all with intercepted PostgREST):* the route
+renders the picker with archived excluded and no requests beyond
+trackables; two selections → two requests, two datasets, y max 100 with
+% title, one series touching 0 and one touching 100, key with units,
+storage written; persisted state restored with one combined request;
+tooltip format; period changes with zero requests and Daily's range
+snap; deselect; a no-data trackable listed as skipped; the five-series
+warning; a 500 keeps the chip, shows the banner, retries; navigation
+destroys and restores; stale id dropped; Daily+1Y reconciled on load.
+
+*Not verifiable from this machine (Phase 3 gate):* whether up to four
+normalised lines are legible at 390px, whether the key under the chart
+makes the 0–100% axis unambiguous, and whether the chart answers the
+calories-vs-workouts-vs-weight question the user actually has.
 
 ---
 
@@ -5284,3 +5359,11 @@ unwind than to ask about.
   on the right axis, judged by their own bounds when set, axis framed by
   the period's min/max plus padding (the user's rule). Suite 3905 green
   first run. `CACHE` → `daily-v32`. Device check pending.
+- **2026-09-13** — **Step 3.5 executed.** Compare screen at `#/compare`:
+  any trackables, each rolled up by its own aggregation, normalised to
+  its own min–max in the window, % axis labelled as such, raw values in
+  tooltip and a min–max key, palette/warning/legend-toggle for clutter,
+  state persisted per device. Two in-loop amendments (has-data = a real
+  entry in the window; min/max over the filled series) and one test
+  baseline fix. Suite 3972 green. `CACHE` → `daily-v33`. Phase 3 gate
+  next.

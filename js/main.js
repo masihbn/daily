@@ -7,6 +7,7 @@ import { parseHash } from './router.js';
 import { createHomeView } from './views/home.js';
 import { createTrackableView } from './views/trackable.js';
 import { createDetailView } from './views/detail.js';
+import { createCompareView } from './views/compare.js';
 import { createSignInView } from './views/signin.js';
 import { createOutboxSync, renderOutboxStatus } from './outbox-sync.js';
 import { getStore } from './store.js';
@@ -31,11 +32,6 @@ function renderView(route) {
   const { name, params } = route;
 
   switch (name) {
-    case 'compare':
-      return {
-        title: VIEW_TITLES.compare,
-        body: '<p>Side-by-side comparison view will go here.</p>',
-      };
     case 'settings': {
       // Step D.7: sign-out lives on the settings placeholder body rather
       // than in its own view — there is nothing else here yet to justify
@@ -161,6 +157,12 @@ async function render() {
     // (which showed just the id and an Edit link).
     app.innerHTML = `<h1>${escapeHtml(VIEW_TITLES.detail)}</h1><div id="view"></div>`;
     currentView = createDetailView({ id: route.params.id });
+    await currentView.mount(document.getElementById('view'));
+  } else if (route.name === 'compare') {
+    // Step 3.5: the real compare view supersedes the placeholder that used
+    // to be a `case 'compare'` branch inside renderView() below.
+    app.innerHTML = '<h1>Compare</h1><div id="view"></div>';
+    currentView = createCompareView();
     await currentView.mount(document.getElementById('view'));
   } else {
     const { title, body } = renderView(route);

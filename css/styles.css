@@ -1374,6 +1374,109 @@ button.hm-cell {
   opacity: 0.4;
 }
 
+/* Compare screen (Step 3.5, CONTRACT-3.5.md) -------------------------------
+   A top-level view at #/compare, not a chart slot inside .detail — so it
+   gets its own top-level block rather than living inside .chart-slot.
+   .compare-picker/.compare-hint/.compare-chips mirror the overlay picker's
+   own .overlay-picker/.overlay-hint/.overlay-chips rules (the chip itself
+   already reuses .overlay-chip's visual treatment via the shared class on
+   the button — see js/views/compare.js). .compare-meaning mirrors
+   .bounds-meaning's small muted line. The range/period controls below
+   reuse .detail-ranges/.trend-periods UNTOUCHED (js/views/compare.js
+   builds identical markup), so nothing new is needed for them here. */
+
+.compare-view {
+  display: block;
+  width: 100%;
+}
+
+.compare-picker {
+  width: 100%;
+  margin: 0 0 16px;
+}
+
+.compare-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.compare-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compare-meaning {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.compare-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+}
+
+.compare-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.compare-empty,
+.compare-unavailable,
+.compare-loading {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+/* Soft series-count warning (§0 rule 5: no hard cap, only this) — uses
+   --bad the same way .bounds-summary's out-of-range state does, but at
+   body-text weight/size since this is advisory, not a verdict. */
+.compare-warning {
+  margin: 10px 0 0;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.compare-skipped {
+  margin: 10px 0 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.compare-key {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.compare-key-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.compare-key-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.compare-key-name {
+  font-weight: 600;
+}
+
+.compare-key-range {
+  color: var(--fg-muted);
+}
+
 /* Sign-in gate (Step D.7) -------------------------------------------------
    Rendered by js/views/signin.js in place of every route's own view while
    there is no session (see main.js's render()). Inputs follow the same

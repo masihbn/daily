@@ -28,9 +28,9 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 3.5
-as of 2026-09-13, then the Phase 3 gate). Nothing in Phase D changed
-what 3.4 onward need to do.
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (the Phase
+3 gate as of 2026-09-13, then Phase 4). Nothing in Phase D changed what
+3.4 onward need to do.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -57,7 +57,7 @@ what 3.4 onward need to do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**3905 tests as of Step 3.4c** (3683 unit, 54 integration, 168 e2e). See
+**3972 tests as of Step 3.5** (3738 unit, 54 integration, 180 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -159,12 +159,16 @@ js/outbox-sync.js    Replays the outbox on reconnect / visibility /
 js/icons.js          Icon set for trackables (Step 2.5).
 js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
+                      compare.js (3.5: #/compare, normalised multi-series),
                       signin.js (email + password, Show/Hide toggle).
 js/charts/           heatmap.js, weekly.js, bounds.js — pure chart
                       builders over Chart.js; overlay.js (3.4–3.4c) —
                       one other trackable on the bounds chart's right
                       axis: bars vs its target (count/sum) or a dashed
-                      line vs its bounds (average/last), plus the picker.
+                      line vs its bounds (average/last), plus the picker;
+                      compare.js (3.5) — pure model + Chart.js render for
+                      the compare screen (each series 0–100% of its own
+                      range in the window).
 js/dates.js          PURE local-calendar date math (Step 1.2): todayLocal,
                       parseLocal, formatLocal, addDays, isoWeekKey,
                       startOfIsoWeek, isoWeeksInRange, rangeDays,
