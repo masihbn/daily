@@ -324,7 +324,8 @@ step bumps the cache — a contract correction, recorded here.
 
 ## Step U.2 — Home cards
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pinged.
+Contract `CONTRACT-U.2.md`. No fix cycle. `sw.js` `CACHE` → `daily-v47`.
 
 **Goal.** Each trackable card reads at a glance: identity (colour icon),
 name, today's value or state, verdict, and one obvious action — and a
@@ -361,7 +362,27 @@ any contract text change; unit tests for any new pure helper.
   ("Monday, 14 September") from `todayLocal()` — pure formatter in
   `home-model.js` with a unit test.
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4627 green** — 4348 unit (+12), 54 integration,
+225 e2e (+6). Changed: `js/views/home.js` (`.trow-meta` wrapper, icon +
+visually-hidden "Log" in `.trow-log`, plus glyph in `.home-new`),
+`js/views/home-model.js` (`longDateLabel`, pure, via `parseLocal`),
+`js/main.js` (`setTitle` `sub`), `index.html` (`#title-sub`),
+`css/styles.css` (card grid `44px / 1fr / auto`), `sw.js`.
+
+*Unit:* `longDateLabel` L1–L6 (hand-computed weekday/month strings incl.
+a leap day and both year edges; seven invalid inputs → `''`).
+*E2E:* U2-1 meta wrapper; U2-2 the Log button is a 44px round icon
+button whose text is still exactly "Log" and whose aria-label is
+unchanged, right-aligned in the card; U2-3 value sits above the button
+and right-aligns with it; U2-4 the verdict badge sits on the icon well;
+U2-5 the date subtitle on Home only; U2-6 "New trackable" block button
+with a glyph.
+
+*Design result:* five cards fit one 844px screen; boolean words are
+pills; numeric values are 22px tabular; the check badge replaced the
+second big ring.
 
 ---
 
@@ -628,3 +649,6 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.1 executed.** Per-route title bar with back
   button, tab bar icons, status pills; `#app` no longer holds an `<h1>`.
   Suite 4609 green.
+- **2026-09-14** — **U.2 executed.** Home card grid, icon-only Log
+  button (text kept for tests), verdict badge on the icon well, date
+  subtitle. Suite 4627 green.

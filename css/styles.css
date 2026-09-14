@@ -197,6 +197,22 @@ header {
   text-align: center;
 }
 
+/* Step U.2 (CONTRACT-U.2 §2/§3): the Home large title's date subtitle.
+   grid-column: 1 / -1 puts it on its own row under the title, spanning
+   the whole .title-bar__row grid the same way [data-size="large"]
+   .title-bar__title does. Every other route passes no `sub`, so
+   setTitle() leaves it [hidden]. */
+.title-bar__sub {
+  grid-column: 1 / -1;
+  margin: 0;
+  font: var(--t-cap);
+  color: var(--fg-2);
+}
+
+.title-bar__sub[hidden] {
+  display: none;
+}
+
 /* Step D.6 — global "unsent writes" indicator. Sits under the title in the
    shell so it is visible from every route, including the detail screens
    where an offline log is most likely to be made.
@@ -624,18 +640,27 @@ button {
   gap: var(--s3);
 }
 
-/* Direct children only — the DOM shape here is fixed by the interface
-   contract (no extra wrapper elements), so the row is laid out purely
-   with flex-wrap + `order` on siblings rather than nested containers. */
+/* Step U.2 (CONTRACT-U.2 §1/§3): a 3-column grid gives identity, name,
+   today's value, verdict and the one action a fixed place instead of a
+   flex-wrap flow. Columns: a fixed 44px icon well, a flexible name/meta
+   column, and an auto-sized value/action column. The icon area is named
+   in both content rows, so it spans them as one 2-row cell — that's what
+   lets .trow-symbol below sit on the well's corner without being a child
+   of it. */
 .trow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon name value"
+    "icon meta log"
+    "editor editor editor"
+    "error error error";
   column-gap: var(--s3);
   row-gap: var(--s1);
+  align-items: center;
   width: 100%;
   min-width: 0;
-  padding: 14px var(--s4);
+  padding: var(--s3) var(--s4);
   background: var(--surface);
   box-shadow: var(--shadow);
   border-left: 4px solid var(--hairline);
@@ -677,13 +702,16 @@ button {
    the trackable's stored colour (home.js); when absent this falls back to
    the muted tone the symbol ring uses, so an uncoloured trackable still
    reads as a coherent (if neutral) icon. Step U.0: the icon now sits in a
-   36px round well tinted from that same inline colour via color-mix(),
-   rather than showing the bare glyph on the card background. */
+   round well tinted from that same inline colour via color-mix(), rather
+   than showing the bare glyph on the card background — grown to 44px in
+   Step U.2 to match the tap-target floor and give the verdict badge room
+   on its corner. */
 .trow-icon {
-  order: -1;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  grid-area: icon;
+  align-self: start;
+  position: relative;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -693,33 +721,43 @@ button {
 }
 
 .trow-icon svg {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 
+/* Step U.2 (CONTRACT-U.2 §0 decision 3/§3): the verdict ring shrinks to a
+   small badge on the icon well's corner instead of a second big circle
+   next to the name. It is a SIBLING of .trow-icon in the DOM, not a
+   child, so it can't be positioned relative to the icon's own box the
+   normal way — instead it shares the icon's grid cell (grid-area: icon
+   spans both content rows) and is pushed to the well's bottom-right
+   corner with align-self/justify-self plus a matching margin. */
 .trow-symbol {
-  order: 0;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  grid-area: icon;
+  align-self: start;
+  justify-self: end;
+  margin: 30px -3px 0 0;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 2px solid var(--fg-3);
-  font-size: 15px;
+  border: 2px solid var(--surface);
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   color: transparent;
 }
 
 /* Glyphs are plain Unicode text characters rendered via CSS `content` on
-   a pseudo-element, styled with `color`/`border` custom properties — NOT
-   an emoji font, which renders inconsistently across iOS versions. */
+   a pseudo-element, styled with the `color` custom property — NOT an
+   emoji font, which renders inconsistently across iOS versions. A solid
+   verdict colour behind an --accent-fg glyph reads at 18px where the
+   previous tinted-background/coloured-border ring would not. */
 .trow-symbol[data-symbol="check"] {
-  border-color: var(--good);
-  background: var(--good-bg);
-  color: var(--good);
+  background: var(--good);
+  color: var(--accent-fg);
 }
 
 .trow-symbol[data-symbol="check"]::before {
@@ -727,28 +765,26 @@ button {
 }
 
 .trow-symbol[data-symbol="cross"] {
-  border-color: var(--bad);
-  background: var(--bad-bg);
-  color: var(--bad);
+  background: var(--bad);
+  color: var(--accent-fg);
 }
 
 .trow-symbol[data-symbol="cross"]::before {
   content: '\2715'; /* U+2715 MULTIPLICATION X */
 }
 
-/* "empty" renders no glyph at all — the plain outline ring (border +
-   border-radius: 50% above) IS the "empty outline circle" the contract
-   asks for. */
+/* "empty" (no verdict signal at all — e.g. an unbounded numeric) renders
+   no badge at all now, rather than an empty outline ring. */
 .trow-symbol[data-symbol="empty"] {
-  border-color: var(--fg-3);
-  background: transparent;
+  display: none;
 }
 
 .trow-name {
-  order: 1;
-  flex: 1 1 55%;
+  grid-area: name;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg);
   font: var(--t-head);
   text-decoration: none;
@@ -757,11 +793,10 @@ button {
 }
 
 .trow-value {
-  order: 2;
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--fg-2);
-  font: 700 20px/1.2 var(--font);
+  grid-area: value;
+  justify-self: end;
+  color: var(--fg);
+  font: 700 22px/1.2 var(--font);
   font-variant-numeric: tabular-nums;
 }
 
@@ -769,29 +804,63 @@ button {
    itself — Step 2.4 defect 5's good/bad verdict for a bounded numeric is
    carried by the row's border/background and by .trow-status below, not
    by recolouring this span (most numerics still have no target/bounds
-   and stay 'neutral', see home-model.js verdict()). Boolean rows are
-   coloured by verdict directly instead, since 'logged' no longer implies
-   'good' there. */
+   and stay 'neutral', see home-model.js verdict()). */
 .trow[data-shape="numeric"][data-logged="true"] .trow-value {
   color: var(--accent);
 }
 
+/* Step U.2 (§0 decision 4): an unlogged numeric shows the em-dash in a
+   muted, lighter weight instead of the full-strength tabular number. */
+.trow[data-shape="numeric"][data-logged="false"] .trow-value {
+  color: var(--fg-3);
+  font-weight: 500;
+}
+
+/* Step U.2 (§0 decision 4): a boolean row shows its verdict word
+   (Done / Not yet / Clean / Logged) as a pill in the value slot instead
+   of a plain coloured word — colour is never the only cue (WCAG 1.4.1),
+   the word itself already carries the meaning. */
+.trow[data-shape="boolean"] .trow-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font: var(--t-cap);
+  font-weight: 600;
+}
+
 .trow[data-shape="boolean"][data-verdict="good"] .trow-value {
+  background: var(--good-bg);
   color: var(--good);
 }
 
 .trow[data-shape="boolean"][data-verdict="bad"] .trow-value {
+  background: var(--bad-bg);
   color: var(--bad);
 }
 
+.trow[data-shape="boolean"][data-verdict="neutral"] .trow-value {
+  background: var(--surface-2);
+  color: var(--fg-2);
+}
+
+.trow-meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  min-width: 0;
+}
+
 /* Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for a bounded
-   numeric's good/bad verdict. Same order as .trow-value so the two sit
-   together — ties in flex `order` keep document order, and this span is
-   always appended right after .trow-value in the DOM (home.js). Step
-   U.0: takes the kit's pill metrics/tint instead of plain coloured text. */
+   numeric's good/bad verdict. Step U.0: takes the kit's pill metrics/tint
+   instead of plain coloured text. Step U.2: now a child of .trow-meta
+   rather than a direct flex child of .trow, so `order` is no longer
+   needed to keep it grouped with .trow-direction/.trow-hint. */
 .trow-status {
-  order: 2;
-  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   height: 24px;
@@ -813,58 +882,67 @@ button {
 }
 
 .trow-direction {
-  order: 3;
-  flex: 0 0 auto;
   color: var(--fg-3);
   font: var(--t-cap);
   white-space: nowrap;
 }
 
 .trow-hint {
-  order: 4;
-  flex: 1 1 100%;
+  flex-basis: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--fg-3);
   font: var(--t-cap);
 }
 
-/* Step U.0: the global `button` rule is a reset only now, so every one of
-   these carries its own complete look — see the comment on that rule
-   above. .trow-log = secondary/sm, .trow-save = primary/sm, .trow-cancel
-   = ghost/sm (docs/DESIGN_PLAN.md §4). Fix cycle (2026-09-14): the "sm"
-   look keeps its smaller padding/font, but every one of these is a real
-   tap target, so min-height stays at the 44pt floor (§1) regardless. */
+/* Step U.2 (§1/§3): .trow-log is now an icon-only round button — the
+   "Log" text moved to a visually-hidden span in the DOM (home.js), so the
+   visible glyph alone (check for boolean, plus for numeric) has to carry
+   the action. .btn--icon's secondary look at the 44px floor.
+   [aria-pressed="true"] (a logged boolean row) fills it solid, matching a
+   pressed/active toggle. .trow-save = primary, .trow-cancel = ghost
+   (docs/DESIGN_PLAN.md §4), both still real tap targets at the 44pt
+   floor (§1) regardless of the "sm" look elsewhere in the kit. */
 .trow-log {
-  order: 5;
-  margin-left: auto;
+  grid-area: log;
+  justify-self: end;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--s2);
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   min-height: 44px;
-  padding: 0 var(--s3);
-  border-radius: var(--r-ctl);
+  padding: 0;
+  border-radius: var(--r-pill);
   background: var(--surface-2);
   color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--hairline);
-  font: var(--t-cap);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+.trow-log svg {
+  width: 20px;
+  height: 20px;
+}
+
+.trow-log[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
 .trow-editor {
-  order: 6;
-  flex: 1 1 100%;
-  min-width: 0;
+  grid-area: editor;
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2);
-  margin: 0;
+  margin-top: var(--s2);
 }
 
 .trow-input {
-  flex: 1 1 100px;
+  flex: 1;
   min-width: 0;
   min-height: 48px;
   padding: 0 var(--s3);
@@ -914,8 +992,7 @@ button {
 }
 
 .trow-error {
-  order: 7;
-  flex: 1 1 100%;
+  grid-area: error;
   min-width: 0;
   overflow-wrap: anywhere;
   margin: 2px 0 0;
@@ -924,14 +1001,16 @@ button {
 }
 
 /* .home-new is an <a>, so it never depended on the global button rule —
-   it already carried a full look; Step U.0 gives it the secondary/block
-   look instead of the old bare-outline one. */
+   it already carried a full look; Step U.0 gave it the secondary/block
+   look instead of the old bare-outline one. Step U.2: gains a leading
+   plus glyph, so it needs a gap between the icon and label spans. */
 .home-new {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: var(--s2);
   width: 100%;
-  margin-top: var(--s3);
+  margin-top: var(--s2);
   min-height: 44px;
   padding: 0 var(--s4);
   border-radius: var(--r-ctl);
@@ -942,6 +1021,11 @@ button {
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+}
+
+.home-new svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* Create / edit a trackable (Step 2.2) ----------------------------------- */

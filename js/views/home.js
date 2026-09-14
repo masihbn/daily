@@ -13,6 +13,7 @@ import { getStore } from '../store.js';
 import { todayLocal } from '../dates.js';
 import { visibleTrackables, parseNumericInput, nextValueFor, rowModel } from './home-model.js';
 import { iconSvg, hasIcon } from '../icons.js';
+import { uiIconSvg } from '../ui-icons.js';
 
 export function createHomeView({ store, today } = {}) {
   const st = store || getStore();
@@ -93,6 +94,29 @@ export function createHomeView({ store, today } = {}) {
     return { entry, status, errorText: null };
   }
 
+  // Step U.2 (CONTRACT-U.2 §1): `.trow-log` becomes an icon-only round
+  // button — the visible "Log" text moves into a visually-hidden span so
+  // `textContent` is still exactly "Log" (screen readers still get the
+  // word, and the button's own `aria-label` already carries the full
+  // "Log <name> for today" text). Built with appendChild only, no HTML
+  // string, so no stray whitespace text node can sneak between the two
+  // spans and break the `textContent === 'Log'` contract.
+  function appendLogButtonContent(btn, iconKey) {
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'trow-log__icon';
+    iconSpan.setAttribute('aria-hidden', 'true');
+    // uiIconSvg()'s own markup is our constant table (js/ui-icons.js) — the
+    // only innerHTML assignment for this element, same rule as the
+    // trackable icon above.
+    iconSpan.innerHTML = uiIconSvg(iconKey);
+    btn.appendChild(iconSpan);
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'visually-hidden';
+    labelSpan.textContent = 'Log';
+    btn.appendChild(labelSpan);
+  }
+
   function buildRow(t) {
     const { entry, status, errorText } = rowViewData(t);
     const model = rowModel(t, entry, status);
@@ -168,6 +192,13 @@ export function createHomeView({ store, today } = {}) {
     valueSpan.textContent = model.shape === 'boolean' ? model.statusWord : model.valueText;
     li.appendChild(valueSpan);
 
+    // Step U.2 (CONTRACT-U.2 §1): .trow-status/.trow-direction/.trow-hint
+    // are unchanged elements, now wrapped in a single .trow-meta container
+    // so the grid layout has one fixed place for "everything below the
+    // name" instead of three independently-flowing siblings.
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'trow-meta';
+
     // Step 2.4 defect 5: the non-colour cue (WCAG 1.4.1) for a bounded
     // numeric's good/bad verdict (home-model.js verdict()/statusWord()).
     // Omitted entirely when empty — an unbounded (or auto-bounded, see
@@ -176,20 +207,22 @@ export function createHomeView({ store, today } = {}) {
       const statusSpan = document.createElement('span');
       statusSpan.className = 'trow-status';
       statusSpan.textContent = model.statusWord;
-      li.appendChild(statusSpan);
+      metaDiv.appendChild(statusSpan);
     }
 
     if (model.shape === 'numeric' && model.directionLabel) {
       const dirSpan = document.createElement('span');
       dirSpan.className = 'trow-direction';
       dirSpan.textContent = model.directionLabel;
-      li.appendChild(dirSpan);
+      metaDiv.appendChild(dirSpan);
     }
 
     const hintSpan = document.createElement('span');
     hintSpan.className = 'trow-hint';
     hintSpan.textContent = model.hint;
-    li.appendChild(hintSpan);
+    metaDiv.appendChild(hintSpan);
+
+    li.appendChild(metaDiv);
 
     if (model.shape === 'boolean') {
       const btn = document.createElement('button');
@@ -199,7 +232,7 @@ export function createHomeView({ store, today } = {}) {
       btn.setAttribute('aria-pressed', String(model.logged));
       btn.setAttribute('aria-label', `Log ${model.name} for today`);
       btn.disabled = disabledNow;
-      btn.textContent = 'Log';
+      appendLogButtonContent(btn, 'check');
       li.appendChild(btn);
     } else {
       // Numeric (and defensively, any unrecognized shape) rows open the
@@ -210,7 +243,7 @@ export function createHomeView({ store, today } = {}) {
       btn.dataset.action = 'open-editor';
       btn.setAttribute('aria-label', `Log ${model.name} for today`);
       btn.disabled = disabledNow;
-      btn.textContent = 'Log';
+      appendLogButtonContent(btn, 'plus');
       li.appendChild(btn);
 
       if (isEditing) {
@@ -319,7 +352,14 @@ export function createHomeView({ store, today } = {}) {
       const newLink = document.createElement('a');
       newLink.className = 'home-new';
       newLink.href = '#/new';
-      newLink.textContent = 'New trackable';
+      const newIcon = document.createElement('span');
+      newIcon.className = 'home-new__icon';
+      newIcon.setAttribute('aria-hidden', 'true');
+      newIcon.innerHTML = uiIconSvg('plus');
+      newLink.appendChild(newIcon);
+      const newLabel = document.createElement('span');
+      newLabel.textContent = 'New trackable';
+      newLink.appendChild(newLabel);
       section.appendChild(newLink);
     }
 

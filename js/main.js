@@ -17,6 +17,8 @@ import { getStore } from './store.js';
 import { getAuth } from './auth.js';
 import { isLockEnabled, isUnlocked } from './applock.js';
 import { uiIconSvg } from './ui-icons.js';
+import { longDateLabel } from './views/home-model.js';
+import { todayLocal } from './dates.js';
 
 const VIEW_TITLES = {
   home: 'Today',
@@ -53,7 +55,7 @@ function renderView(route) {
 // Every element lookup is guarded individually — a shell missing #title-bar/
 // #title/#title-back (e.g. an older cached index.html mid-deploy) must never
 // throw and must never stop the rest of render() from finishing.
-function setTitle(text, { size = 'large', back = null } = {}) {
+function setTitle(text, { size = 'large', back = null, sub = null } = {}) {
   try {
     const bar = document.getElementById('title-bar');
     if (bar) bar.setAttribute('data-size', size);
@@ -73,6 +75,24 @@ function setTitle(text, { size = 'large', back = null } = {}) {
     if (backEl) {
       backEl.hidden = back === null;
       if (back !== null) backEl.setAttribute('href', back);
+    }
+  } catch {
+    // See above.
+  }
+
+  // Step U.2 (CONTRACT-U.2 §2): the Home route's date subtitle. `sub` is a
+  // non-empty string only for Home as of this step; every other route
+  // passes none, which clears and hides the element.
+  try {
+    const subEl = document.getElementById('title-sub');
+    if (subEl) {
+      if (typeof sub === 'string' && sub !== '') {
+        subEl.textContent = sub;
+        subEl.hidden = false;
+      } else {
+        subEl.textContent = '';
+        subEl.hidden = true;
+      }
     }
   } catch {
     // See above.
@@ -218,7 +238,7 @@ async function render() {
   updateNav(route.name);
 
   if (route.name === 'home') {
-    setTitle(VIEW_TITLES.home, { size: 'large' });
+    setTitle(VIEW_TITLES.home, { size: 'large', sub: longDateLabel(todayLocal()) });
     app.innerHTML = '<div id="view"></div>';
     currentView = createHomeView();
     await currentView.mount(document.getElementById('view'));

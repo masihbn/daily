@@ -1416,3 +1416,206 @@ test('NAV-RACE — a render suspended on #/ must not clobber the nav after a lat
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.2.md §5 — U2-1 through U2-6 (Home cards: 3-column grid,
+// trow-meta wrapper, icon+visually-hidden "Log" text, date subtitle)
+// ===========================================================================
+//
+// T_BOOL (id:1, 'Workout', boolean, direction:'build') and T_CUM (id:2,
+// 'Calories', numeric, no bounds configured) are this file's existing
+// fixtures reused per the task brief. T_BOUNDED (id:20, 'Weight', numeric,
+// manual bounds 70-80, defined above for BOUNDS1-3) is reused here as "the
+// numeric row with a status word" — its statusWord ('In range'/'Out of
+// range') is the only numeric case in this file that has one.
+
+test('U2-1 — every li.trow has exactly one .trow-meta containing .trow-hint; a numeric row with a status word has .trow-status inside .trow-meta', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL, T_CUM, T_BOUNDED]);
+  await routeEntries(page, {
+    getFixture: [
+      { id: 950, trackable_id: 1, entry_date: TODAY, value: 1, note: null }, // T_BOOL logged
+      { id: 951, trackable_id: 20, entry_date: TODAY, value: 75, note: null }, // T_BOUNDED in range
+      // T_CUM (id 2): no entry -> numeric with no bounds -> empty statusWord.
+    ],
+  });
+
+  await page.goto('/index.html#/');
+
+  const boolRow = page.locator('li.trow[data-trackable-id="1"]');
+  const cumRow = page.locator('li.trow[data-trackable-id="2"]');
+  const boundedRow = page.locator('li.trow[data-trackable-id="20"]');
+
+  for (const row of [boolRow, cumRow, boundedRow]) {
+    await expect(row.locator('.trow-meta')).toHaveCount(1);
+    await expect(row.locator('.trow-meta > .trow-hint')).toHaveCount(1);
+  }
+
+  // Boolean rows never carry .trow-status (it's a numeric-only element), and
+  // a numeric row with no configured bounds has an empty statusWord -> no
+  // element at all (per CONTRACT-2.4.md §7's "omit the element entirely").
+  await expect(boolRow.locator('.trow-status')).toHaveCount(0);
+  await expect(cumRow.locator('.trow-status')).toHaveCount(0);
+
+  // T_BOUNDED, in range: statusWord is non-empty -> the element exists,
+  // lives inside .trow-meta, and shows the word.
+  await expect(boundedRow.locator('.trow-meta .trow-status')).toHaveCount(1);
+  await expect(boundedRow.locator('.trow-meta .trow-status')).toHaveText('In range');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('U2-2 — every .trow-log has visible text "Log", an icon svg, aria-label "Log <name> for today", a >=44x44 tap target, and sits near the card\'s right edge', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL, T_CUM]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const cases = [
+    { id: '1', name: 'Workout' },
+    { id: '2', name: 'Calories' },
+  ];
+
+  for (const { id, name } of cases) {
+    const row = page.locator(`li.trow[data-trackable-id="${id}"]`);
+    const log = row.locator('.trow-log');
+
+    // textContent must be exactly 'Log' — the visible "Log" text moved into
+    // a visually-hidden span, but it is still the only text node.
+    const text = await log.textContent();
+    expect(text.trim()).toBe('Log');
+    await expect(log.locator('.trow-log__icon svg')).toHaveCount(1);
+    await expect(log).toHaveAttribute('aria-label', `Log ${name} for today`);
+
+    const trowBox = await row.boundingBox();
+    const logBox = await log.boundingBox();
+    expect(logBox.width).toBeGreaterThanOrEqual(44);
+    expect(logBox.height).toBeGreaterThanOrEqual(44);
+    // Contract formula: the log button's right edge must be within 24px of
+    // the card's right padding edge (card padding assumed 16px).
+    expect(trowBox.x + trowBox.width - 16 - 24).toBeLessThanOrEqual(logBox.x + logBox.width);
+  }
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('U2-3 — .trow-value sits above .trow-log and is right-aligned with it (within 2px)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL, T_CUM]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  for (const id of ['1', '2']) {
+    const row = page.locator(`li.trow[data-trackable-id="${id}"]`);
+    const valueBox = await row.locator('.trow-value').boundingBox();
+    const logBox = await row.locator('.trow-log').boundingBox();
+
+    expect(valueBox.y + valueBox.height).toBeLessThanOrEqual(logBox.y + 1);
+    const valueRight = valueBox.x + valueBox.width;
+    const logRight = logBox.x + logBox.width;
+    expect(Math.abs(valueRight - logRight)).toBeLessThanOrEqual(2);
+  }
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('U2-4 — boolean row logged today: .trow-value text "Done", and the .trow-symbol badge sits on the icon well (its centre within the icon box expanded by 6px)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, {
+    getFixture: [{ id: 960, trackable_id: 1, entry_date: TODAY, value: 1, note: null }],
+  });
+
+  await page.goto('/index.html#/');
+
+  const row = page.locator('li.trow[data-trackable-id="1"]');
+  await expect(row.locator('.trow-value')).toHaveText('Done');
+
+  const iconBox = await row.locator('.trow-icon').boundingBox();
+  const symbolBox = await row.locator('.trow-symbol').boundingBox();
+  const cx = symbolBox.x + symbolBox.width / 2;
+  const cy = symbolBox.y + symbolBox.height / 2;
+
+  expect(cx).toBeGreaterThanOrEqual(iconBox.x - 6);
+  expect(cx).toBeLessThanOrEqual(iconBox.x + iconBox.width + 6);
+  expect(cy).toBeGreaterThanOrEqual(iconBox.y - 6);
+  expect(cy).toBeLessThanOrEqual(iconBox.y + iconBox.height + 6);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('U2-5 — #title-sub shows a long date label on Home, and is hidden (attribute) on #/settings', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, []);
+  await routeEntries(page, { getFixture: [] });
+  // #/settings mounts and GETs app_settings (in addition to trackables,
+  // already routed above) — route it so the navigation below doesn't fall
+  // through to installGuard's catch-all abort.
+  await page.route('**/rest/v1/app_settings*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, rolling_window_days: 90, updated_at: '2026-01-01T00:00:00Z' }]),
+    });
+  });
+
+  await page.goto('/index.html#/');
+
+  const sub = page.locator('#title-sub');
+  await expect(sub).toBeVisible();
+  const text = (await sub.textContent()) || '';
+  expect(text).toMatch(
+    /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), \d{1,2} (January|February|March|April|May|June|July|August|September|October|November|December)$/
+  );
+
+  await page.goto('/index.html#/settings');
+  const hasHidden = await sub.evaluate((el) => el.hasAttribute('hidden'));
+  expect(hasHidden).toBe(true);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+test('U2-6 — .home-new: text "New trackable", contains an svg, and is a large tap target (height >= 44, width >= 300)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const link = page.locator('a.home-new');
+  const text = await link.textContent();
+  expect(text.trim()).toBe('New trackable');
+  await expect(link.locator('svg')).toHaveCount(1);
+
+  const box = await link.boundingBox();
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  expect(box.width).toBeGreaterThanOrEqual(300);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

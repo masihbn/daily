@@ -26,6 +26,7 @@ import {
   statusWord,
   statusSymbol,
   directionLabel,
+  longDateLabel,
 } from '../../js/views/home-model.js';
 
 // ===========================================================================
@@ -1127,6 +1128,48 @@ describe('rowModel — additional documented rules', () => {
     assert.equal(result.valueText, formatValue(trackable, null));
     assert.equal(result.hint, relogHint(trackable, null));
   });
+});
+
+// ===========================================================================
+// longDateLabel (CONTRACT-U.2.md §2/§5) — NEW in Step U.2
+// ===========================================================================
+//
+// Pure formatter: 'YYYY-MM-DD' -> 'Monday, 14 September' (English weekday
+// and month names, no year, no leading zero on the day). Must use local-
+// calendar math (parseLocal from ../dates.js), never `new Date('YYYY-MM-DD')`
+// (UTC midnight, wrong for part of every day). Expectations below are
+// hand-computed from the calendar (verified via day-of-year offsets from the
+// contract's own L4 anchor, 2026-01-01 = Thursday), not derived with `Date`
+// in this test.
+
+describe('longDateLabel — worked examples (CONTRACT-U.2.md §5 L1-L5, assert exactly)', () => {
+  const cases = [
+    ['L1', '2026-09-14', 'Monday, 14 September'],
+    ['L2', '2024-02-29', 'Thursday, 29 February'],
+    ['L3', '2025-12-31', 'Wednesday, 31 December'],
+    ['L4', '2026-01-01', 'Thursday, 1 January'],
+    ['L5', '2026-03-08', 'Sunday, 8 March'],
+  ];
+
+  for (const [label, input, expected] of cases) {
+    it(`${label}: longDateLabel(${JSON.stringify(input)}) === ${JSON.stringify(expected)}`, () => {
+      assert.equal(longDateLabel(input), expected);
+    });
+  }
+});
+
+describe('longDateLabel — L6: invalid inputs -> "" and never throw (CONTRACT-U.2.md §5)', () => {
+  const invalid = ['', '2026-13-01', 'nope', null, undefined, 42, '2026-09-14T00:00'];
+
+  for (const input of invalid) {
+    it(`longDateLabel(${JSON.stringify(input)}) === ''`, () => {
+      let result;
+      assert.doesNotThrow(() => {
+        result = longDateLabel(input);
+      });
+      assert.equal(result, '');
+    });
+  }
 });
 
 // ===========================================================================

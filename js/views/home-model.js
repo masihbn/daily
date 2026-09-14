@@ -1,14 +1,15 @@
 // Pure view-model helpers for the Home screen (Step 2.1). PURE MODULE: no
 // DOM, no fetch, no localStorage. May import only from ../aggregate.js and
-// ../dates.js (only ../aggregate.js is actually needed here). Every
-// function is total for the inputs it documents (never throws) except
-// where a throw is explicitly specified — see nextValueFor().
+// ../dates.js. Every function is total for the inputs it documents (never
+// throws) except where a throw is explicitly specified — see
+// nextValueFor().
 //
 // This module owns NO re-log semantics of its own: nextValueFor() is a
 // thin wrapper over aggregate.js's applyRelog(), which is the single
 // implementation of "what does re-logging today do."
 
 import { applyRelog } from '../aggregate.js';
+import { parseLocal } from '../dates.js';
 
 function isFiniteNumber(v) {
   return typeof v === 'number' && Number.isFinite(v);
@@ -238,6 +239,52 @@ export function nextValueFor(trackable, entry, input) {
   }
 
   return applyRelog(existing, input, trackable);
+}
+
+// --- U.2 longDateLabel ------------------------------------------------
+//
+// The Home title bar's date subtitle (CONTRACT-U.2.md §2). Local-calendar
+// math only — routes through parseLocal() from ../dates.js, never
+// `new Date('YYYY-MM-DD')`, which parses as UTC midnight and reads as the
+// wrong day for part of every day in a non-UTC zone (see dates.js's "THE
+// DATE TRAP" header comment). Any input that is not a valid 'YYYY-MM-DD'
+// string returns '' and this never throws.
+
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+export function longDateLabel(dateStr) {
+  let date;
+  try {
+    date = parseLocal(dateStr);
+  } catch {
+    return '';
+  }
+  const weekday = WEEKDAY_NAMES[date.getDay()];
+  const month = MONTH_NAMES[date.getMonth()];
+  return `${weekday}, ${date.getDate()} ${month}`;
 }
 
 // --- 2.6 rowModel ------------------------------------------------------

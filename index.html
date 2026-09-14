@@ -34,6 +34,10 @@
   <div class="title-bar__row">
     <a id="title-back" class="title-bar__back btn btn--icon btn--ghost" href="#/" hidden aria-label="Back"></a>
     <h1 id="title" class="title-bar__title">Daily</h1>
+    <!-- Step U.2 (CONTRACT-U.2 §2): date subtitle under the Home large title.
+         Empty/hidden by default; js/main.js's setTitle() fills it in only
+         when a route passes a `sub` string (Home only, as of U.2). -->
+    <p id="title-sub" class="title-bar__sub" hidden></p>
   </div>
   <!-- Step D.6: global unsent-writes indicator. Lives in the shell, not in a
        view, because the whole point is that it is visible from every route —
