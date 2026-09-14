@@ -5333,8 +5333,10 @@ value logged and sent after reconnecting. "It all works."
 
 ## Step 5.2 — Face ID local app-lock (WebAuthn)
 
-**Status:** DONE (2026-09-14) — suite-verified, **awaiting device
-check** (Face ID itself cannot run anywhere but the phone). Fresh
+**Status:** DONE (2026-09-14) — suite-verified and **device-verified
+2026-09-14**: Face ID prompts on launch by itself; the one remaining tap
+is Apple's own "Use passkey" consent sheet, which no web app can skip.
+Fresh
 Implementer and Test Author from `CONTRACT-5.2.md`; suite green on the
 first run. `sw.js` `CACHE` → `daily-v41`. Note for the reader: this step's own notes
 ("anyone with the anon key can still read/write until Step 5.3") predate
