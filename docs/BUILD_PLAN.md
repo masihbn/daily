@@ -4845,9 +4845,9 @@ kg ticks crowd the chart.
 
 ## Step 3.5 — Normalized multi-series comparison chart
 
-**Status:** DONE (2026-09-13) — suite-verified, **awaiting device
-check** (the Phase 3 gate follows immediately, so the device check IS
-the gate). Executed under the ORCHESTRATION.md loop with a fresh
+**Status:** DONE (2026-09-13) — suite-verified and **device-verified
+2026-09-13** ("works, you have the thumbs up"), after one device-feedback
+fix (axis headroom). Executed under the ORCHESTRATION.md loop with a fresh
 Implementer and Test Author from `CONTRACT-3.5.md`; two contract
 amendments and one test fix, all caught inside the loop. `sw.js`
 `CACHE` → `daily-v33`.
@@ -4965,6 +4965,13 @@ exact tick values.
 ---
 
 ## ⛔ PHASE 3 GATE — hard stop
+
+**Status:** PASSED — 2026-09-13. All four chart types were seen on the
+phone across the day's device checks: calendar + weekly trend (Step
+D.0), two-bars Range chart with overlay bars and a line overlay (3.4b,
+3.4c), and the compare screen (3.5, after the headroom fix). User: "It's
+cool" / "works, you have the thumbs up to move forward with the next
+steps." `PROJECT_NOTES.md` Test log, Attempt 15.
 
 All four chart types on a real phone screen. Charts are the payoff of
 the whole reframing, so this gate is about *legibility*, not

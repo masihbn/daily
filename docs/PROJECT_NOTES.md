@@ -312,6 +312,31 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 15 — 2026-09-13, Steps 3.4c + 3.5 and the Phase 3 gate
+
+**3.4c** (`daily-v32`): Weight as a dashed line on the Calories Range
+chart's right axis, framed by its own min/max plus padding — "That
+works. Move forward."
+
+**3.5** (`daily-v33` → `v34`): the Compare screen with Calories, Workout
+and Weight each scaled to its own range. First verdict: "It's cool, but
+… add some padding to the top and the bottom" — points at 0%/100% sat on
+the chart edge. Fixed the same evening (y scale −5..105, ticks pinned to
+0/25/50/75/100).
+
+**The update-lag gotcha, now understood.** After the fix deployed the
+user reported "Nothing's changed" — and the site WAS serving the new
+file. GitHub Pages sends `Cache-Control: max-age=600`, and `sw.js`'s
+network-first `fetch(event.request)` honours the browser HTTP cache, so
+for up to ten minutes after a deploy the phone keeps getting the
+previous file even after two relaunches. Ten minutes later: "works".
+Carried to Step 5.1 as a concrete fix (`cache: 'no-cache'` on
+same-origin asset fetches). **Until 5.1 lands: after any deploy, wait
+ten minutes before asking the user to check.**
+
+**Phase 3 gate: PASSED.** All four chart types confirmed legible on the
+phone. Phase 4 next.
+
 ### Attempt 14 — 2026-09-13, Step 3.4 → 3.4b: the overlay, twice, on the phone
 
 **Context**: the user ended the park the moment the Phase D gate
