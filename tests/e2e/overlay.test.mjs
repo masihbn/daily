@@ -1,15 +1,21 @@
-// E2E tests for the overlay chart REWRITTEN for CONTRACT-3.4b.md (delta over
-// CONTRACT-3.4.md after the device check): the overlay is no longer fixed-row
-// markers but the overlay trackable's OWN trend series, drawn as bars on a
-// visible right-hand axis ('yOverlay'), coloured per bucket by verdict
-// against its own target, with a dashed target line annotation. Only ONE
-// overlay at a time (tapping another chip SWAPS the selection; there is no
-// cap-disable state any more). Written strictly against CONTRACT-3.4b.md §1
-// (module contract), §2 (renderBounds's `model.overlays` behaviour) and §3
-// (detail.js wiring) — cases O1 through O12 from §6. The implementation
-// (js/charts/overlay.js, js/charts/bounds.js, js/views/detail.js) is being
-// written in parallel by another agent from the same contract and has NOT
-// been read while writing this file.
+// E2E tests for the overlay chart, updated through CONTRACT-3.4c.md (delta
+// over CONTRACT-3.4b.md, itself a delta over CONTRACT-3.4.md after the
+// device check): the overlay is the overlay trackable's OWN trend series,
+// drawn on a visible right-hand axis ('yOverlay'). Two overlay KINDS as of
+// 3.4c: 'bar' (count/sum aggregations — bars from zero, verdict against
+// targetFor, target line) and 'line' (average/last aggregations, e.g.
+// Weight — a dashed line judged by its OWN band via boundsFor, axis frames
+// the data, never forced to zero). 3.4c also widened candidacy: every
+// non-archived boolean OR numeric trackable is now offered, not just
+// count/sum numerics. Only ONE overlay at a time (tapping another chip
+// SWAPS the selection; there is no cap-disable state). Written strictly
+// against CONTRACT-3.4c.md's §1 (module contract), §2 (renderBounds's
+// `model.overlays` behaviour) and §3 (detail.js wiring) — cases O1 through
+// O15 from §6 (O1-O12 carried over from 3.4b with O1/O6 updated for the
+// widened candidacy; O13-O15 new for line-kind overlays). The
+// implementation (js/charts/overlay.js, js/charts/bounds.js,
+// js/views/detail.js) is being written in parallel by another agent from
+// the same contract and has NOT been read while writing this file.
 //
 // Do NOT start a server here and do NOT hardcode the base URL or viewport;
 // both are supplied by playwright.config.mjs (baseURL 127.0.0.1:8123, 390x844
@@ -20,10 +26,11 @@
 // after it, service workers blocked, seedSession() in beforeEach, and
 // expect(unexpected).toEqual([]) in every test.
 //
-// GUARDRAIL (CONTRACT-3.4.md / CONTRACT-3.4b.md / docs/ORCHESTRATION.md):
-// nothing in this file may create, modify, or delete a real Supabase row.
-// Every PostgREST call the app makes is intercepted with page.route() and
-// fully fulfilled/aborted from fixtures — ZERO real network calls.
+// GUARDRAIL (CONTRACT-3.4.md / CONTRACT-3.4b.md / CONTRACT-3.4c.md /
+// docs/ORCHESTRATION.md): nothing in this file may create, modify, or
+// delete a real Supabase row. Every PostgREST call the app makes is
+// intercepted with page.route() and fully fulfilled/aborted from fixtures —
+// ZERO real network calls.
 //
 // visibleSlots() (js/views/detail.js, unchanged by this contract) only shows
 // the 'overlay' slot when 'bounds' is also shown (bounds_enabled === true AND
@@ -33,7 +40,7 @@
 
 import { test, expect } from '@playwright/test';
 import { seedSession, installAuthGuard } from '../helpers/e2e-session.mjs';
-import { addDays, isoWeekKey, startOfIsoWeek } from '../../js/dates.js';
+import { addDays, isoWeekKey, startOfIsoWeek, isoWeeksInRange } from '../../js/dates.js';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -114,8 +121,10 @@ const T_WORKOUT = {
   archived: false,
 };
 
-// A numeric 'average' trackable — NOT a candidate (continuous readings are
-// Step 3.5's territory).
+// CONTRACT-3.4c: every non-archived trackable is now a candidate, including
+// this one — 'average' aggregation makes it a LINE-kind overlay when
+// selected (Step 3.4c's whole point: a continuous reading like Calories or
+// Weight, judged by its own band rather than a target).
 const T_CALORIES = {
   id: 602,
   name: 'Calories',
@@ -152,6 +161,29 @@ const T_READING = {
   target_value: null,
   color: '#34c759',
   sort_order: 3,
+  archived: false,
+};
+
+// CONTRACT-3.4c.md §6's required fixture: a continuous (LINE-kind, aggregation
+// 'last') candidate with its own manual band, so it is judged by zone
+// (in/below/above its band) rather than a target. bounds_enabled is toggled
+// off by O14's variant via spread, not a second literal object.
+const T_WEIGHT_OVL = {
+  id: 606,
+  name: 'Weight',
+  value_shape: 'numeric',
+  relog_semantic: 'state',
+  aggregation: 'last',
+  direction: 'break',
+  unit: 'kg',
+  bounds_enabled: true,
+  bounds_mode: 'manual',
+  bound_lower: 78,
+  bound_upper: 85,
+  target_type: 'none',
+  target_value: null,
+  color: '#0a84ff',
+  sort_order: 4,
   archived: false,
 };
 
@@ -201,6 +233,28 @@ function weeklyCounts(dates) {
 const WORKOUT_WEEK_COUNTS = weeklyCounts(WORKOUT_DATES);
 
 const METRIC_ENTRIES = [{ id: 1, trackable_id: 501, entry_date: PAST_DATE, value: 80, note: null }];
+
+// Weight's readings: three IN the 78-85 band, one below, one above — all
+// well inside the default 3M range, spread across distinct weeks (offsets
+// 5/12/20/30/40 days back) so O15's Weekly case has both populated and
+// empty week buckets to check.
+const WEIGHT_OVL_READINGS = [
+  { offset: 5, value: 80 }, // in
+  { offset: 12, value: 75 }, // below
+  { offset: 20, value: 90 }, // above
+  { offset: 30, value: 82 }, // in
+  { offset: 40, value: 79 }, // in
+];
+const WEIGHT_OVL_ENTRIES = WEIGHT_OVL_READINGS.map(({ offset, value }, i) => ({
+  id: 9000 + i,
+  trackable_id: 606,
+  entry_date: addDays(TODAY, -offset),
+  value,
+  note: null,
+}));
+const WEIGHT_IN_BAND_COUNT = WEIGHT_OVL_READINGS.filter((r) => r.value >= 78 && r.value <= 85).length;
+const WEIGHT_OUT_BAND_COUNT = WEIGHT_OVL_READINGS.length - WEIGHT_IN_BAND_COUNT;
+const WEIGHT_WEEK_KEYS = new Set(WEIGHT_OVL_ENTRIES.map((e) => isoWeekKey(e.entry_date)));
 
 const AUTO_FEW_ENTRIES = [1, 3, 5, 7, 9].map((offset, i) => ({
   id: 900 + i,
@@ -337,10 +391,17 @@ function readChartInfo(page) {
         yAxisID: ds.yAxisID,
         data: ds.data,
         backgroundColor: ds.backgroundColor,
+        borderDash: ds.borderDash,
+        pointBackgroundColor: ds.pointBackgroundColor,
       })),
       labels: chart.data.labels,
       yOverlay: scales.yOverlay
-        ? { position: scales.yOverlay.position, min: scales.yOverlay.min, suggestedMax: scales.yOverlay.suggestedMax }
+        ? {
+            position: scales.yOverlay.position,
+            min: scales.yOverlay.min,
+            suggestedMin: scales.yOverlay.suggestedMin,
+            suggestedMax: scales.yOverlay.suggestedMax,
+          }
         : null,
       yTitle: scales.y && scales.y.title ? scales.y.title.text : null,
       legendDisplay:
@@ -394,14 +455,20 @@ function pageErrorCollector(page) {
 // O1 — nothing selected
 // ===========================================================================
 
-test('O1 — nothing selected: picker with the "Pick one…" hint, chips for both boolean candidates only, no overlay dataset, one entries GET', async ({
+test('O1 — nothing selected: picker with the "Pick one…" hint, chips for ALL FOUR candidates (601, 602, 603, 606 — CONTRACT-3.4c widened candidacy), no overlay dataset, one entries GET', async ({
   page,
 }) => {
   const pageErrors = pageErrorCollector(page);
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
-  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING]);
-  const getRequests = await routeEntries(page, { 501: METRIC_ENTRIES, 601: WORKOUT_ENTRIES, 602: [], 603: [] });
+  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING, T_WEIGHT_OVL]);
+  const getRequests = await routeEntries(page, {
+    501: METRIC_ENTRIES,
+    601: WORKOUT_ENTRIES,
+    602: [],
+    603: [],
+    606: WEIGHT_OVL_ENTRIES,
+  });
 
   await page.goto('/index.html#/t/501');
   await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
@@ -412,11 +479,14 @@ test('O1 — nothing selected: picker with the "Pick one…" hint, chips for bot
     'Pick one to draw it on the Range chart above, on its own axis.'
   );
 
-  await expect(picker.locator('.overlay-chip')).toHaveCount(2);
+  // CONTRACT-3.4c widened candidacy: 602 (numeric average) and 606 (numeric
+  // last) are now candidates too — 4 chips total, none for the metric.
+  await expect(picker.locator('.overlay-chip')).toHaveCount(4);
   await expect(chip(page, 601)).toHaveAttribute('aria-pressed', 'false');
+  await expect(chip(page, 602)).toHaveAttribute('aria-pressed', 'false');
   await expect(chip(page, 603)).toHaveAttribute('aria-pressed', 'false');
-  await expect(chip(page, 602)).toHaveCount(0); // non-candidate
-  await expect(chip(page, 501)).toHaveCount(0); // the metric itself
+  await expect(chip(page, 606)).toHaveAttribute('aria-pressed', 'false');
+  await expect(chip(page, 501)).toHaveCount(0); // the metric itself, never offered
 
   await expect(page.locator('.bounds')).toHaveAttribute('data-overlays', '0');
 
@@ -662,8 +732,14 @@ test('O6 — selecting a second candidate while one is already selected SWAPS it
   const pageErrors = pageErrorCollector(page);
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
-  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING]);
-  const getRequests = await routeEntries(page, { 501: METRIC_ENTRIES, 601: WORKOUT_ENTRIES, 602: [], 603: [] });
+  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING, T_WEIGHT_OVL]);
+  const getRequests = await routeEntries(page, {
+    501: METRIC_ENTRIES,
+    601: WORKOUT_ENTRIES,
+    602: [],
+    603: [],
+    606: WEIGHT_OVL_ENTRIES,
+  });
   await seedOverlaySelection(page, { 501: ['601'] });
 
   await page.goto('/index.html#/t/501');
@@ -671,6 +747,13 @@ test('O6 — selecting a second candidate while one is already selected SWAPS it
   await expect(chip(page, 601)).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => getRequests.length).toBe(2);
   const countBefore = getRequests.length;
+
+  // CONTRACT-3.4c widened candidacy: the full chip roster (all four
+  // candidates) is present alongside the already-selected 601, and 602/606
+  // (the newly-added candidates) are unpressed.
+  await expect(page.locator('.chart-slot[data-slot="overlay"] .overlay-chip')).toHaveCount(4);
+  await expect(chip(page, 602)).toHaveAttribute('aria-pressed', 'false');
+  await expect(chip(page, 606)).toHaveAttribute('aria-pressed', 'false');
 
   await selectOverlay(page, 603);
 
@@ -932,6 +1015,236 @@ test('O12 — the tooltip label callback reports "Workout · N of 3" for the ove
     { idx: knownIdx }
   );
   expect(metricTooltip).toContain('kg');
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// O13 — CONTRACT-3.4c: a continuous (line-kind) overlay at Daily, judged by
+// its own band
+// ===========================================================================
+
+test('O13 — selecting Weight (line kind) at Daily draws a dashed line on a data-framed right axis, coloured by its own band, not a target', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING, T_WEIGHT_OVL]);
+  const getRequests = await routeEntries(page, {
+    501: METRIC_ENTRIES,
+    601: [],
+    602: [],
+    603: [],
+    606: WEIGHT_OVL_ENTRIES,
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect.poll(() => getRequests.length).toBe(1);
+  // Daily is the bounds chart's default period.
+  await expect(page.locator('.bounds-period[data-bounds-period="day"]')).toHaveAttribute('aria-pressed', 'true');
+
+  await selectOverlay(page, 606);
+
+  await expect.poll(() => getRequests.length).toBe(2);
+  const overlayReq = getRequests[getRequests.length - 1];
+  expect(overlayReq.ids).toContain('606');
+  expect(overlayReq.ids).not.toContain('501');
+
+  const info = await readChartInfo(page);
+  expect(info.datasetCount).toBe(2);
+  expect(info.datasets[1].type).toBe('line');
+  expect(info.datasets[1].yAxisID).toBe('yOverlay');
+  expect(info.datasets[1].borderDash).toEqual([4, 3]);
+
+  // No min:0 for a line-kind overlay — it frames the data instead — and the
+  // frame's suggestedMin sits below the lowest fixture reading (75).
+  expect(info.yOverlay).not.toBeNull();
+  expect(info.yOverlay.min).toBeUndefined();
+  expect(info.yOverlay.suggestedMin).toBeLessThan(75);
+
+  // The band lines (78/85) are drawn as annotations on the right axis.
+  const annotations = info.annotations ? Object.values(info.annotations) : [];
+  const overlayScaled = annotations.filter((a) => a && a.scaleID === 'yOverlay');
+  const values = overlayScaled.map((a) => a.value).sort((a, b) => a - b);
+  expect(values).toContain(78);
+  expect(values).toContain(85);
+
+  // Point colours partition into exactly one "in-band" colour and one
+  // "out-of-band" colour, matching the fixture's 3-in / 2-out split.
+  const rawKeys = await readRawBucketKeys(page); // 'day' period -> raw 'YYYY-MM-DD' keys
+  const ptColors = info.datasets[1].pointBackgroundColor;
+  const inBandColors = new Set();
+  const outBandColors = new Set();
+  let inBandIdx = -1;
+  for (const r of WEIGHT_OVL_READINGS) {
+    const dateStr = addDays(TODAY, -r.offset);
+    const idx = rawKeys.indexOf(dateStr);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const inBand = r.value >= 78 && r.value <= 85;
+    if (inBand) {
+      inBandColors.add(ptColors[idx]);
+      if (inBandIdx === -1) inBandIdx = idx;
+    } else {
+      outBandColors.add(ptColors[idx]);
+    }
+  }
+  expect(inBandColors.size).toBe(1);
+  expect(outBandColors.size).toBe(1);
+  for (const c of inBandColors) expect(outBandColors.has(c)).toBe(false);
+  expect(WEIGHT_IN_BAND_COUNT).toBeGreaterThan(0);
+  expect(WEIGHT_OUT_BAND_COUNT).toBeGreaterThan(0);
+
+  // Tooltip for an in-band index ends with '· in range' and includes 'kg'.
+  const tooltip = await page.evaluate(
+    ({ idx }) => {
+      const canvas = document.querySelector('.bounds-canvas');
+      const chart = window.Chart.getChart(canvas);
+      return chart.options.plugins.tooltip.callbacks.label({ datasetIndex: 1, dataIndex: idx });
+    },
+    { idx: inBandIdx }
+  );
+  expect(tooltip).toContain('kg');
+  expect(tooltip.endsWith('in range')).toBe(true);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// O14 — same overlay with bounds disabled: no band, uniform colour, axis
+// still frames the data (never forced to zero)
+// ===========================================================================
+
+test('O14 — with bounds_enabled false, the line overlay has no band annotations, every point is the same (trackable) colour, and the axis still frames the data above zero', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  const weightNoBounds = { ...T_WEIGHT_OVL, bounds_enabled: false };
+  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING, weightNoBounds]);
+  const getRequests = await routeEntries(page, {
+    501: METRIC_ENTRIES,
+    601: [],
+    602: [],
+    603: [],
+    606: WEIGHT_OVL_ENTRIES,
+  });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect.poll(() => getRequests.length).toBe(1);
+
+  await selectOverlay(page, 606);
+  await expect.poll(() => getRequests.length).toBe(2);
+
+  const info = await readChartInfo(page);
+  expect(info.datasetCount).toBe(2);
+
+  // No band annotations at all (no overlayLower/overlayUpper, no
+  // overlayTarget — Weight has no target either).
+  const annotations = info.annotations ? Object.values(info.annotations) : [];
+  const overlayScaled = annotations.filter((a) => a && a.scaleID === 'yOverlay');
+  expect(overlayScaled.length).toBe(0);
+
+  // Every point (including the ones with real readings) is the trackable's
+  // own colour — status isn't 'ok', so every verdict is 'none'.
+  const ptColors = info.datasets[1].pointBackgroundColor.filter((c) => c !== undefined && c !== null);
+  const distinctColors = new Set(ptColors);
+  expect(distinctColors.size).toBe(1);
+  expect(distinctColors.has('#0a84ff')).toBe(true);
+
+  // The axis still frames the data (never forced to zero): suggestedMin is
+  // below the lowest fixture reading (75) yet still positive.
+  expect(info.yOverlay.suggestedMin).toBeLessThan(75);
+  expect(info.yOverlay.suggestedMin).toBeGreaterThan(0);
+
+  expect(pageErrors).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// O15 — Weekly bucketing for a line-kind overlay: aligned bucket count, gaps
+// stay gaps, zero extra GETs
+// ===========================================================================
+
+test('O15 — Weekly for the line overlay has one value per ISO week in range, a week with no reading is null, and switching period issues zero GETs', async ({
+  page,
+}) => {
+  const pageErrors = pageErrorCollector(page);
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_MANUAL, T_WORKOUT, T_CALORIES, T_READING, T_WEIGHT_OVL]);
+  const getRequests = await routeEntries(page, {
+    501: METRIC_ENTRIES,
+    601: [],
+    602: [],
+    603: [],
+    606: WEIGHT_OVL_ENTRIES,
+  });
+  await seedOverlaySelection(page, { 501: ['606'] });
+
+  await page.goto('/index.html#/t/501');
+  await expect(page.locator('section.detail')).toHaveAttribute('data-detail-state', 'ready');
+  await expect
+    .poll(async () => {
+      const info = await readChartInfo(page);
+      return info ? info.datasetCount : null;
+    })
+    .toBe(2);
+  await expect.poll(() => getRequests.length).toBe(2);
+  const countBefore = getRequests.length;
+
+  const labelsAtDay = (await readChartInfo(page)).labels;
+  await page.locator('.bounds-period[data-bounds-period="week"]').click();
+  await expect(page.locator('.bounds-period[data-bounds-period="week"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect
+    .poll(async () => {
+      const info = await readChartInfo(page);
+      return JSON.stringify(info ? info.labels : null) !== JSON.stringify(labelsAtDay);
+    })
+    .toBe(true);
+
+  const infoAtWeek = await readChartInfo(page);
+  const weekRawKeys = await readRawBucketKeys(page);
+
+  // The default 3M range's own ISO-week bucket count — the same "resolveRange
+  // + isoWeeksInRange" arithmetic detail.js/boundsModel() use — not a
+  // hardcoded number.
+  const rangeFrom = addDays(TODAY, -89); // resolveRange('3m', TODAY).from
+  const expectedWeekCount = isoWeeksInRange(rangeFrom, TODAY).length;
+  expect(infoAtWeek.datasets[1].data.length).toBe(expectedWeekCount);
+  expect(weekRawKeys.length).toBe(expectedWeekCount);
+
+  // A week with none of Weight's logged days is null (a real gap, not 0).
+  let emptyWeekIdx = -1;
+  for (let i = 0; i < weekRawKeys.length; i++) {
+    if (!WEIGHT_WEEK_KEYS.has(weekRawKeys[i])) {
+      emptyWeekIdx = i;
+      break;
+    }
+  }
+  expect(emptyWeekIdx).toBeGreaterThanOrEqual(0);
+  expect(infoAtWeek.datasets[1].data[emptyWeekIdx]).toBeNull();
+
+  // A week that DOES contain one of Weight's logged days has a real value.
+  let populatedWeekIdx = -1;
+  for (let i = 0; i < weekRawKeys.length; i++) {
+    if (WEIGHT_WEEK_KEYS.has(weekRawKeys[i])) {
+      populatedWeekIdx = i;
+      break;
+    }
+  }
+  expect(populatedWeekIdx).toBeGreaterThanOrEqual(0);
+  expect(infoAtWeek.datasets[1].data[populatedWeekIdx]).not.toBeNull();
+
+  expect(getRequests.length).toBe(countBefore);
 
   expect(pageErrors).toEqual([]);
   expect(unexpected).toEqual([]);

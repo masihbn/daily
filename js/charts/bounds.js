@@ -29,16 +29,17 @@ import { rangeDays, addDays, isoWeeksInRange, monthsInRange, isoWeekKey } from '
 // implementation per concept is this codebase's governing discipline.
 // weekly.js does not import this module, so there is no cycle.
 import { PERIODS } from './weekly.js';
-// Step 3.4b (CONTRACT-3.4b.md §2): the overlay's own trend-series shape,
-// axis window/title, tooltip text and target line are all owned by
-// overlay.js — this module just wires them onto the Range chart's own
-// scales/legend/tooltip.
+// Step 3.4b/3.4c (CONTRACT-3.4b.md §2, CONTRACT-3.4c.md §2): the overlay's
+// own trend-series shape, axis window/title, tooltip text, target line
+// (bar kind) and band lines (line kind) are all owned by overlay.js — this
+// module just wires them onto the Range chart's own scales/legend/tooltip.
 import {
   overlayDatasets,
   overlayTooltipLabel,
   overlayAxisFor,
   overlayAxisTitle,
   overlayTargetAnnotation,
+  overlayBoundAnnotations,
 } from './overlay.js';
 
 // --- §2.1 constants ------------------------------------------------------
@@ -918,14 +919,22 @@ export function renderBounds(model) {
 
     // Step 3.4b (CONTRACT-3.4b.md §2): the overlay's own target, drawn on
     // the RIGHT axis (overlayTargetAnnotation() sets scaleID: 'yOverlay') —
-    // null when there is no overlay, or the overlay trackable has no
-    // target, or the target doesn't apply at this period (targetFor()
-    // returns null for weekly_count at 'day' — see weekly.js).
+    // null for a 'line'-kind overlay (Step 3.4c: a continuous reading has
+    // no target, see overlayBoundAnnotations() below instead), or when
+    // there is no overlay, or the overlay trackable has no target, or the
+    // target doesn't apply at this period (targetFor() returns null for
+    // weekly_count at 'day' — see weekly.js).
     if (overlay !== null) {
       const overlayTarget = overlayTargetAnnotation(overlay, lineColor);
       if (overlayTarget !== null) {
         plugins.annotation.annotations.overlayTarget = overlayTarget;
       }
+      // Step 3.4c (CONTRACT-3.4c.md §2): a 'line'-kind overlay's own band
+      // (bounds.status === 'ok'), also on the right axis — {} for a 'bar'
+      // kind or a not-'ok'/missing bounds object, so this spread is always
+      // safe (adds nothing in every case that isn't "line overlay with a
+      // real band").
+      Object.assign(plugins.annotation.annotations, overlayBoundAnnotations(overlay, lineColor));
     }
   }
 
@@ -952,15 +961,32 @@ export function renderBounds(model) {
   if (overlay !== null) {
     scales.y.title = { display: true, text: model.unit || '' };
     const overlayAxis = overlayAxisFor(overlay);
-    scales.yOverlay = {
-      type: 'linear',
-      position: 'right',
-      min: 0,
-      suggestedMax: overlayAxis.suggestedMax,
-      grid: { drawOnChartArea: false },
-      ticks: { precision: 0 },
-      title: { display: true, text: overlayAxisTitle(overlay, model.period) },
-    };
+    // Step 3.4c (CONTRACT-3.4c.md §2): a 'bar' overlay is a count/amount —
+    // `min: 0` and integer ticks still apply (3.4b, unchanged). A 'line'
+    // overlay is a continuous reading (e.g. Weight in kg) — forcing it to
+    // start at 0 would flatten every real change to a sliver near the top
+    // (the same weekly.js#axisBoundsFor reasoning cited in
+    // overlay.js#overlayAxisFor), and fractional ticks are legitimate
+    // (kg), so neither `min` nor `ticks.precision` is set for this kind.
+    scales.yOverlay =
+      overlay.kind === 'line'
+        ? {
+            type: 'linear',
+            position: 'right',
+            suggestedMin: overlayAxis.suggestedMin,
+            suggestedMax: overlayAxis.suggestedMax,
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: overlayAxisTitle(overlay, model.period) },
+          }
+        : {
+            type: 'linear',
+            position: 'right',
+            min: 0,
+            suggestedMax: overlayAxis.suggestedMax,
+            grid: { drawOnChartArea: false },
+            ticks: { precision: 0 },
+            title: { display: true, text: overlayAxisTitle(overlay, model.period) },
+          };
   }
 
   const datasets =

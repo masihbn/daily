@@ -25,7 +25,10 @@ import { directionLabel, visibleTrackables, parseNumericInput, hasEntryValue } f
 import { iconSvg, hasIcon } from '../icons.js';
 import { renderHeatmap, heatmapModel, monthBoundsFor, monthOf, shiftMonth, clampMonth, monthLabel } from '../charts/heatmap.js';
 import { renderWeekly, destroyWeekly, trendModel, PERIODS } from '../charts/weekly.js';
-import { renderBounds, destroyBounds, boundsModel } from '../charts/bounds.js';
+// Step 3.4c (CONTRACT-3.4c.md §3): boundsFor() is imported here too — a
+// 'line'-kind overlay (a continuous reading, e.g. Weight) needs its own
+// band, computed the SAME way the metric's own Range chart computes one.
+import { renderBounds, destroyBounds, boundsModel, boundsFor } from '../charts/bounds.js';
 // Step 3.4 (CONTRACT-3.4.md §3): the overlay picker and its pure selection/
 // bucketing helpers. This view owns the localStorage access (via the
 // injected-storage pattern below), the network load, and the render-time
@@ -707,7 +710,21 @@ export function createDetailView({ id, store, api, today } = {}) {
           .map((oid) => {
             const t = overlayCandidatesNow.find((c) => c && String(c.id) === oid);
             if (!t) return null;
-            return overlayModel({ trackable: t, entries: overlayEntriesFor(oid), keys: bm.dates, period: bm.period });
+            // Step 3.4c (CONTRACT-3.4c.md §3): the SAME call the overlay
+            // trackable's own Range chart would make over the same window
+            // (overlayEntriesFor(oid) is that window) — this is what a
+            // 'line'-kind overlay (a continuous reading, e.g. Weight) is
+            // judged against, since it has a band, not a target. Harmless
+            // to compute for a 'bar'-kind overlay too: overlayModel() only
+            // consults `bounds` for kind 'line'.
+            const overlayBounds = boundsFor(t, overlayEntriesFor(oid));
+            return overlayModel({
+              trackable: t,
+              entries: overlayEntriesFor(oid),
+              keys: bm.dates,
+              period: bm.period,
+              bounds: overlayBounds,
+            });
           })
           .filter(Boolean);
         // Step 3.4b (CONTRACT-3.4b.md §3): `name` is the METRIC trackable's

@@ -4621,7 +4621,9 @@ the build parked.**
 
 **Status:** DONE (2026-09-13), **redesigned the same day as 3.4b after
 the first device check; 3.4b device-verified 2026-09-13** ("Nice. I like
-that."). `PROJECT_NOTES.md` Test log, Attempt 14.
+that."). `PROJECT_NOTES.md` Test log, Attempt 14. **3.4c added the same
+evening** (continuous trackables as line overlays; `CACHE` →
+`daily-v32`), suite-verified, awaiting device check.
 Started the day the Phase D gate passed, because the user ended the
 park: "there's no reason for us to stop things". Executed under the
 ORCHESTRATION.md loop twice: 3.4 (`CONTRACT-3.4.md`, markers) then 3.4b
@@ -4793,6 +4795,50 @@ read as "the other thing" at a glance, whether green/red bars under a
 green/red-dotted line is too much colour, and whether the right-axis
 title fits at 390px. **Device verdict 2026-09-13: thumbs up — "Nice. I
 like that."** All three read fine.
+
+**Test Subjects, 3.4c (2026-09-13).** Suite **3905 green** — 3683 unit
+(+43), 54 integration, 168 e2e (+3). `CACHE` → `daily-v32`.
+
+*Why.* Right after the 3.4b thumbs-up: "that does not include the
+weight … how can we show that". Weight has no target, so 3.4b's
+met/missed rule excluded it. The user's rule for it: frame the axis by
+"the highest and lowest values within the start and the end of the
+period, with some extra padding" — and, when the trackable has bounds,
+those are its balance.
+
+*What changed.* Every non-archived trackable is now a candidate. Two
+overlay kinds, decided by the trackable's series aggregation: `bar`
+(count/sum — exactly 3.4b) and `line` (average/last — Weight). A line
+overlay is a dashed line on the right axis in the trackable's colour;
+weekly/monthly points are its own per-bucket average; empty buckets
+stay gaps. Its axis frames min/max ±10% of the span (flat: ±1), never
+forced to zero. detail.js computes the overlay's own `boundsFor()` on
+the same window its own Range chart would use and passes it in; with
+bounds `ok`, two dashed bound lines on the right axis and each point
+coloured in/out of band; otherwise no verdicts at all. Tooltip:
+`Weight · 80.4 kg · in range`. `overlay.js` mirrors `zoneFor` locally
+(six lines, commented) rather than importing `bounds.js`, which imports
+it — the graph stays acyclic; a unit test pins the mirror to the
+original across a table of cases.
+
+*Unit (+43):* candidacy widened; kind rule; the zone mirror vs
+`bounds.js#zoneFor`; line model values/zones/verdicts with ok vs
+insufficient bounds; line axis framing with and without bounds, flat
+series, all-null; axis title, tooltip zone words, null target for line
+kind, bound annotations shape, line dataset shape.
+
+*E2E (+3):* Weight fixture with manual 78–85 bounds → dashed line
+dataset, axis `suggestedMin` below the lowest reading and no `min: 0`,
+`overlayLower`/`overlayUpper` annotations at 78/85 on `yOverlay`, point
+colours partition in-band vs out, tooltip ends "· in range"; bounds off
+→ no band lines, uniform point colour, axis still frames above zero;
+Weekly → one bucket per ISO week with a genuinely null empty week and
+zero extra requests. Chip roster now includes the average/last
+trackables.
+
+*Not verifiable here:* whether a dashed weight line behind a solid
+calorie line reads as two things at 390px, and whether the right-axis
+kg ticks crowd the chart.
 
 ---
 
@@ -5232,3 +5278,8 @@ unwind than to ask about.
   overlay at a time. Both 3.4 test files rewritten (orchestrator
   decision — same step, changed behaviour). Suite 3859 green after one
   test-lookup fix. `CACHE` → `daily-v31`. Device check pending.
+- **2026-09-13** — **Step 3.4c: continuous trackables as overlays.**
+  User: "that does not include the weight". Line overlays (average/last)
+  on the right axis, judged by their own bounds when set, axis framed by
+  the period's min/max plus padding (the user's rule). Suite 3905 green
+  first run. `CACHE` → `daily-v32`. Device check pending.

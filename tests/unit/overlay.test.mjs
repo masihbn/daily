@@ -34,15 +34,22 @@ import {
   writeOverlaySelection,
   sanitizeSelection,
   overlayModel,
+  overlayKindFor,
+  zoneOf,
   withAlpha,
   overlayAxisFor,
   overlayAxisTitle,
   overlayTooltipLabel,
   overlayTargetAnnotation,
+  overlayBoundAnnotations,
   overlayDatasets,
 } from '../../js/charts/overlay.js';
 import { rangeDays, isoWeekKey, startOfIsoWeek, addDays } from '../../js/dates.js';
 import { targetFor, weekVerdict } from '../../js/charts/weekly.js';
+// CONTRACT-3.4c.md §6, U1c: zoneOf is a local mirror of bounds.js#zoneFor —
+// imported here (test file only, never from overlay.js) purely to assert
+// the two agree across a table of cases.
+import { zoneFor } from '../../js/charts/bounds.js';
 
 // --- fake storage helpers (unchanged from 3.4) ------------------------------
 
@@ -80,10 +87,13 @@ function throwingSetStorage() {
 }
 
 // ===========================================================================
-// U1 — isOverlayCandidate (unchanged by 3.4b)
+// U1 — isOverlayCandidate — CONTRACT-3.4c: every non-archived boolean OR
+// numeric trackable is now a candidate (average/last included — Weight is
+// the whole point of 3.4c). Aggregation no longer gates candidacy at all;
+// only value_shape and archived do.
 // ===========================================================================
 
-describe('U1 — isOverlayCandidate', () => {
+describe('U1 — isOverlayCandidate (3.4c: average/last numerics are now candidates)', () => {
   it('boolean -> true', () => {
     assert.equal(isOverlayCandidate({ value_shape: 'boolean', archived: false }), true);
   });
@@ -96,16 +106,20 @@ describe('U1 — isOverlayCandidate', () => {
     assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'sum', archived: false }), true);
   });
 
-  it('numeric + average -> false', () => {
-    assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'average', archived: false }), false);
+  it('numeric + average -> true (CHANGED in 3.4c: was false)', () => {
+    assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'average', archived: false }), true);
   });
 
-  it('numeric + last -> false', () => {
-    assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'last', archived: false }), false);
+  it('numeric + last -> true (CHANGED in 3.4c: was false)', () => {
+    assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'last', archived: false }), true);
   });
 
   it('archived boolean -> false', () => {
     assert.equal(isOverlayCandidate({ value_shape: 'boolean', archived: true }), false);
+  });
+
+  it('archived numeric (any aggregation) -> false', () => {
+    assert.equal(isOverlayCandidate({ value_shape: 'numeric', aggregation: 'average', archived: true }), false);
   });
 
   it('null / string / [] -> false, and never throws', () => {
@@ -118,14 +132,77 @@ describe('U1 — isOverlayCandidate', () => {
 });
 
 // ===========================================================================
-// U2 — overlayCandidates (unchanged by 3.4b)
+// U1b — overlayKindFor
+// ===========================================================================
+
+describe('U1b — overlayKindFor', () => {
+  it("'count' / 'sum' -> 'bar'", () => {
+    assert.equal(overlayKindFor('count'), 'bar');
+    assert.equal(overlayKindFor('sum'), 'bar');
+  });
+
+  it("'average' / 'last' -> 'line'", () => {
+    assert.equal(overlayKindFor('average'), 'line');
+    assert.equal(overlayKindFor('last'), 'line');
+  });
+
+  it('garbage -> "bar" (safe default), never throws', () => {
+    assert.equal(overlayKindFor(undefined), 'bar');
+    assert.equal(overlayKindFor(null), 'bar');
+    assert.equal(overlayKindFor('nonsense'), 'bar');
+    assert.equal(overlayKindFor(42), 'bar');
+    assert.equal(overlayKindFor([]), 'bar');
+  });
+});
+
+// ===========================================================================
+// U1c — zoneOf mirrors bounds.js#zoneFor
+// ===========================================================================
+
+describe('U1c — zoneOf mirrors bounds.js#zoneFor', () => {
+  const okBounds = { status: 'ok', lower: 78, upper: 85 };
+  const table = [
+    ['in-band value', 80, okBounds],
+    ['below-band value', 77, okBounds],
+    ['above-band value', 86, okBounds],
+    ['exactly at lower bound -> in', 78, okBounds],
+    ['exactly at upper bound -> in', 85, okBounds],
+    ['non-finite value (NaN)', NaN, okBounds],
+    ['non-finite value (null)', null, okBounds],
+    ['non-finite value (string)', '80', okBounds],
+    ['status not ok (insufficient)', 80, { status: 'insufficient', lower: null, upper: null }],
+    ['status not ok (invalid)', 80, { status: 'invalid', lower: null, upper: null }],
+    ['lower null', 80, { status: 'ok', lower: null, upper: 85 }],
+    ['upper null', 80, { status: 'ok', lower: 78, upper: null }],
+    ['bounds null', 80, null],
+    ['bounds undefined', 80, undefined],
+    ['bounds not an object', 80, 'nope'],
+  ];
+  for (const [label, value, bounds] of table) {
+    it(`${label}: zoneOf === zoneFor`, () => {
+      assert.equal(zoneOf(value, bounds), zoneFor(value, bounds));
+    });
+  }
+
+  it('the mirrored values are the real zone strings, not both-undefined vacuously', () => {
+    assert.equal(zoneOf(80, okBounds), 'in');
+    assert.equal(zoneOf(77, okBounds), 'below');
+    assert.equal(zoneOf(86, okBounds), 'above');
+    assert.equal(zoneOf(80, null), 'unknown');
+  });
+});
+
+// ===========================================================================
+// U2 — overlayCandidates (CONTRACT-3.4c: "non-candidate" fixtures updated —
+// aggregation 'last' is now itself a candidate, so a genuine non-candidate
+// needs a value_shape outside {'boolean','numeric'})
 // ===========================================================================
 
 describe('U2 — overlayCandidates', () => {
   it('preserves input order and drops non-candidates', () => {
     const trackables = [
       { id: '3', name: 'C', value_shape: 'boolean' },
-      { id: '1', name: 'A', value_shape: 'numeric', aggregation: 'last' }, // non-candidate
+      { id: '1', name: 'A', value_shape: 'text' }, // non-candidate: not boolean/numeric
       { id: '2', name: 'B', value_shape: 'numeric', aggregation: 'count' },
     ];
     const result = overlayCandidates(trackables, '999');
@@ -136,7 +213,7 @@ describe('U2 — overlayCandidates', () => {
     const trackables = [
       { id: 10, name: 'A', value_shape: 'boolean' },
       { id: '20', name: 'B', value_shape: 'boolean' },
-      { id: 30, name: 'C', value_shape: 'numeric', aggregation: 'last' },
+      { id: 30, name: 'C', value_shape: 'text' }, // non-candidate
     ];
     const result = overlayCandidates(trackables, '10');
     assert.deepEqual(result.map((t) => t.id), ['20']);
@@ -146,7 +223,7 @@ describe('U2 — overlayCandidates', () => {
     const trackables = [
       { id: 10, name: 'A', value_shape: 'boolean' },
       { id: '20', name: 'B', value_shape: 'boolean' },
-      { id: 30, name: 'C', value_shape: 'numeric', aggregation: 'last' },
+      { id: 30, name: 'C', value_shape: 'text' }, // non-candidate
     ];
     const result = overlayCandidates(trackables, 20);
     assert.deepEqual(result.map((t) => t.id), [10]);
@@ -312,6 +389,11 @@ describe('U7 — overlayModel alignment: boolean count trackable', () => {
     assert.equal(model.color, '#bf5af2');
     assert.equal(model.aggregation, 'count');
     assert.equal(model.direction, 'build');
+    // CONTRACT-3.4c: every bar-kind model carries kind:'bar', all-'unknown'
+    // zones, and bounds:null when no bounds were given.
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, model.values.map(() => 'unknown'));
+    assert.equal(model.bounds, null);
   });
 
   it('week granularity: three distinct logged days in one ISO week -> count 3 in that key, 0 in the other', () => {
@@ -328,6 +410,9 @@ describe('U7 — overlayModel alignment: boolean count trackable', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'week' });
     assert.deepEqual(model.values, [3, 0]);
     assert.equal(model.total, 3);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 });
 
@@ -348,6 +433,10 @@ describe('U8 — overlayModel aggregation', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'day' });
     assert.deepEqual(model.values, [2, 4, 0]);
     assert.equal(model.total, 6);
+    // 'sum' aggregation -> bar kind (CONTRACT-3.4c).
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 
   it("numeric 'average' trackable averages per bucket and fills null for an empty bucket", () => {
@@ -361,6 +450,9 @@ describe('U8 — overlayModel aggregation', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'day' });
     assert.deepEqual(model.values, [10, null]);
     assert.equal(model.total, 10);
+    // 'average' aggregation -> LINE kind under CONTRACT-3.4c (see U9c for
+    // the dedicated line-kind zone/verdict/target coverage).
+    assert.equal(model.kind, 'line');
   });
 
   it("target_type: 'weekly_average' forces 'average' aggregation regardless of trackable.aggregation", () => {
@@ -377,6 +469,9 @@ describe('U8 — overlayModel aggregation', () => {
     // Sum would be 30; average of the two logged days is 15 — proves the
     // override actually changed which aggregation ran, not just the label.
     assert.deepEqual(model.values, [15]);
+    // Forced to 'average' -> LINE kind under CONTRACT-3.4c, regardless of
+    // trackable.aggregation being 'sum'.
+    assert.equal(model.kind, 'line');
   });
 });
 
@@ -409,6 +504,9 @@ describe('U9 — overlayModel target + verdicts', () => {
     assert.deepEqual(model.target, targetFor(trackable, 'week'));
     assert.equal(model.target.value, 3);
     assert.deepEqual(model.verdicts, ['good', 'bad', 'good']);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 
   it("period 'month' scales a weekly_count target up (>3), and verdicts compare against the scaled value", () => {
@@ -428,6 +526,9 @@ describe('U9 — overlayModel target + verdicts', () => {
       weekVerdict(5, expectedTarget, 'build'),
     ]);
     assert.deepEqual(model.verdicts, ['good', 'bad']);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 
   it("period 'day' -> target null and every verdict 'none' for a weekly_count trackable", () => {
@@ -437,6 +538,9 @@ describe('U9 — overlayModel target + verdicts', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'day' });
     assert.equal(model.target, null);
     assert.deepEqual(model.verdicts, ['none', 'none']);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 
   it("direction 'break' with weekly_count 1, values [0,2] -> verdicts [good,bad] (under-target is good)", () => {
@@ -452,6 +556,9 @@ describe('U9 — overlayModel target + verdicts', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'week' });
     assert.deepEqual(model.values, [0, 2]);
     assert.deepEqual(model.verdicts, ['good', 'bad']);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 
   it('no target -> every verdict is none regardless of values', () => {
@@ -461,6 +568,9 @@ describe('U9 — overlayModel target + verdicts', () => {
     const model = overlayModel({ trackable, entries, keys, period: 'day' });
     assert.equal(model.target, null);
     assert.deepEqual(model.verdicts, ['none', 'none']);
+    assert.equal(model.kind, 'bar');
+    assert.deepEqual(model.zones, ['unknown', 'unknown']);
+    assert.equal(model.bounds, null);
   });
 });
 
@@ -526,6 +636,61 @@ describe('U9b — overlayModel degenerate inputs', () => {
 });
 
 // ===========================================================================
+// U9c — overlayModel LINE kind (CONTRACT-3.4c: aggregation 'last', a
+// continuous reading like Weight, judged by its own band rather than a
+// target)
+// ===========================================================================
+
+describe('U9c — overlayModel line kind: aggregation "last", bounds-driven zones/verdicts', () => {
+  const trackable = { id: 601, name: 'Weight', color: '#0a84ff', unit: 'kg', value_shape: 'numeric', aggregation: 'last', direction: 'break' };
+
+  // Four week buckets engineered to hit each zone once: week1 resolves via
+  // 'last' semantics (two entries, LATER date wins — 77, not an average of
+  // 100 and 77 — proving overlayModel really delegates to rollup('last')
+  // rather than reimplementing it); week2/3 are single-entry in/above;
+  // week4 has no entries at all -> fillValueFor('last') = null.
+  const monday = startOfIsoWeek('2026-07-06');
+  const week1 = isoWeekKey(monday);
+  const week2 = isoWeekKey(addDays(monday, 7));
+  const week3 = isoWeekKey(addDays(monday, 14));
+  const week4 = isoWeekKey(addDays(monday, 21));
+  const keys = [week1, week2, week3, week4];
+  const entries = [
+    { entry_date: monday, value: 100 }, // week1, earlier date
+    { entry_date: addDays(monday, 2), value: 77 }, // week1, LATER date -> 'last' picks this
+    { entry_date: addDays(monday, 7), value: 80 }, // week2
+    { entry_date: addDays(monday, 14), value: 86 }, // week3
+    // week4: no entries -> null
+  ];
+
+  it("aggregation 'last' resolves per bucket via rollup (later date wins, not an average); empty bucket -> null", () => {
+    const model = overlayModel({ trackable, entries, keys, period: 'week', bounds: null });
+    assert.deepEqual(model.values, [77, 80, 86, null]);
+    assert.equal(model.kind, 'line');
+  });
+
+  it("with bounds { status: 'ok', lower: 78, upper: 85 }: zones/verdicts per value (77 below/bad, 80 in/good, 86 above/bad, null unknown/none); target always null for line kind", () => {
+    const bounds = { status: 'ok', lower: 78, upper: 85 };
+    const model = overlayModel({ trackable, entries, keys, period: 'week', bounds });
+    assert.deepEqual(model.values, [77, 80, 86, null]);
+    assert.deepEqual(model.zones, ['below', 'in', 'above', 'unknown']);
+    assert.deepEqual(model.verdicts, ['bad', 'good', 'bad', 'none']);
+    assert.equal(model.target, null);
+    assert.deepEqual(model.bounds, bounds);
+  });
+
+  it("with bounds { status: 'insufficient' }: every zone/verdict is unknown/none regardless of value; target null", () => {
+    const bounds = { status: 'insufficient', lower: null, upper: null };
+    const model = overlayModel({ trackable, entries, keys, period: 'week', bounds });
+    assert.deepEqual(model.values, [77, 80, 86, null]);
+    assert.deepEqual(model.zones, ['unknown', 'unknown', 'unknown', 'unknown']);
+    assert.deepEqual(model.verdicts, ['none', 'none', 'none', 'none']);
+    assert.equal(model.target, null);
+    assert.deepEqual(model.bounds, bounds);
+  });
+});
+
+// ===========================================================================
 // U10 — withAlpha
 // ===========================================================================
 
@@ -557,22 +722,22 @@ describe('U10 — withAlpha', () => {
 // U11 — overlayAxisFor
 // ===========================================================================
 
-describe('U11 — overlayAxisFor', () => {
+describe('U11 — overlayAxisFor (kind: "bar", as 3.4b)', () => {
   it('values [3,2,4] target 3 -> suggestedMax ceil(4*1.15)=5 (integer rounding for count-like data)', () => {
-    const model = { values: [3, 2, 4], target: { value: 3 }, aggregation: 'count' };
+    const model = { kind: 'bar', values: [3, 2, 4], target: { value: 3 }, aggregation: 'count' };
     const axis = overlayAxisFor(model);
     assert.equal(axis.min, 0);
     assert.equal(axis.suggestedMax, 5);
   });
 
   it('values [1] target 12 -> suggestedMax ceil(12*1.15)=14', () => {
-    const model = { values: [1], target: { value: 12 }, aggregation: 'count' };
+    const model = { kind: 'bar', values: [1], target: { value: 12 }, aggregation: 'count' };
     const axis = overlayAxisFor(model);
     assert.equal(axis.suggestedMax, 14);
   });
 
   it('all null, no target -> min 0, suggestedMax ceil(1*1.15)=2', () => {
-    const model = { values: [null, null], target: null, aggregation: 'average' };
+    const model = { kind: 'bar', values: [null, null], target: null, aggregation: 'average' };
     const axis = overlayAxisFor(model);
     assert.equal(axis.min, 0);
     assert.equal(axis.suggestedMax, 2);
@@ -587,31 +752,88 @@ describe('U11 — overlayAxisFor', () => {
 });
 
 // ===========================================================================
+// U11b — overlayAxisFor (kind: "line", CONTRACT-3.4c: frames the data,
+// never forced to zero)
+// ===========================================================================
+
+describe('U11b — overlayAxisFor (kind: "line")', () => {
+  it('values [79,81,80], no bounds -> span 2, pad 10% (0.2) -> suggestedMin 78.8, suggestedMax 81.2', () => {
+    const model = { kind: 'line', values: [79, 81, 80], bounds: null };
+    const axis = overlayAxisFor(model);
+    assert.ok(Math.abs(axis.suggestedMin - 78.8) < 1e-9, `expected ~78.8, got ${axis.suggestedMin}`);
+    assert.ok(Math.abs(axis.suggestedMax - 81.2) < 1e-9, `expected ~81.2, got ${axis.suggestedMax}`);
+  });
+
+  it('with ok bounds 78/85 widening the candidate range -> suggestedMin 78 - 0.7, suggestedMax 85 + 0.7', () => {
+    // lo/hi become 78/85 (the bounds, since they're wider than the values);
+    // span 7, pad 10% = 0.7.
+    const model = { kind: 'line', values: [79, 81, 80], bounds: { status: 'ok', lower: 78, upper: 85 } };
+    const axis = overlayAxisFor(model);
+    assert.ok(Math.abs(axis.suggestedMin - (78 - 0.7)) < 1e-9, `expected ~77.3, got ${axis.suggestedMin}`);
+    assert.ok(Math.abs(axis.suggestedMax - (85 + 0.7)) < 1e-9, `expected ~85.7, got ${axis.suggestedMax}`);
+  });
+
+  it('a single value 80 (flat/degenerate span) -> padded +/-1: suggestedMin 79, suggestedMax 81', () => {
+    const model = { kind: 'line', values: [80], bounds: null };
+    const axis = overlayAxisFor(model);
+    assert.equal(axis.suggestedMin, 79);
+    assert.equal(axis.suggestedMax, 81);
+  });
+
+  it('all null, no bounds -> no candidates -> suggestedMin/suggestedMax both undefined', () => {
+    const model = { kind: 'line', values: [null, null], bounds: null };
+    const axis = overlayAxisFor(model);
+    assert.equal(axis.suggestedMin, undefined);
+    assert.equal(axis.suggestedMax, undefined);
+  });
+});
+
+// ===========================================================================
 // U12 — overlayAxisTitle
 // ===========================================================================
 
-describe('U12 — overlayAxisTitle', () => {
+describe('U12 — overlayAxisTitle (kind: "bar", as 3.4b)', () => {
   it("count aggregation, no unit -> 'days' / 'days / week' / 'days / month'", () => {
-    const model = { unit: null, aggregation: 'count' };
+    const model = { kind: 'bar', unit: null, aggregation: 'count' };
     assert.equal(overlayAxisTitle(model, 'day'), 'days');
     assert.equal(overlayAxisTitle(model, 'week'), 'days / week');
     assert.equal(overlayAxisTitle(model, 'month'), 'days / month');
   });
 
   it("unit 'cigarettes' -> 'cigarettes / week'", () => {
-    const model = { unit: 'cigarettes', aggregation: 'sum' };
+    const model = { kind: 'bar', unit: 'cigarettes', aggregation: 'sum' };
     assert.equal(overlayAxisTitle(model, 'week'), 'cigarettes / week');
   });
 
   it("no unit, sum aggregation, week/month -> 'per week' / 'per month'", () => {
-    const model = { unit: null, aggregation: 'sum' };
+    const model = { kind: 'bar', unit: null, aggregation: 'sum' };
     assert.equal(overlayAxisTitle(model, 'week'), 'per week');
     assert.equal(overlayAxisTitle(model, 'month'), 'per month');
   });
 
   it("no unit, sum aggregation, day -> '' (base, unmodified)", () => {
-    const model = { unit: null, aggregation: 'sum' };
+    const model = { kind: 'bar', unit: null, aggregation: 'sum' };
     assert.equal(overlayAxisTitle(model, 'day'), '');
+  });
+});
+
+// ===========================================================================
+// U12b — overlayAxisTitle (kind: "line")
+// ===========================================================================
+
+describe('U12b — overlayAxisTitle (kind: "line")', () => {
+  it("unit 'kg' -> 'kg' at every period (day/week/month) — a weekly AVERAGE of kg is still kg", () => {
+    const model = { kind: 'line', unit: 'kg' };
+    assert.equal(overlayAxisTitle(model, 'day'), 'kg');
+    assert.equal(overlayAxisTitle(model, 'week'), 'kg');
+    assert.equal(overlayAxisTitle(model, 'month'), 'kg');
+  });
+
+  it("no unit -> 'value' at every period", () => {
+    const model = { kind: 'line', unit: null };
+    assert.equal(overlayAxisTitle(model, 'day'), 'value');
+    assert.equal(overlayAxisTitle(model, 'week'), 'value');
+    assert.equal(overlayAxisTitle(model, 'month'), 'value');
   });
 });
 
@@ -619,31 +841,67 @@ describe('U12 — overlayAxisTitle', () => {
 // U13 — overlayTooltipLabel
 // ===========================================================================
 
-describe('U13 — overlayTooltipLabel', () => {
+describe('U13 — overlayTooltipLabel (kind: "bar", as 3.4b)', () => {
   it('value 4, target 3 -> "Workout · 4 of 3"', () => {
-    const model = { name: 'Workout', values: [4], target: { value: 3 } };
+    const model = { kind: 'bar', name: 'Workout', values: [4], target: { value: 3 } };
     assert.equal(overlayTooltipLabel(model, 0), 'Workout · 4 of 3');
   });
 
   it('value 12, target 13.035 -> "Workout · 12 of 13" (target rounds to one decimal / whole)', () => {
-    const model = { name: 'Workout', values: [12], target: { value: 13.035 } };
+    const model = { kind: 'bar', name: 'Workout', values: [12], target: { value: 13.035 } };
     assert.equal(overlayTooltipLabel(model, 0), 'Workout · 12 of 13');
   });
 
   it('no target -> "Workout · 4"', () => {
-    const model = { name: 'Workout', values: [4], target: null };
+    const model = { kind: 'bar', name: 'Workout', values: [4], target: null };
     assert.equal(overlayTooltipLabel(model, 0), 'Workout · 4');
   });
 
   it('null value -> "Workout · —"', () => {
-    const model = { name: 'Workout', values: [null], target: { value: 3 } };
+    const model = { kind: 'bar', name: 'Workout', values: [null], target: { value: 3 } };
     assert.equal(overlayTooltipLabel(model, 0), 'Workout · —');
   });
 
   it('out-of-range index -> "Workout · —"', () => {
-    const model = { name: 'Workout', values: [4], target: { value: 3 } };
+    const model = { kind: 'bar', name: 'Workout', values: [4], target: { value: 3 } };
     assert.equal(overlayTooltipLabel(model, 99), 'Workout · —');
     assert.equal(overlayTooltipLabel(model, -1), 'Workout · —');
+  });
+});
+
+// ===========================================================================
+// U13b — overlayTooltipLabel (kind: "line")
+// ===========================================================================
+
+describe('U13b — overlayTooltipLabel (kind: "line")', () => {
+  it('80.44 kg, zone "in" -> "Weight · 80.4 kg · in range" (value rounds to one decimal)', () => {
+    const model = { kind: 'line', name: 'Weight', unit: 'kg', values: [80.44], zones: ['in'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · 80.4 kg · in range');
+  });
+
+  it('86, zone "above" -> "Weight · 86 kg · above"', () => {
+    const model = { kind: 'line', name: 'Weight', unit: 'kg', values: [86], zones: ['above'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · 86 kg · above');
+  });
+
+  it('77, zone "below" -> "Weight · 77 kg · below"', () => {
+    const model = { kind: 'line', name: 'Weight', unit: 'kg', values: [77], zones: ['below'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · 77 kg · below');
+  });
+
+  it('no bounds (zone "unknown") -> plain value, no zone suffix: "Weight · 80.4 kg"', () => {
+    const model = { kind: 'line', name: 'Weight', unit: 'kg', values: [80.44], zones: ['unknown'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · 80.4 kg');
+  });
+
+  it('null value -> "Weight · —"', () => {
+    const model = { kind: 'line', name: 'Weight', unit: 'kg', values: [null], zones: ['unknown'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · —');
+  });
+
+  it('no unit -> value only, no trailing unit', () => {
+    const model = { kind: 'line', name: 'Weight', unit: null, values: [80], zones: ['in'] };
+    assert.equal(overlayTooltipLabel(model, 0), 'Weight · 80 · in range');
   });
 });
 
@@ -651,9 +909,9 @@ describe('U13 — overlayTooltipLabel', () => {
 // U14 — overlayTargetAnnotation
 // ===========================================================================
 
-describe('U14 — overlayTargetAnnotation', () => {
+describe('U14 — overlayTargetAnnotation (kind: "bar", as 3.4b)', () => {
   it('exact shape, including scaleID "yOverlay" and the raw target value', () => {
-    const model = { name: 'Workout', color: '#bf5af2', target: { value: 3 } };
+    const model = { kind: 'bar', name: 'Workout', color: '#bf5af2', target: { value: 3 } };
     const ann = overlayTargetAnnotation(model, '#000000');
     assert.deepEqual(ann, {
       type: 'line',
@@ -672,18 +930,18 @@ describe('U14 — overlayTargetAnnotation', () => {
   });
 
   it('rounds the label content the same way overlayTooltipLabel does', () => {
-    const model = { name: 'Workout', color: '#bf5af2', target: { value: 13.035 } };
+    const model = { kind: 'bar', name: 'Workout', color: '#bf5af2', target: { value: 13.035 } };
     const ann = overlayTargetAnnotation(model, '#000000');
     assert.equal(ann.label.content, 'Workout 13');
   });
 
   it('null when target is null', () => {
-    const model = { name: 'Workout', color: '#bf5af2', target: null };
+    const model = { kind: 'bar', name: 'Workout', color: '#bf5af2', target: null };
     assert.equal(overlayTargetAnnotation(model, '#000000'), null);
   });
 
   it('falls back to the passed-in colour when model.color is missing', () => {
-    const model = { name: 'Workout', color: null, target: { value: 3 } };
+    const model = { kind: 'bar', name: 'Workout', color: null, target: { value: 3 } };
     const ann = overlayTargetAnnotation(model, '#123456');
     assert.equal(ann.borderColor, '#123456');
     assert.equal(ann.label.backgroundColor, '#123456');
@@ -691,13 +949,72 @@ describe('U14 — overlayTargetAnnotation', () => {
 });
 
 // ===========================================================================
+// U14b — overlayTargetAnnotation (kind: "line" -> always null) and
+// overlayBoundAnnotations (NEW in 3.4c)
+// ===========================================================================
+
+describe('U14b — overlayTargetAnnotation (line -> null) / overlayBoundAnnotations', () => {
+  it('overlayTargetAnnotation is null for kind "line", even with a (nonsensical) target present', () => {
+    const model = { kind: 'line', name: 'Weight', color: '#0a84ff', target: { value: 80 } };
+    assert.equal(overlayTargetAnnotation(model, '#000000'), null);
+  });
+
+  it('overlayBoundAnnotations: exact shape for kind "line" with ok bounds', () => {
+    const model = { kind: 'line', name: 'Weight', color: '#0a84ff', bounds: { status: 'ok', lower: 78, upper: 85 } };
+    const anns = overlayBoundAnnotations(model, '#000000');
+    assert.deepEqual(anns, {
+      overlayLower: {
+        type: 'line',
+        scaleID: 'yOverlay',
+        value: 78,
+        borderColor: '#0a84ff',
+        borderWidth: 1,
+        borderDash: [4, 4],
+        label: { display: true, content: '78', position: 'end', backgroundColor: '#0a84ff' },
+      },
+      overlayUpper: {
+        type: 'line',
+        scaleID: 'yOverlay',
+        value: 85,
+        borderColor: '#0a84ff',
+        borderWidth: 1,
+        borderDash: [4, 4],
+        label: { display: true, content: '85', position: 'end', backgroundColor: '#0a84ff' },
+      },
+    });
+  });
+
+  it('overlayBoundAnnotations falls back to the passed-in colour when model.color is missing', () => {
+    const model = { kind: 'line', name: 'Weight', color: null, bounds: { status: 'ok', lower: 78, upper: 85 } };
+    const anns = overlayBoundAnnotations(model, '#123456');
+    assert.equal(anns.overlayLower.borderColor, '#123456');
+    assert.equal(anns.overlayUpper.label.backgroundColor, '#123456');
+  });
+
+  it('overlayBoundAnnotations is {} for kind "bar" (even with bounds present)', () => {
+    const model = { kind: 'bar', name: 'Workout', color: '#bf5af2', bounds: { status: 'ok', lower: 1, upper: 3 } };
+    assert.deepEqual(overlayBoundAnnotations(model, '#000000'), {});
+  });
+
+  it('overlayBoundAnnotations is {} for kind "line" with no bounds', () => {
+    const model = { kind: 'line', name: 'Weight', color: '#0a84ff', bounds: null };
+    assert.deepEqual(overlayBoundAnnotations(model, '#000000'), {});
+  });
+
+  it('overlayBoundAnnotations is {} for kind "line" with a non-ok bounds status', () => {
+    const model = { kind: 'line', name: 'Weight', color: '#0a84ff', bounds: { status: 'insufficient', lower: null, upper: null } };
+    assert.deepEqual(overlayBoundAnnotations(model, '#000000'), {});
+  });
+});
+
+// ===========================================================================
 // U15 — overlayDatasets
 // ===========================================================================
 
-describe('U15 — overlayDatasets', () => {
+describe('U15 — overlayDatasets (kind: "bar", as 3.4b)', () => {
   it('exact bar-dataset shape: type, yAxisID, data===values, per-bucket colours by verdict, label', () => {
     const models = [
-      { name: 'Workout', color: '#bf5af2', values: [3, 2, 4], verdicts: ['good', 'bad', 'none'] },
+      { kind: 'bar', name: 'Workout', color: '#bf5af2', values: [3, 2, 4], verdicts: ['good', 'bad', 'none'] },
     ];
     const colors = { good: '#34c759', bad: '#ff6b6b', fallback: '#999999' };
     const datasets = overlayDatasets(models, colors);
@@ -738,7 +1055,7 @@ describe('U15 — overlayDatasets', () => {
   });
 
   it("verdict 'none' with no model.color falls back to colors.fallback", () => {
-    const models = [{ name: 'X', color: null, values: [1], verdicts: ['none'] }];
+    const models = [{ kind: 'bar', name: 'X', color: null, values: [1], verdicts: ['none'] }];
     const colors = { good: '#34c759', bad: '#ff6b6b', fallback: '#999999' };
     const datasets = overlayDatasets(models, colors);
     assert.deepEqual(datasets[0].backgroundColor, [withAlpha('#999999', OVERLAY_BAR_ALPHA)]);
@@ -749,5 +1066,67 @@ describe('U15 — overlayDatasets', () => {
     assert.deepEqual(overlayDatasets(null, { good: '#0f0', bad: '#f00', fallback: '#000' }), []);
     assert.deepEqual(overlayDatasets(undefined, { good: '#0f0', bad: '#f00', fallback: '#000' }), []);
     assert.deepEqual(overlayDatasets('nope', { good: '#0f0', bad: '#f00', fallback: '#000' }), []);
+  });
+});
+
+// ===========================================================================
+// U15b — overlayDatasets (kind: "line", CONTRACT-3.4c)
+// ===========================================================================
+
+describe('U15b — overlayDatasets (kind: "line")', () => {
+  it('exact line-dataset shape: type, yAxisID, data===values, borderDash [4,3], point colours by verdict, spanGaps false', () => {
+    const models = [
+      { kind: 'line', name: 'Weight', color: '#0a84ff', values: [77, 80, null], verdicts: ['bad', 'good', 'none'] },
+    ];
+    const colors = { good: '#34c759', bad: '#ff6b6b', fallback: '#999999' };
+    const datasets = overlayDatasets(models, colors);
+
+    assert.equal(datasets.length, 1);
+    const ds = datasets[0];
+
+    const expectedKeys = [
+      'type',
+      'label',
+      'yAxisID',
+      'data',
+      'borderColor',
+      'backgroundColor',
+      'borderDash',
+      'borderWidth',
+      'tension',
+      'spanGaps',
+      'fill',
+      'pointRadius',
+      'pointHoverRadius',
+      'pointBackgroundColor',
+      'pointBorderColor',
+      'order',
+    ].sort();
+    assert.deepEqual(Object.keys(ds).sort(), expectedKeys);
+
+    assert.equal(ds.type, 'line');
+    assert.equal(ds.label, 'Weight');
+    assert.equal(ds.yAxisID, 'yOverlay');
+    assert.deepEqual(ds.data, [77, 80, null]);
+    assert.equal(ds.borderColor, '#0a84ff');
+    assert.equal(ds.backgroundColor, withAlpha('#0a84ff', OVERLAY_BAR_ALPHA));
+    assert.deepEqual(ds.borderDash, [4, 3]);
+    assert.equal(ds.borderWidth, 2);
+    assert.equal(ds.tension, 0);
+    assert.equal(ds.spanGaps, false);
+    assert.equal(ds.fill, false);
+    assert.equal(ds.pointRadius, 3);
+    assert.equal(ds.pointHoverRadius, 4);
+    assert.deepEqual(ds.pointBackgroundColor, [colors.bad, colors.good, '#0a84ff']);
+    assert.deepEqual(ds.pointBorderColor, [colors.bad, colors.good, '#0a84ff']);
+    assert.equal(ds.order, 1);
+  });
+
+  it('colour falls back to colors.fallback when model.color is missing', () => {
+    const models = [{ kind: 'line', name: 'Weight', color: null, values: [80], verdicts: ['none'] }];
+    const colors = { good: '#34c759', bad: '#ff6b6b', fallback: '#999999' };
+    const datasets = overlayDatasets(models, colors);
+    assert.equal(datasets[0].borderColor, '#999999');
+    assert.deepEqual(datasets[0].pointBackgroundColor, ['#999999']);
   });
 });

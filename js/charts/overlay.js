@@ -59,21 +59,51 @@ function isRealDateStr(str) {
   }
 }
 
-// --- §1 isOverlayCandidate (unchanged from CONTRACT-3.4) -----------------
+// --- §1 isOverlayCandidate (Step 3.4c — widened) --------------------------
 
-// Candidates are trackables whose logged days are discrete EVENTS: boolean
-// rows, or numeric rows whose aggregation is 'count' or 'sum'.
-// 'average'/'last' numerics (calories, weight) are continuous readings,
-// not events — Step 3.5's comparison chart is for those, never this one.
-// Never throws.
+// Step 3.4c §0 rule 1: EVERY non-archived trackable is now a candidate,
+// event-shaped (boolean/count/sum -> drawn as bars, 3.4b's behaviour) or
+// continuous (average/last, e.g. Weight -> drawn as a dashed line, new in
+// 3.4c). overlayKindFor() below is what a caller uses to tell which kind a
+// given candidate will render as. Never throws.
 export function isOverlayCandidate(trackable) {
   if (!isPlainObject(trackable)) return false;
   if (trackable.archived === true) return false;
-  if (trackable.value_shape === 'boolean') return true;
-  if (trackable.value_shape === 'numeric') {
-    return trackable.aggregation === 'count' || trackable.aggregation === 'sum';
-  }
-  return false;
+  return trackable.value_shape === 'boolean' || trackable.value_shape === 'numeric';
+}
+
+// --- §1 overlayKindFor (Step 3.4c) ----------------------------------------
+
+// 'bar' — an accumulated count/amount per bucket (events): drawn from zero,
+// judged against a target. 'line' — a continuous reading per bucket
+// (Weight's weekly average): drawn as a level, judged against a band, not
+// a target. Mirrors weekly.js#chartTypeFor's own bar-vs-line split, but
+// named for what THIS module draws with each kind rather than reusing that
+// name, since chartTypeFor answers a different question (what shape is the
+// metric's OWN trend chart) than this one (what shape is the overlay).
+// Garbage/unknown aggregation defaults to 'bar' — the 3.4b behaviour is
+// the conservative default. Never throws.
+export function overlayKindFor(aggregation) {
+  return aggregation === 'average' || aggregation === 'last' ? 'line' : 'bar';
+}
+
+// --- §1 zoneOf (Step 3.4c) -------------------------------------------------
+
+// Mirror of js/charts/bounds.js#zoneFor — NOT imported, deliberately:
+// bounds.js imports overlayDatasets/overlayTooltipLabel/overlayAxisFor/
+// overlayAxisTitle/overlayTargetAnnotation/overlayBoundAnnotations from
+// THIS module, so an import the other way would create a cycle. The rule
+// itself is six lines and unlikely to drift, but if bounds.js#zoneFor ever
+// changes, this copy must change with it. Both edges inclusive — a value
+// exactly on a bound is 'in', matching bounds.js's own convention. Never
+// throws.
+export function zoneOf(value, bounds) {
+  if (!isFiniteNumber(value)) return 'unknown';
+  if (!isPlainObject(bounds) || bounds.status !== 'ok') return 'unknown';
+  if (!isFiniteNumber(bounds.lower) || !isFiniteNumber(bounds.upper)) return 'unknown';
+  if (value < bounds.lower) return 'below';
+  if (value > bounds.upper) return 'above';
+  return 'in';
 }
 
 // --- §1 overlayCandidates (unchanged) -------------------------------
@@ -168,15 +198,19 @@ export function sanitizeSelection(ids, candidates) {
   return out;
 }
 
-// --- §1 overlayModel (Step 3.4b — replaces the 3.4 shape entirely) -------
+// --- §1 overlayModel (Step 3.4b shape; Step 3.4c adds bounds/kind/zones) -
 
 // The per-overlay model, aligned to the METRIC's own bucket keys
 // (boundsModel().dates) — this is exactly js/charts/weekly.js#trendModel,
 // except it never invents its own keys: the caller (the Range chart) owns
-// the x-axis, and bar k must sit under the metric's point k even on the
+// the x-axis, and bucket k must sit under the metric's point k even on the
 // 'All' range where the two trackables' histories start on different
-// dates. Never throws.
-export function overlayModel({ trackable, entries, keys, period } = {}) {
+// dates. `bounds` (Step 3.4c) is a js/charts/bounds.js#boundsFor() result
+// for THIS overlay trackable, computed by the caller over the same window
+// — it is what a 'line'-kind overlay (a continuous reading, e.g. Weight)
+// is judged against, since a continuous reading has no target, only a
+// band. Never throws.
+export function overlayModel({ trackable, entries, keys, period, bounds } = {}) {
   const id = isPlainObject(trackable) ? String(trackable.id) : '';
   const name =
     isPlainObject(trackable) && typeof trackable.name === 'string' && trackable.name !== ''
@@ -191,7 +225,9 @@ export function overlayModel({ trackable, entries, keys, period } = {}) {
       ? trackable.unit
       : null;
   const aggregation = seriesAggregationFor(trackable);
+  const kind = overlayKindFor(aggregation);
   const direction = isPlainObject(trackable) && trackable.direction === 'break' ? 'break' : 'build';
+  const boundsArg = isPlainObject(bounds) ? bounds : null;
 
   const per = period === 'week' || period === 'month' ? period : 'day';
   const keyList = Array.isArray(keys) ? keys : [];
@@ -215,17 +251,36 @@ export function overlayModel({ trackable, entries, keys, period } = {}) {
   // seriesAggregationFor() only ever returns one of rollup's four legal
   // aggregations, and `per` is always one of rollup's three legal periods
   // — so rollup()'s own validation throws are unreachable from here, same
-  // reasoning as weekly.js#trendModel's comment on this exact call.
+  // reasoning as weekly.js#trendModel's comment on this exact call. For
+  // kind 'line' (aggregation 'average'/'last'), fillValueFor() already
+  // fills an empty bucket with null, not 0 — a week you didn't weigh
+  // yourself is a gap, not a zero reading (weekly.js#fillValueFor's own
+  // reasoning, unchanged here).
   const buckets = rollup(deduped, per, aggregation);
   const filled = fillSeries(buckets, keyList, fillValueFor(aggregation));
-
-  const target = targetFor(trackable, per);
-
   const values = filled.map((f) => f.value);
-  const verdicts = values.map((v) => weekVerdict(v, target, direction));
+
+  // Step 3.4c §0 rule 2/3: 'bar' keeps 3.4b's target/verdict rule exactly.
+  // 'line' has no target (a continuous reading is judged against a BAND,
+  // not a single number) — its zones come from zoneOf() against `bounds`,
+  // and its verdicts are derived from those zones (in -> good, below/above
+  // -> bad, no band or no reading -> none), never from weekVerdict().
+  let zones;
+  let verdicts;
+  let target;
+  if (kind === 'line') {
+    zones = values.map((v) => zoneOf(v, boundsArg));
+    verdicts = zones.map((z) => (z === 'in' ? 'good' : z === 'below' || z === 'above' ? 'bad' : 'none'));
+    target = null;
+  } else {
+    zones = values.map(() => 'unknown');
+    target = targetFor(trackable, per);
+    verdicts = values.map((v) => weekVerdict(v, target, direction));
+  }
+
   const total = values.reduce((sum, v) => sum + (isFiniteNumber(v) ? v : 0), 0);
 
-  return { id, name, color, unit, aggregation, direction, values, verdicts, target, total };
+  return { id, name, color, unit, aggregation, direction, kind, values, zones, verdicts, target, bounds: boundsArg, total };
 }
 
 // --- §1 withAlpha --------------------------------------------------------
@@ -258,16 +313,50 @@ export function withAlpha(color, alpha) {
   return color;
 }
 
-// --- §1 overlayAxisFor -----------------------------------------------
+// --- §1 overlayAxisFor (Step 3.4c — branches by kind) ---------------------
 
-// The right-hand axis window. Always framed from 0 (these are counts/
-// sums, never a level like weight — see weekly.js#axisBoundsFor's
-// beginAtZero rule for 'sum'/'count'), and padded 15% above the larger of
-// the data or the target line, so neither sits on the axis border. Rounds
-// UP (never inward, which could clip the very point the padding protects)
-// — to a whole number for a 'count' series or an all-integer series, else
-// to one decimal. Never throws.
+// kind 'bar': exactly 3.4b — always framed from 0 (these are counts/sums,
+// never a level), padded 15% above the larger of the data or the target
+// line, rounded UP to a whole number for a 'count'/all-integer series,
+// else to one decimal.
+//
+// kind 'line' (Step 3.4c): the user's own rule ("consider the highest and
+// lowest values within the start and the end of the period, with some
+// extra padding") — NEVER forced to zero (a weight axis starting at 0
+// would flatten every real change to a sliver near the top, exactly
+// weekly.js#axisBoundsFor's beginAtZero reasoning for 'average'/'last').
+// The two bounds are folded into the frame when `bounds.status === 'ok'`,
+// so a band line is never drawn on the axis border. A flat/single-point
+// series pads by a flat 1 (not a percentage of a possibly-zero span).
+// Never throws.
 export function overlayAxisFor(model) {
+  const kind = isPlainObject(model) ? model.kind : undefined;
+
+  if (kind === 'line') {
+    const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : [];
+    const finite = values.filter(isFiniteNumber);
+    const bounds = isPlainObject(model) ? model.bounds : null;
+    const boundsOk = isPlainObject(bounds) && bounds.status === 'ok';
+
+    const candidates = finite.slice();
+    if (boundsOk) {
+      if (isFiniteNumber(bounds.lower)) candidates.push(bounds.lower);
+      if (isFiniteNumber(bounds.upper)) candidates.push(bounds.upper);
+    }
+
+    if (candidates.length === 0) {
+      return { suggestedMin: undefined, suggestedMax: undefined };
+    }
+
+    const lo = Math.min(...candidates);
+    const hi = Math.max(...candidates);
+    const span = hi - lo;
+    const pad = span > 0 ? span * 0.1 : 1;
+    return { suggestedMin: lo - pad, suggestedMax: hi + pad };
+  }
+
+  // kind 'bar' (or a garbage/missing model — the conservative default,
+  // same reasoning as overlayKindFor()).
   const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : [];
   const finite = values.filter(isFiniteNumber);
 
@@ -291,55 +380,78 @@ export function overlayAxisFor(model) {
   return { min: 0, suggestedMax };
 }
 
-// --- §1 overlayAxisTitle -------------------------------------------------
+// --- §1 overlayAxisTitle (Step 3.4c — branches by kind) -------------------
 
-// The right axis needs its own title (§0 rule 5) — without one, a bar
-// chart of "3" on an unlabelled axis answers nothing. `unit` wins when the
-// trackable has one (e.g. 'cigarettes'); a bare count trackable with no
-// unit reads as 'days' (it's a days-logged count); anything else has no
-// natural noun and falls back to 'per <period>'. Never throws.
+// kind 'bar': exactly 3.4b. kind 'line': `unit` at every period — a weekly
+// AVERAGE of kg is still kg, unlike a bar count which genuinely changes
+// meaning per period ('days' vs 'days / week'). No unit -> the generic
+// 'value', since a continuous reading with no unit has no natural noun the
+// way a count trackable has 'days'. Never throws.
 export function overlayAxisTitle(model, period) {
+  const kind = isPlainObject(model) ? model.kind : undefined;
   const unit = isPlainObject(model) && typeof model.unit === 'string' && model.unit !== '' ? model.unit : null;
+
+  if (kind === 'line') return unit || 'value';
+
+  // kind 'bar' (or garbage) — exactly 3.4b.
   const aggregation = isPlainObject(model) ? model.aggregation : undefined;
   const base = unit !== null ? unit : aggregation === 'count' ? 'days' : '';
-
   if (period !== 'week' && period !== 'month') return base;
   if (base === '') return `per ${period}`;
   return `${base} / ${period}`;
 }
 
-// --- §1 overlayTooltipLabel (Step 3.4b — new shape, no `period` arg) -----
+// --- §1 overlayTooltipLabel (Step 3.4c — branches by kind) ----------------
 
-// Tooltip line for bucket `index`. Carries the target when there is one
-// ('4 of 3') so the tooltip alone answers "did this bucket hit its own
-// target" without cross-referencing the dashed line. Never throws.
+// kind 'bar': exactly 3.4b (carries the target, '4 of 3', when there is
+// one). kind 'line': carries the ROUNDED value and unit, plus the zone
+// word (in range/below/above) when a band exists — the tooltip alone
+// answers "was this reading in band" without cross-referencing the dashed
+// bound lines. Never throws.
 export function overlayTooltipLabel(model, index) {
   const name = isPlainObject(model) && typeof model.name === 'string' ? model.name : '';
+  const kind = isPlainObject(model) ? model.kind : undefined;
   const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : null;
 
   if (values === null || !Number.isInteger(index) || index < 0 || index >= values.length) {
     return `${name} · —`;
   }
-
   const value = values[index];
   if (!isFiniteNumber(value)) return `${name} · —`;
 
+  if (kind === 'line') {
+    const unit = isPlainObject(model) && typeof model.unit === 'string' && model.unit !== '' ? model.unit : null;
+    const v = Math.round(value * 10) / 10;
+    let out = `${name} · ${v}${unit ? ' ' + unit : ''}`;
+    const zones = isPlainObject(model) && Array.isArray(model.zones) ? model.zones : [];
+    const zone = zones[index];
+    if (zone === 'in') out += ' · in range';
+    else if (zone === 'below') out += ' · below';
+    else if (zone === 'above') out += ' · above';
+    return out;
+  }
+
+  // kind 'bar' (or garbage) — exactly 3.4b.
   const target = isPlainObject(model) ? model.target : null;
   if (!isPlainObject(target) || !isFiniteNumber(target.value)) return `${name} · ${value}`;
-
   const t = Math.round(target.value * 10) / 10;
   return `${name} · ${value} of ${t}`;
 }
 
-// --- §1 overlayTargetAnnotation ------------------------------------------
+// --- §1 overlayTargetAnnotation (Step 3.4c — line kind has none) ---------
 
 // The overlay's own target, drawn as a dashed line ON THE RIGHT AXIS
 // (scaleID: 'yOverlay') — a target line with no scaleID would default to
 // the chart's first/left y-axis and land at the wrong height entirely,
-// since the two axes have unrelated ranges. null when there is no target
+// since the two axes have unrelated ranges. null for kind 'line' (a
+// continuous reading has a BAND, not a target — see
+// overlayBoundAnnotations() below) or when there is no target at all
 // (targetFor() already returns null for 'day' and untargeted trackables).
 // Never throws.
 export function overlayTargetAnnotation(model, fallbackColor) {
+  const kind = isPlainObject(model) ? model.kind : undefined;
+  if (kind === 'line') return null;
+
   const target = isPlainObject(model) ? model.target : null;
   if (!isPlainObject(target) || !isFiniteNumber(target.value)) return null;
 
@@ -363,16 +475,72 @@ export function overlayTargetAnnotation(model, fallbackColor) {
   };
 }
 
-// --- §1 overlayDatasets (Step 3.4b — bars, not rug markers) --------------
+// --- §1 overlayBoundAnnotations (Step 3.4c — NEW) -------------------------
 
-// PURE Chart.js bar dataset configs, one per model. Per-bucket colour by
-// verdict (good/bad/neutral), semi-transparent fill so the bars read as a
-// secondary series without competing with the metric's own line —
-// `order: 2` keeps the bars drawn behind/after the line in Chart.js's
-// default draw order. `colors` is `{ good, bad, fallback }` — plain
-// strings, resolved by the caller (js/charts/bounds.js) from CSS custom
-// properties, since this module never touches `document`. Non-array
-// `models` -> []. Never throws.
+// A 'line'-kind overlay's balance is its BAND, not a target (§0 rule 3) —
+// two dashed lines on the right axis, one per bound, only drawn when
+// `model.bounds.status === 'ok'` (the same status boundsFor() uses to mean
+// "there is a real band to show" for the metric's own Range chart). {}
+// for a 'bar'-kind model, a missing/non-ok bounds object, or a bounds
+// object whose lower/upper aren't finite — Object.assign/spread-safe, so
+// the caller can always `{ ...overlayBoundAnnotations(...) }` into its own
+// annotations map. Never throws.
+export function overlayBoundAnnotations(model, fallbackColor) {
+  const kind = isPlainObject(model) ? model.kind : undefined;
+  if (kind !== 'line') return {};
+
+  const bounds = isPlainObject(model) ? model.bounds : null;
+  if (!isPlainObject(bounds) || bounds.status !== 'ok' || !isFiniteNumber(bounds.lower) || !isFiniteNumber(bounds.upper)) {
+    return {};
+  }
+
+  const color = (isPlainObject(model) && model.color) || fallbackColor;
+
+  return {
+    overlayLower: {
+      type: 'line',
+      scaleID: 'yOverlay',
+      value: bounds.lower,
+      borderColor: color,
+      borderWidth: 1,
+      borderDash: [4, 4],
+      label: { display: true, content: String(bounds.lower), position: 'end', backgroundColor: color },
+    },
+    overlayUpper: {
+      type: 'line',
+      scaleID: 'yOverlay',
+      value: bounds.upper,
+      borderColor: color,
+      borderWidth: 1,
+      borderDash: [4, 4],
+      label: { display: true, content: String(bounds.upper), position: 'end', backgroundColor: color },
+    },
+  };
+}
+
+// --- §1 overlayDatasets (Step 3.4c — branches by kind) --------------------
+
+// PURE Chart.js dataset configs, one per model, branching on `model.kind`:
+//
+// 'bar' — exactly 3.4b's bars: per-bucket colour by verdict (good/bad/
+// neutral), semi-transparent fill so the bars read as a secondary series
+// without competing with the metric's own line, `order: 2` keeps them
+// drawn behind/after the line in Chart.js's default draw order.
+//
+// 'line' (Step 3.4c) — a dashed line (visually distinct from the metric's
+// own solid line) with per-POINT colour by zone-derived verdict, so an
+// out-of-band reading stands out even without reading the dashed bound
+// lines. `fill: false`/`spanGaps: false`: an unlogged bucket is a real gap
+// (weekly.js#fillValueFor's reasoning for 'average'/'last'), never bridged
+// or shaded under. `order: 1` draws it ABOVE the bars (order 2), since a
+// line overlay and a bar overlay never coexist (one overlay at a time),
+// but a line reads better on top of the metric's own zone shading either
+// way.
+//
+// `colors` is `{ good, bad, fallback }` — plain strings, resolved by the
+// caller (js/charts/bounds.js) from CSS custom properties, since this
+// module never touches `document`. Non-array `models` -> []. Never
+// throws.
 export function overlayDatasets(models, colors) {
   const list = Array.isArray(models) ? models : [];
   const palette = isPlainObject(colors) ? colors : {};
@@ -385,9 +553,32 @@ export function overlayDatasets(models, colors) {
     const values = isPlainObject(model) && Array.isArray(model.values) ? model.values : [];
     const verdicts = isPlainObject(model) && Array.isArray(model.verdicts) ? model.verdicts : [];
     const modelColor = (isPlainObject(model) && model.color) || fallback;
+    const kind = isPlainObject(model) ? model.kind : undefined;
 
+    if (kind === 'line') {
+      const pointColors = verdicts.map((v) => (v === 'good' ? good : v === 'bad' ? bad : modelColor));
+      return {
+        type: 'line',
+        label: name,
+        yAxisID: 'yOverlay',
+        data: values,
+        borderColor: modelColor,
+        backgroundColor: withAlpha(modelColor, OVERLAY_BAR_ALPHA),
+        borderDash: [4, 3],
+        borderWidth: 2,
+        tension: 0,
+        spanGaps: false,
+        fill: false,
+        pointRadius: 3,
+        pointHoverRadius: 4,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: pointColors,
+        order: 1,
+      };
+    }
+
+    // kind 'bar' (or garbage) — exactly 3.4b.
     const solidColors = verdicts.map((v) => (v === 'good' ? good : v === 'bad' ? bad : modelColor));
-
     return {
       type: 'bar',
       label: name,
