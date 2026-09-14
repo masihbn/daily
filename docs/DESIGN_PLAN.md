@@ -742,7 +742,8 @@ from the pinned-axis copy) via `data-chrome="false"`.
 
 ## Step U.6 — Forms, Settings, Sign in, Lock
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified; device check pinged.
+Contract `CONTRACT-U.6.md`. `sw.js` `CACHE` → `daily-v52`.
 
 **Goal.** Create/edit, Settings, Sign in and Lock look like the rest of
 the app: grouped inset lists, segmented choices instead of native
@@ -781,7 +782,30 @@ text/position changes.
 - Lock: centred column, `lock` glyph 48px, "Locked", Unlock primary,
   "Sign out instead" ghost. Same classes and auto-prompt behaviour.
 
-**Test Subjects.** _(filled by the executing session)_
+**Test Subjects.**
+
+Suite after this step: **4733 green** — 4418 unit, 54 integration, 261 e2e.
+Changed: `js/views/trackable.js` (live preview card, three group cards
+by `data-field`, sticky `.tform-actions`; every field/radio/name kept),
+`js/views/settings.js` (chevron icon buttons for reorder, status pill),
+`js/views/signin.js` (logo), `js/views/lock.js` (glyph),
+`css/styles.css`, `sw.js`.
+
+*E2E:* TU-1 groups and field membership; TU-2 preview follows name,
+colour and icon; TU-3 radio labels render as a 44px segmented control
+and still check the native input; TU-4 sticky action bar; TU-5 a
+group with no visible field is hidden; SU-1 reorder buttons are 44px
+icon buttons with their text kept; SU-2 sign-out width; SU-3 app-lock
+status pill; AU-1 sign-in logo and the Show/Hide button aligned with
+the password field; LU-1 lock glyph and full-width Unlock.
+
+*Decisions at execution time:* the radio inputs are hidden with
+`opacity: 0` (the pattern the icon/colour radios already use) rather
+than the clip recipe, because Chromium's hit-testing sent Playwright's
+`check()` to the wrapper with the clip version; the "Signed in as"
+row is `display: block` with a 52px line-height because flex collapsed
+the space before the email. The sign-in logo still shows the old blue
+square — U.7 replaces the icon.
 
 ---
 
@@ -863,3 +887,6 @@ test count, and close this plan the way `BUILD_PLAN.md` was closed.
 - **2026-09-14** — **U.5 executed.** Compare: one control bar, scrolling
   chips, key list as the legend, Expand → `#/compare/chart`. Suite 4723
   green.
+- **2026-09-14** — **U.6 executed.** Form preview + grouped cards +
+  segmented radios + sticky actions; Settings rows; sign-in logo; lock
+  glyph. Suite 4733 green.

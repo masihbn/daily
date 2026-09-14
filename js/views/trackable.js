@@ -22,6 +22,21 @@ import * as apiModule from '../api.js';
 import { parseNumericInput } from './home-model.js';
 import { ICONS, ICON_KEYS, iconSvg, hasIcon } from '../icons.js';
 
+// Step U.6 (CONTRACT-U.6.md §1): the three group cards' field membership.
+// Every FIELD_ORDER entry must appear here; anything not explicitly listed
+// as basics/type falls into 'goal' per the contract's "ANY other field not
+// listed above" rule — see the `|| 'goal'` fallback where this is read.
+const GROUP_FOR_FIELD = {
+  name: 'basics',
+  unit: 'basics',
+  icon: 'basics',
+  color: 'basics',
+  value_shape: 'type',
+  direction: 'type',
+  aggregation: 'type',
+};
+const GROUP_ORDER = ['basics', 'type', 'goal'];
+
 // --- shared constants ------------------------------------------------------
 
 // DOM order for the `div.tform-field[data-field]` wrappers — also the
@@ -349,12 +364,115 @@ export function createTrackableView({ mode, id, api, store } = {}) {
     sectionEl = document.createElement('section');
     sectionEl.className = 'tform';
     // Exactly one listener per event type, delegated on this root,
-    // attached once here and removed in unmount().
+    // attached once here and removed in unmount(). Step U.6
+    // (CONTRACT-U.6.md §1): 'input' is added so the live preview updates as
+    // the user types the name/unit, without waiting for blur/'change'.
     sectionEl.addEventListener('change', handleChange);
     sectionEl.addEventListener('submit', handleSubmit);
     sectionEl.addEventListener('click', handleClick);
+    // Step U.6 (CONTRACT-U.6.md §1): the one new listener this step adds —
+    // 'change' already drives a full render() via handleChange() below,
+    // which rebuilds the preview from formState; 'input' is the only gap
+    // (text keystrokes never reach handleChange), so this is the single
+    // delegated listener that covers it without disturbing the "one
+    // listener per event type" rule (radios also fire 'input', so a
+    // colour/icon pick is covered here too, redundantly but harmlessly,
+    // ahead of handleChange's own render()).
+    sectionEl.addEventListener('input', syncPreview);
     container.appendChild(sectionEl);
     return sectionEl;
+  }
+
+  // --- live preview (Step U.6, CONTRACT-U.6.md §1) --------------------------
+
+  // Pure DOM, no store: builds the read-only preview card shown once per
+  // render() from the current formState. Never throws.
+  function buildPreview() {
+    const preview = document.createElement('div');
+    preview.className = 'tform-preview';
+    preview.setAttribute('aria-hidden', 'true');
+
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'tform-preview-icon';
+    const color = typeof formState.color === 'string' && formState.color !== '' ? formState.color : PALETTE[0];
+    iconSpan.style.color = color;
+    const iconKey = hasIcon(formState.icon) ? formState.icon : 'dot';
+    iconSpan.dataset.icon = iconKey;
+    iconSpan.innerHTML = iconSvg(iconKey);
+    preview.appendChild(iconSpan);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'tform-preview-name';
+    const name = typeof formState.name === 'string' ? formState.name.trim() : '';
+    nameSpan.textContent = name === '' ? 'New trackable' : name;
+    preview.appendChild(nameSpan);
+
+    const kindSpan = document.createElement('span');
+    kindSpan.className = 'tform-preview-kind';
+    kindSpan.textContent = previewKindText(formState);
+    preview.appendChild(kindSpan);
+
+    return preview;
+  }
+
+  // 'Yes / no' | 'Number' by value_shape, plus ' · <unit>' when the unit
+  // field is in play (numeric) and non-empty. Shared by buildPreview() (from
+  // formState) and syncPreview() (from the live DOM) so the two can never
+  // disagree on the wording.
+  function previewKindText({ value_shape, unit }) {
+    const numeric = value_shape === 'numeric';
+    const u = typeof unit === 'string' ? unit.trim() : '';
+    let text = numeric ? 'Number' : 'Yes / no';
+    if (numeric && u !== '') text += ` · ${u}`;
+    return text;
+  }
+
+  // Delegated 'input' listener (attached in ensureSection(), removed in
+  // unmount()): reads name/value_shape/unit/icon/color straight from the
+  // live DOM and updates only the three preview spans (never triggers a
+  // full render(), which would tear down and rebuild the text inputs
+  // mid-keystroke and lose focus/cursor position). 'change' events are
+  // already covered by handleChange()'s own render() call. Never throws.
+  function syncPreview() {
+    try {
+      if (!sectionEl) return;
+      const form = sectionEl.querySelector('form.tform-form');
+      if (!form) return;
+
+      const iconSpan = form.querySelector('.tform-preview-icon');
+      const nameSpan = form.querySelector('.tform-preview-name');
+      const kindSpan = form.querySelector('.tform-preview-kind');
+      if (!iconSpan || !nameSpan || !kindSpan) return;
+
+      const nameInput = form.querySelector('input[name="name"]');
+      const name = nameInput && typeof nameInput.value === 'string' ? nameInput.value.trim() : '';
+      nameSpan.textContent = name === '' ? 'New trackable' : name;
+
+      const shapeInput = form.querySelector('input[name="value_shape"]:checked');
+      const shape = shapeInput ? shapeInput.value : formState.value_shape;
+
+      const unitInput = form.querySelector('input[name="unit"]');
+      const unit = unitInput && typeof unitInput.value === 'string' ? unitInput.value : '';
+      kindSpan.textContent = previewKindText({ value_shape: shape, unit });
+
+      const colorInput = form.querySelector('input[name="color"]:checked');
+      const color = colorInput ? colorInput.value : formState.color;
+      if (typeof color === 'string' && color !== '') {
+        iconSpan.style.color = color;
+        // CONTRACT-U.6.md §5: the icon grid is tinted from the same
+        // selected colour, kept in sync from this one updater too.
+        const iconGrid = form.querySelector('.tform-icon-grid');
+        if (iconGrid) iconGrid.style.color = color;
+      }
+
+      const iconInput = form.querySelector('input[name="icon"]:checked');
+      const iconKey = iconInput ? iconInput.value : formState.icon;
+      const safeIconKey = hasIcon(iconKey) ? iconKey : 'dot';
+      iconSpan.dataset.icon = safeIconKey;
+      iconSpan.innerHTML = iconSvg(safeIconKey);
+    } catch {
+      // Never throws.
+    }
   }
 
   // --- field builders ------------------------------------------------------
@@ -704,23 +822,58 @@ export function createTrackableView({ mode, id, api, store } = {}) {
     const form = document.createElement('form');
     form.className = 'tform-form';
 
+    // Step U.6 (CONTRACT-U.6.md §1): the live preview card, pure DOM from
+    // formState, sits above the group cards.
+    form.appendChild(buildPreview());
+
+    // Step U.6: fields are wrapped into three group cards (basics/type/
+    // goal) by GROUP_FOR_FIELD — a display-only regrouping. Every field is
+    // still built in FIELD_ORDER (so its own relative order within its
+    // group, and the `[hidden]`/disabled handling in buildField(), are
+    // unchanged), just appended into its group's container instead of
+    // straight onto the form.
+    const groupEls = {};
+    for (const g of GROUP_ORDER) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'tform-group card';
+      groupEl.dataset.group = g;
+      groupEls[g] = groupEl;
+    }
+
     const vis = new Set(visibleFields(formState));
     for (const fieldName of FIELD_ORDER) {
-      form.appendChild(buildField(fieldName, vis.has(fieldName)));
+      const fieldEl = buildField(fieldName, vis.has(fieldName));
+      const groupName = GROUP_FOR_FIELD[fieldName] || 'goal';
+      groupEls[groupName].appendChild(fieldEl);
     }
+
+    for (const g of GROUP_ORDER) {
+      const groupEl = groupEls[g];
+      // A group with no visible field must not show an empty card.
+      const anyFieldVisible = Array.from(groupEl.querySelectorAll('.tform-field')).some((f) => !f.hidden);
+      groupEl.hidden = !anyFieldVisible;
+      form.appendChild(groupEl);
+    }
+
+    // Step U.6: Save/Cancel move into a sticky action bar. The elements
+    // themselves (class, type, text, disabled state) are unchanged.
+    const actions = document.createElement('div');
+    actions.className = 'tform-actions';
 
     const saveBtn = document.createElement('button');
     saveBtn.className = 'tform-save';
     saveBtn.type = 'submit';
     saveBtn.disabled = viewState === 'saving';
     saveBtn.textContent = 'Save';
-    form.appendChild(saveBtn);
+    actions.appendChild(saveBtn);
 
     const cancelLink = document.createElement('a');
     cancelLink.className = 'tform-cancel';
     cancelLink.href = '#/';
     cancelLink.textContent = 'Cancel';
-    form.appendChild(cancelLink);
+    actions.appendChild(cancelLink);
+
+    form.appendChild(actions);
 
     section.appendChild(form);
 
@@ -963,6 +1116,7 @@ export function createTrackableView({ mode, id, api, store } = {}) {
       sectionEl.removeEventListener('change', handleChange);
       sectionEl.removeEventListener('submit', handleSubmit);
       sectionEl.removeEventListener('click', handleClick);
+      sectionEl.removeEventListener('input', syncPreview);
     }
     if (container) {
       container.innerHTML = '';

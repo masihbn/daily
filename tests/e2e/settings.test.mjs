@@ -624,3 +624,81 @@ test('S9 — trackables GET 500 shows .detail-offline, blocks still render, no p
 // running in the full suite; no new test is added here, and
 // tests/e2e/auth.test.mjs is not edited (task boundary).
 // ===========================================================================
+
+// ===========================================================================
+// CONTRACT-U.6.md §7 — Settings icon buttons and the app-lock status pill.
+// Written strictly against §2/§5/§7 of that contract; the implementation
+// (js/views/settings.js, css/styles.css) is being written in parallel and is
+// not visible here.
+// ===========================================================================
+
+// SU-1 — every .settings-move: svg present, unchanged arrow text, >=44x44,
+// and the up arrow is visually rotated (its computed transform is not none)
+test('SU-1 — every .settings-move icon button carries an svg, keeps its arrow textContent, is >=44x44, and the up arrow is visually rotated', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeSettings(page);
+  await routeTrackables(page, [T_WORKOUT, T_CALORIES]);
+  await routeEntries(page, []);
+
+  await page.goto('/index.html#/settings');
+  await expect(page.locator('section.settings')).toHaveAttribute('data-settings-state', 'ready');
+
+  const moveButtons = page.locator('.settings-move');
+  const count = await moveButtons.count();
+  expect(count).toBeGreaterThan(0);
+
+  for (let i = 0; i < count; i++) {
+    const btn = moveButtons.nth(i);
+    await expect(btn.locator('svg')).toHaveCount(1);
+    const text = (await btn.textContent()).trim();
+    expect(['↑', '↓']).toContain(text);
+    const box = await btn.boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }
+
+  const upSvg = page.locator('.settings-move[data-action="move-up"] svg').first();
+  const transform = await upSvg.evaluate((el) => getComputedStyle(el).transform);
+  expect(transform).not.toBe('none');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// SU-2 — the account block's sign-out button is a full-width row control
+test("SU-2 — the account block's #signout-btn is a wide tap target", async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeSettings(page);
+  await routeTrackables(page, [T_WORKOUT]);
+  await routeEntries(page, []);
+
+  await page.goto('/index.html#/settings');
+  await expect(page.locator('section.settings')).toHaveAttribute('data-settings-state', 'ready');
+
+  const box = await page.locator('#signout-btn').boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(200);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// SU-3 — the app-lock status carries the pill class
+test('SU-3 — .settings-applock-status carries the "pill" class', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeSettings(page);
+  await routeTrackables(page, [T_WORKOUT]);
+  await routeEntries(page, []);
+
+  await page.goto('/index.html#/settings');
+  await expect(page.locator('section.settings')).toHaveAttribute('data-settings-state', 'ready');
+
+  await expect(page.locator('.settings-applock-status')).toHaveClass(/pill/);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

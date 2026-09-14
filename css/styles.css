@@ -1191,6 +1191,60 @@ button {
   width: 100%;
 }
 
+/* Step U.6 (CONTRACT-U.6.md §1/§5): the live preview card. Pure DOM,
+   read-only (aria-hidden), built/updated by js/views/trackable.js. */
+.tform-preview {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  column-gap: var(--s3);
+  align-items: center;
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  background: var(--surface);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+}
+
+.tform-preview-icon {
+  grid-row: 1 / span 2;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.tform-preview-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.tform-preview-name {
+  font: var(--t-head);
+  color: var(--fg);
+}
+
+.tform-preview-kind {
+  font: var(--t-cap);
+  color: var(--fg-2);
+}
+
+/* Step U.6 (CONTRACT-U.6.md §1/§5): the three group cards (basics/type/
+   goal) that wrap the existing .tform-field elements — a display-only
+   regrouping, see js/views/trackable.js render(). */
+.tform-group {
+  margin-bottom: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.tform-group[hidden] {
+  display: none;
+}
+
 .tform-field {
   display: flex;
   flex-direction: column;
@@ -1249,31 +1303,43 @@ button {
   padding-right: var(--s2);
 }
 
-/* DEFECT 2 fix (CONTRACT-2.4.md §4): without align-items, this defaults
-   to stretch, so the fixed-height radio lands at the top of the 44px row
-   while the label's own align-items: center centres its text — the two
-   read at different heights. */
+/* Step U.6 (CONTRACT-U.6.md §0/§5): native radios stay (tests + semantics)
+   but read as a segmented control (.seg) — the track here, each
+   radio+label pair a flex item, the radio itself visually hidden (not
+   display:none, so it stays focusable) and its label the visible,
+   selectable segment. Replaces the old "show the native radio" look
+   (DEFECT 2 fix, CONTRACT-2.4.md §4) now that the label alone is the tap
+   target. */
 .tform-radio-group {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 20px;
+  background: var(--surface-2);
+  padding: 4px;
+  border-radius: var(--r-ctl);
+  gap: 2px;
 }
 
-/* Each radio + its label is one flex item (see trackable.js radioField())
-   so a wrap can never split a radio from its own label, and the pair is
-   centred against itself directly rather than relying on the group's
-   cross-axis alignment. */
 .tform-radio-pair {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
+  flex: 1;
+  display: flex;
+  position: relative;
 }
 
+/* Deviation from CONTRACT-U.6.md §5's literal "clip"-based hiding recipe:
+   that recipe (matching .visually-hidden's margin:-1px/overflow:hidden/
+   clip:rect(0,0,0,0) combination) made Chromium's hit-testing resolve a
+   Playwright .check() on these inputs to the enclosing .tform-radio-pair
+   instead of the input itself, timing out six pre-existing tests (F2, F3,
+   DEFECT4a, DEFECT4b, F6, F8) that call .check() on
+   input[name="value_shape"] directly — a real regression, not a flaky
+   test. The opacity:0 technique below is the SAME one already proven here
+   for .tform-color-group/.tform-icon-grid's own radios (including a
+   .check() call in TU-2), so it keeps the input invisible and its label
+   the real tap target without breaking direct .check() calls. */
 .tform-radio-group input[type="radio"] {
-  width: 22px;
-  height: 22px;
-  accent-color: var(--accent);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .tform-field input[type="checkbox"] {
@@ -1285,13 +1351,26 @@ button {
 }
 
 .tform-radio-group label {
-  display: inline-flex;
+  flex: 1;
+  display: flex;
   align-items: center;
+  justify-content: center;
   min-height: 44px;
-  color: var(--fg);
-  font-size: 15px;
+  border-radius: 8px;
+  font: var(--t-cap);
+  color: var(--fg-2);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+}
+
+.tform-radio-group input[type="radio"]:checked + label {
+  background: var(--surface-3);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.tform-radio-group input[type="radio"]:focus-visible + label {
+  outline: 2px solid var(--focus);
 }
 
 .tform-field[data-field="bounds_enabled"] {
@@ -1453,16 +1532,32 @@ button {
   border: 0;
 }
 
-/* Step U.0: the global `button` rule is a reset only now — .tform-save
-   (primary/block), .tform-archive (ghost, danger text), the confirm
-   step's .tform-archive-confirm (danger) and .tform-archive-cancel
-   (ghost) each need their full look spelled out here; none of them may
-   rely on the base `button` rule for sizing any more. .tform-cancel is
-   an <a>, unaffected by the button reset, but keeps the same ghost/block
-   look for visual consistency with its sibling. */
+/* Step U.6 (CONTRACT-U.6.md §1/§5): Save/Cancel now live in a sticky bar
+   above the tab bar instead of stacked full-width at the end of the form —
+   .tform-save becomes a flex sibling of .tform-cancel (flex: 1 instead of
+   width: 100%) and .tform-cancel drops its own full width so the two sit
+   side by side. Step U.0: the global `button` rule is a reset only, so
+   .tform-save (primary), .tform-archive (danger row), the confirm step's
+   .tform-archive-confirm (danger) and .tform-archive-cancel (ghost) each
+   need their full look spelled out here; none of them may rely on the base
+   `button` rule for sizing any more. .tform-cancel is an <a>, unaffected by
+   the button reset, but keeps the same ghost look for visual consistency
+   with its sibling. */
+.tform-actions {
+  position: sticky;
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + var(--s2));
+  z-index: 5;
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 .tform-save {
   display: flex;
-  width: 100%;
+  flex: 1;
   align-items: center;
   justify-content: center;
   min-height: 44px;
@@ -1488,7 +1583,6 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
   min-height: 44px;
   padding: 0 var(--s4);
   border-radius: var(--r-ctl);
@@ -1500,6 +1594,9 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* CONTRACT-U.6.md §5: a "card-looking danger row" — same bad-bg treatment
+   as .tform-confirm-archive below (and .signout in Settings) rather than
+   plain transparent/red text. */
 .tform-archive {
   margin-top: var(--s4);
   display: flex;
@@ -1508,8 +1605,8 @@ button {
   justify-content: center;
   min-height: 44px;
   padding: 0 var(--s4);
-  border-radius: var(--r-ctl);
-  background: transparent;
+  border-radius: var(--r-card);
+  background: var(--bad-bg);
   color: var(--bad);
   font: var(--t-head);
 }
@@ -2558,19 +2655,40 @@ button.hm-cell {
    44px-min-height / 16px-font sizing every other form in this app uses
    (.tform-input, .trow-input) so iOS never auto-zooms on focus. */
 
+/* Step U.6 (CONTRACT-U.6.md §3/§5): a centred column with the app icon
+   above the form, instead of a full-width block. */
 .signin {
-  display: block;
-  width: 100%;
-}
-
-.signin-form {
+  max-width: 360px;
+  margin: 10vh auto 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: stretch;
+  gap: var(--s4);
+}
+
+.signin-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  align-self: center;
+  box-shadow: var(--shadow);
+}
+
+/* Two-column grid so the Show/Hide toggle can sit beside the password
+   field instead of stacking under it: row 1 is the email field (spans
+   both columns), row 2 is the password field (column 1) beside the toggle
+   (column 2), row 3 the submit button and row 4 the error line each span
+   both columns again. */
+.signin-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--s2);
+  row-gap: var(--s3);
   width: 100%;
 }
 
 .signin-field {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2578,6 +2696,10 @@ button.hm-cell {
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-2);
+}
+
+.signin-field:nth-of-type(2) {
+  grid-column: 1;
 }
 
 .signin-field input {
@@ -2598,22 +2720,24 @@ button.hm-cell {
   outline: none;
 }
 
-/* Step U.0: the global `button` rule is a reset only now — .signin-toggle
-   (secondary) and .signin-submit (primary/block) need their full look
-   spelled out below. */
+/* Step U.6 (CONTRACT-U.6.md §5): .signin-toggle sits in the grid's second
+   column, level with the password field, styled ghost (ordinary text, no
+   fill) rather than a standalone secondary block button. Step U.0: the
+   global `button` rule is a reset only now, so .signin-toggle and
+   .signin-submit (primary/block) need their full look spelled out below. */
 .signin-toggle {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 var(--s4);
+  grid-column: 2;
+  align-self: end;
+  min-height: 48px;
+  padding: 0 var(--s3);
   border-radius: var(--r-ctl);
-  background: var(--surface-2);
-  color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--hairline);
+  background: transparent;
+  color: var(--fg-2);
   font: var(--t-head);
 }
 
 .signin-submit {
-  width: 100%;
+  grid-column: 1 / -1;
   min-height: 44px;
   padding: 0 var(--s4);
   border-radius: var(--r-ctl);
@@ -2629,7 +2753,8 @@ button.hm-cell {
 }
 
 .signin-error {
-  margin: 4px 0 0;
+  grid-column: 1 / -1;
+  margin: 0;
   color: var(--bad);
   font-size: 13px;
 }
@@ -2640,8 +2765,20 @@ button.hm-cell {
 
 /* Settings: signed-in-as + sign-out (Step D.7) ---------------------------- */
 
+/* Step U.6 (CONTRACT-U.6.md §2): the "Signed in as" line takes the .list__row
+   look (min-height, hairline below) by CSS only — no class/markup change.
+   Deliberately NOT display:flex: this element's content is a plain text
+   node ("Signed in as ") followed by a <span> (the email) — turning it into
+   a flex container makes the text node an anonymous flex item and visually
+   collapses the trailing space between the two, running the words into the
+   email. line-height centres the single line within the row instead. */
 .signin-as {
-  margin: 0 0 12px;
+  display: block;
+  min-height: 52px;
+  line-height: 52px;
+  margin: 0 0 var(--s3);
+  padding: 0;
+  box-shadow: inset 0 -1px 0 var(--hairline);
   color: var(--fg-2);
   font-size: 14px;
 }
@@ -2682,20 +2819,33 @@ button.hm-cell {
    (see main.js's render()). Styled like .signin* just above — both are
    full-screen gates with nothing else on the page until they resolve. */
 
+/* Step U.6 (CONTRACT-U.6.md §4/§5): a centred column, same layout family as
+   .signin above. */
 .lock {
-  display: block;
-  width: 100%;
+  max-width: 360px;
+  margin: 14vh auto 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.lock-glyph svg {
+  width: 48px;
+  height: 48px;
+  color: var(--fg-2);
+  margin: 0 auto;
 }
 
 .lock-title {
-  margin: 0 0 8px;
+  margin: 0;
   font: var(--t-title);
 }
 
 .lock-help {
-  margin: 0 0 16px;
+  margin: 0;
+  font: var(--t-sub);
   color: var(--fg-2);
-  font-size: 13px;
 }
 
 /* Step U.0: the global `button` rule is a reset only now — .lock-unlock
@@ -2722,7 +2872,7 @@ button.hm-cell {
 }
 
 .lock-error {
-  margin: 12px 0 0;
+  margin: 0;
   color: var(--bad);
   font-size: 13px;
 }
@@ -2732,7 +2882,7 @@ button.hm-cell {
 }
 
 .lock-alt {
-  margin: 16px 0 0;
+  margin: 0;
 }
 
 .lock-signout {
@@ -2900,6 +3050,26 @@ button.hm-cell {
 
 .settings-move:disabled {
   opacity: 0.4;
+}
+
+/* Step U.6 (CONTRACT-U.6.md §2): the chevron glyph each .settings-move now
+   carries (its visible arrow text moved to a .visually-hidden span — see
+   js/views/settings.js). The up button's glyph (chevron-down) is flipped
+   to point up; the down button's is already the right way round. */
+.settings-move__icon {
+  display: flex;
+  width: 20px;
+  height: 20px;
+}
+
+.settings-move__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.settings-move[data-action="move-up"] svg {
+  transform: rotate(180deg);
 }
 
 .settings-error {

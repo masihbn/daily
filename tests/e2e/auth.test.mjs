@@ -611,3 +611,35 @@ test('A15 — after a mocked 400 sign-in failure, the typed values and a "Hide" 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.6.md §7 — AU-1: the sign-in logo. Written strictly against §3/
+// §5/§7 of that contract; the implementation (js/views/signin.js,
+// css/styles.css) is being written in parallel and is not visible here.
+// ===========================================================================
+
+test('AU-1 — signed out: the sign-in logo is visible with the right src, and the Show/Hide toggle sits level with, and to the right of, the password field', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('section.signin')).toBeVisible();
+
+  const logo = page.locator('img.signin-logo');
+  await expect(logo).toBeVisible();
+  const src = await logo.getAttribute('src');
+  expect(src.endsWith('icons/icon-192.png')).toBe(true);
+
+  const toggleBox = await page.locator('button.signin-toggle').boundingBox();
+  const passwordBox = await page.locator('input[name="password"]').boundingBox();
+  const toggleCenterY = toggleBox.y + toggleBox.height / 2;
+  const passwordCenterY = passwordBox.y + passwordBox.height / 2;
+  expect(Math.abs(toggleCenterY - passwordCenterY)).toBeLessThanOrEqual(6);
+  expect(toggleBox.x).toBeGreaterThan(passwordBox.x);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

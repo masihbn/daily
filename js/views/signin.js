@@ -122,6 +122,15 @@ export function createSignInView({ auth, onSignedIn } = {}) {
     sectionEl.addEventListener('submit', handleSubmit);
     sectionEl.addEventListener('click', handleClick);
     container.appendChild(sectionEl);
+    // Step U.6 (CONTRACT-U.6.md §3): the app icon, before the form. Static
+    // markup, no state — built once here, never touched by render().
+    const logo = document.createElement('img');
+    logo.className = 'signin-logo';
+    logo.src = 'icons/icon-192.png';
+    logo.alt = '';
+    logo.width = 72;
+    logo.height = 72;
+    sectionEl.appendChild(logo);
     buildForm(sectionEl);
     return sectionEl;
   }

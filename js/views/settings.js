@@ -42,6 +42,10 @@ import { requestAppVersion } from '../net-status.js';
 // screen's idea of "is the lock on" (via readLock()) can never disagree
 // with what enableLock()/disableLock() just wrote.
 import { isWebAuthnSupported, enableLock, disableLock, readLock, markUnlocked } from '../applock.js';
+// Step U.6 (CONTRACT-U.6.md §2): the reorder chevrons and the icon this
+// file's own module never drew before — chrome icons live in ui-icons.js,
+// not icons.js (which draws per-trackable identity icons).
+import { uiIconSvg } from '../ui-icons.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -318,6 +322,11 @@ export function createSettingsView({ store, auth, today } = {}) {
       nameSpan.textContent = typeof t.name === 'string' ? t.name : '';
       li.appendChild(nameSpan);
 
+      // Step U.6 (CONTRACT-U.6.md §2): each button gets a chevron-down glyph
+      // (the up button's is flipped 180° by CSS via
+      // [data-action="move-up"]) plus a visually-hidden span carrying the
+      // original arrow character — textContent stays exactly '↑'/'↓' since
+      // the svg contributes no text nodes.
       const upBtn = document.createElement('button');
       upBtn.type = 'button';
       upBtn.className = 'settings-move';
@@ -325,7 +334,15 @@ export function createSettingsView({ store, auth, today } = {}) {
       upBtn.dataset.id = idStr;
       upBtn.setAttribute('aria-label', 'Move up');
       upBtn.disabled = busy || i === 0;
-      upBtn.textContent = '↑'; // UPWARDS ARROW
+      const upIcon = document.createElement('span');
+      upIcon.className = 'settings-move__icon';
+      upIcon.setAttribute('aria-hidden', 'true');
+      upIcon.innerHTML = uiIconSvg('chevron-down');
+      upBtn.appendChild(upIcon);
+      const upSr = document.createElement('span');
+      upSr.className = 'visually-hidden';
+      upSr.textContent = '↑'; // UPWARDS ARROW
+      upBtn.appendChild(upSr);
       li.appendChild(upBtn);
 
       const downBtn = document.createElement('button');
@@ -335,7 +352,15 @@ export function createSettingsView({ store, auth, today } = {}) {
       downBtn.dataset.id = idStr;
       downBtn.setAttribute('aria-label', 'Move down');
       downBtn.disabled = busy || i === visible.length - 1;
-      downBtn.textContent = '↓'; // DOWNWARDS ARROW
+      const downIcon = document.createElement('span');
+      downIcon.className = 'settings-move__icon';
+      downIcon.setAttribute('aria-hidden', 'true');
+      downIcon.innerHTML = uiIconSvg('chevron-down');
+      downBtn.appendChild(downIcon);
+      const downSr = document.createElement('span');
+      downSr.className = 'visually-hidden';
+      downSr.textContent = '↓'; // DOWNWARDS ARROW
+      downBtn.appendChild(downSr);
       li.appendChild(downBtn);
 
       ol.appendChild(li);
@@ -523,8 +548,10 @@ export function createSettingsView({ store, auth, today } = {}) {
     const supported = isWebAuthnSupported();
     const lock = readLock(localStorageOrNull());
 
+    // Step U.6 (CONTRACT-U.6.md §2): always a status pill; additionally
+    // "good" (green) only while the lock is actually on. Text unchanged.
     const statusP = document.createElement('p');
-    statusP.className = 'settings-applock-status';
+    statusP.className = lock ? 'settings-applock-status pill pill--good' : 'settings-applock-status pill';
     if (!supported) {
       statusP.textContent = 'Not available on this device or browser.';
     } else if (lock) {

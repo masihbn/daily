@@ -568,3 +568,35 @@ test('U.1 — a locked launch shows title "Locked", compact, with the back butto
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.6.md §7 — LU-1: the lock glyph. Written strictly against §4/§5/
+// §7 of that contract; the implementation (js/views/lock.js, css/styles.css)
+// is being written in parallel and is not visible here. The automatic
+// unlock attempt (present since K2) is made to reject, same as K3/K5/U.1,
+// so the lock screen stays visible for this test to observe.
+// ===========================================================================
+
+test('LU-1 — a locked launch shows the lock glyph and a wide Unlock button, with the lock title unchanged', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await seedSession(page);
+  await seedLock(page);
+  await installFakeWebAuthn(page, { get: { ok: false, errorName: 'NotAllowedError' } });
+  await routeEmptyRest(page);
+
+  await page.goto('/index.html#/settings');
+
+  await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
+  await expect(page.locator('.lock-glyph svg')).toHaveCount(1);
+
+  const box = await page.locator('button.lock-unlock').boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(300);
+
+  await expect(page.locator('.lock-title')).toHaveText('Daily is locked');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

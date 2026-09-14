@@ -1022,3 +1022,154 @@ test('F15 — no uncaught page errors, no horizontal scroll at 390px, and every 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
+
+// ===========================================================================
+// CONTRACT-U.6.md §7 — form redesign: preview card, group cards, segmented
+// radios, sticky action bar. Written strictly against §1/§5/§7 of that
+// contract; the implementation (js/views/trackable.js, css/styles.css) is
+// being written in parallel and is not visible here.
+// ===========================================================================
+
+// TU-1 — three group cards, in order, with the right fields inside each
+test('TU-1 — #/new groups .tform-field elements into three .tform-group[data-group] cards, in order: basics, type, goal', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const groups = page.locator('.tform-group[data-group]');
+  await expect(groups).toHaveCount(3);
+  const groupNames = await groups.evaluateAll((els) => els.map((el) => el.getAttribute('data-group')));
+  expect(groupNames).toEqual(['basics', 'type', 'goal']);
+
+  const basics = page.locator('.tform-group[data-group="basics"]');
+  const typeGroup = page.locator('.tform-group[data-group="type"]');
+  const goal = page.locator('.tform-group[data-group="goal"]');
+
+  for (const field of ['name', 'icon', 'color']) {
+    await expect(basics.locator(`.tform-field[data-field="${field}"]`)).toHaveCount(1);
+  }
+  for (const field of ['value_shape', 'direction']) {
+    await expect(typeGroup.locator(`.tform-field[data-field="${field}"]`)).toHaveCount(1);
+  }
+  await expect(goal.locator('.tform-field[data-field="target_type"]')).toHaveCount(1);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// TU-2 — the live preview card reflects name/colour/icon as they are set
+test('TU-2 — the live preview card reflects the name, selected colour and selected icon', async ({ page }) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  await expect(page.locator('.tform-preview-name')).toHaveText('New trackable');
+
+  await page.locator('input[name="name"]').fill('Pushups');
+  await expect(page.locator('.tform-preview-name')).toHaveText('Pushups');
+
+  // Default colour is already #34c759 (F1's documented default) — checking
+  // it here matches CONTRACT-U.6.md §7's TU-2 case verbatim; either way the
+  // preview must reflect it once this radio is (or already was) checked.
+  await page.locator('input[name="color"][value="#34c759"]').check();
+  const previewColor = await page.locator('.tform-preview-icon').evaluate((el) => el.style.color);
+  expect(previewColor === '#34c759' || previewColor.includes('52, 199, 89')).toBe(true);
+
+  const dumbbellRadio = page.locator('input[name="icon"][value="dumbbell"]');
+  const dumbbellId = await dumbbellRadio.getAttribute('id');
+  expect(dumbbellId).toBeTruthy();
+  await page.locator(`label[for="${dumbbellId}"]`).click();
+  await expect(page.locator('.tform-preview-icon')).toHaveAttribute('data-icon', 'dumbbell');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// TU-3 — the value_shape segmented radios: tap-target size, shared baseline,
+// and the label (not the visually-hidden input) is the real tap target
+test('TU-3 — value_shape segmented radios: both label boxes are >=44px tall and share the same y; clicking the "Numeric" label checks its radio', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const booleanRadio = page.locator('input[name="value_shape"][value="boolean"]');
+  const numericRadio = page.locator('input[name="value_shape"][value="numeric"]');
+  const booleanId = await booleanRadio.getAttribute('id');
+  const numericId = await numericRadio.getAttribute('id');
+  expect(booleanId).toBeTruthy();
+  expect(numericId).toBeTruthy();
+
+  const booleanLabel = page.locator(`label[for="${booleanId}"]`);
+  const numericLabel = page.locator(`label[for="${numericId}"]`);
+
+  const booleanBox = await booleanLabel.boundingBox();
+  const numericBox = await numericLabel.boundingBox();
+  expect(booleanBox.height).toBeGreaterThanOrEqual(44);
+  expect(numericBox.height).toBeGreaterThanOrEqual(44);
+  expect(Math.abs(booleanBox.y - numericBox.y)).toBeLessThanOrEqual(2);
+
+  await numericLabel.click();
+  await expect(numericRadio).toBeChecked();
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// TU-4 — the sticky action bar
+test('TU-4 — .tform-actions is a sticky bar containing Save and Cancel, and Save is a wide tap target', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+
+  await page.goto('/index.html#/new');
+
+  const actions = page.locator('.tform-actions');
+  const position = await actions.evaluate((el) => getComputedStyle(el).position);
+  expect(position).toBe('sticky');
+  await expect(actions.locator('.tform-save')).toHaveCount(1);
+  await expect(actions.locator('.tform-cancel')).toHaveCount(1);
+
+  const saveBox = await page.locator('.tform-save').boundingBox();
+  expect(saveBox.width).toBeGreaterThanOrEqual(200);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// TU-5 — the goal group's own hidden toggling.
+//
+// Ambiguity check performed per the task brief: [data-field="target_type"]
+// lives in the "goal" group per CONTRACT-U.6.md §1, and this file's own F1/F2
+// establish (via FIELD_CONTROLS / assertFieldHidden's field list) that the
+// ONLY progressively-hidden fields are unit, aggregation, bounds_enabled,
+// bounds_mode, bound_lower, bound_upper and target_value — target_type is
+// never one of them, for either value_shape. So the goal group always has at
+// least one visible field (target_type) regardless of shape, and can never
+// legitimately carry the `hidden` attribute with this fixture. The boolean
+// case from §7 ("with boolean selected, if the goal group ends up with no
+// visible field it has the hidden attribute") therefore never applies here
+// and is intentionally not exercised; only the numeric non-hidden case is.
+test('TU-5 — the goal group is never hidden for a numeric trackable (target_type always keeps it non-empty; see comment for why the boolean "hidden" case is skipped)', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+
+  await page.goto('/index.html#/new');
+  await page.locator('input[name="value_shape"][value="numeric"]').check();
+
+  const goal = page.locator('.tform-group[data-group="goal"]');
+  await expect(goal).toBeVisible();
+  await expect(goal).not.toHaveAttribute('hidden', '');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});

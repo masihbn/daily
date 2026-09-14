@@ -30,6 +30,8 @@
 import { getAuth } from '../auth.js';
 import { getStore } from '../store.js';
 import { unlock, disableLock } from '../applock.js';
+// Step U.6 (CONTRACT-U.6.md §4): the lock glyph above the title.
+import { uiIconSvg } from '../ui-icons.js';
 
 const ERROR_CANCELLED = 'Unlock was cancelled.';
 const ERROR_UNSUPPORTED = 'Face ID is not available in this browser. Sign out to continue.';
@@ -73,6 +75,12 @@ export function createLockView({ auth, store, storage, session, nav, onUnlocked 
   function buildSection(el) {
     const section = document.createElement('section');
     section.className = 'lock';
+
+    const glyph = document.createElement('span');
+    glyph.className = 'lock-glyph';
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.innerHTML = uiIconSvg('lock');
+    section.appendChild(glyph);
 
     const title = document.createElement('h2');
     title.className = 'lock-title';
