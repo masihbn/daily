@@ -5077,6 +5077,17 @@ network, and reliably picks up new deploys.
 - **Verify the update path explicitly**: bump `CACHE`, deploy, and
   confirm an already-installed client actually picks up the new version.
   This is the single most-repeated gotcha in `PROJECT_NOTES.md`.
+- **Carried over from Step 3.5's device check (2026-09-13):** GitHub
+  Pages serves every file with `Cache-Control: max-age=600`, and the
+  fetch handler's plain `fetch(event.request)` honours the browser's HTTP
+  cache. So for up to 10 minutes after a deploy, a "network-first" fetch
+  returns the PREVIOUS version from the HTTP cache and the user sees no
+  change even after two relaunches — which is exactly what happened with
+  `daily-v34`. Fix here: fetch same-origin assets with
+  `{ cache: 'no-cache' }` (revalidate with the server, still cheap: a 304
+  when unchanged) in both the install handler and the network-first
+  path, so a `CACHE` bump actually reaches the phone on the next launch.
+  Verify on the device by deploying twice within ten minutes.
 - **Carried over from Step 0.3 (found on review, deliberately deferred to
   here):** the install handler's CDN branch calls `cache.put(url, res)`
   without checking `res.ok`. A 404 or 5xx from jsDelivr would be cached
