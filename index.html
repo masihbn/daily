@@ -32,6 +32,12 @@
        and hidden until js/outbox-sync.js finds queued writes.
        role="status" so VoiceOver announces it without stealing focus. -->
   <p id="outbox-status" class="outbox-status" role="status" aria-live="polite" data-count="0" hidden></p>
+  <!-- Step 5.1: visible offline indicator, driven by navigator.onLine and
+       the online/offline events (js/net-status.js). Different fact from
+       the per-view "you appear to be offline" banners: this means "the
+       browser currently believes there is no network," i.e. the app is
+       serving last-known cached data. -->
+  <p id="net-status" class="net-status" role="status" aria-live="polite" data-online="true" hidden></p>
 </header>
 <div id="app"></div>
 <nav id="nav">

@@ -5201,7 +5201,12 @@ cannot be verified from this machine. **Wait before Phase 5.**
 
 ## Step 5.1 — Offline behavior & service-worker pass
 
-**Status:** TODO
+**Status:** DONE (2026-09-14) — suite-verified, **update path and
+airplane mode awaiting the device check** (§7 of the contract: a second
+deploy within ten minutes must reach the phone after ONE relaunch).
+Fresh Implementer and Test Author from `CONTRACT-5.1.md`; one
+test-side fix cycle; one addition (a visible app version). `sw.js`
+`CACHE` → `daily-v39`.
 
 **Goal.** The installed app opens and shows last-known data with no
 network, and reliably picks up new deploys.
@@ -5248,7 +5253,79 @@ network, and reliably picks up new deploys.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+Suite after this step: **4118 green** — 3865 unit (+37), 54 integration,
+199 e2e (+2). New: `js/net-status.js`, `tests/unit/sw-handlers.test.mjs`,
+`tests/unit/net-status.test.mjs`, `tests/e2e/offline.test.mjs`; changed:
+`sw.js`, `js/main.js`, `js/views/settings.js`, `index.html`,
+`css/styles.css`.
+
+*What was actually wrong (found on reading `sw.js`, verified):* the
+fetch handler ran `cache.put()` for EVERY response — Supabase REST and
+auth included (the "two competing stale layers" this step's notes
+forbid), non-GET requests (a `put` with a POST throws inside an
+un-awaited promise), and error responses. And both the install
+`addAll` and the runtime fetch honoured the browser HTTP cache, which
+with GitHub Pages' `max-age=600` is the 10-minute update lag of
+Attempt 15.
+
+*Design decisions taken at execution time:*
+
+- **The worker intercepts only same-origin GETs and the two pinned
+  CDN scripts.** Everything else is not intercepted at all (no
+  `respondWith`), so Supabase never touches the SW cache and `store.js`
+  stays the only data cache.
+- **Bypass the HTTP cache**: install fetches every asset with
+  `cache: 'reload'`; the runtime network-first path uses
+  `cache: 'no-cache'` (revalidate; 304 when unchanged). CDN URLs are
+  versioned and immutable: cache-first.
+- **Only OK responses are cached**, on every path. Offline navigations
+  with no exact match get the cached `index.html`.
+- **One relaunch is enough after a deploy**: main.js reloads once on
+  `controllerchange` (never on first install, never twice) and calls
+  `registration.update()` whenever the page becomes visible — an
+  installed iOS PWA is resumed far more often than reloaded.
+- **`#net-status`**: "Offline — showing last saved data", driven by
+  `navigator.onLine` and the online/offline events. The per-view "this
+  load failed" banners stay; the D.6 outbox indicator stays.
+- **A visible app version**: Settings asks the controlling worker for
+  its cache name (`GET_VERSION` → `VERSION`) and shows "App version
+  daily-v39". Added so the update path can be verified on the phone
+  without guessing.
+- **Testability**: `sw.js` stays a classic worker; the unit tests
+  evaluate it in a Node `vm` sandbox with fake `self`/`caches`/`fetch`
+  and drive the captured listeners — the first time the worker's
+  behaviour is asserted rather than its text.
+
+*The fix cycle.* Group B of the e2e file runs the REAL worker (the one
+place it runs in CI). N3 set the context offline and reloaded; the
+worker served the cached shell correctly, but Chromium under Playwright
+leaves `navigator.onLine === true` on a document created while already
+offline and fires no `offline` event — verified by the Runner with a
+cross-origin probe that failed with ERR_INTERNET_DISCONNECTED. Ruling:
+product code per contract; the test now dispatches the event it cannot
+get from the browser, and keeps the real check (shell + data render
+with no network). The initial-state path is verified on the device.
+
+*Unit (37):* every worker handler — install (`reload` Requests, CDN
+put only when ok, a throwing CDN fetch never fails install), activate
+(old caches deleted), fetch (same-origin ok → cached; 404 → returned
+not cached; network down → cache; navigation → index fallback; nothing
+cached → rejects; Supabase URL → not intercepted; POST → not
+intercepted; CDN cache-first with ok guard), message (SKIP_WAITING,
+GET_VERSION with and without a source); net-status render/start/stop
+and `requestAppVersion` (no controller, reply, timeout).
+
+*E2E (3 tests):* indicator toggles with the context's online state;
+with the worker ALLOWED: the trackables GET is still observed by
+`page.route` (proof the worker no longer intercepts cross-origin),
+`caches.keys()` holds the cache, `main.js` is cached, offline reload
+still renders Home with the indicator, online reload hides it,
+Settings shows "App version daily-v…".
+
+*Device check (pending, §7):* deploy twice within ten minutes and
+confirm the phone shows the new version after one relaunch; airplane
+mode: shell + last data + indicator, log a value, leave airplane mode,
+watch it send.
 
 ---
 
@@ -5553,3 +5630,13 @@ unwind than to ask about.
   decimal below); the N3/N16 unit expectations and S2 wrap
   `deriveBounds` in `roundBound`. Next: Phase 5, starting with the
   service-worker pass (5.1), which also fixes the 10-minute update lag.
+- **2026-09-14** — **Step 5.1 executed.** The worker was caching every
+  response incl. Supabase; now it intercepts only same-origin GETs and
+  the two CDN scripts, bypasses the HTTP cache (`reload` on install,
+  `no-cache` at runtime), caches only OK responses, falls back to the
+  cached index for navigations; the page reloads once when a new
+  worker takes control and checks for updates on every resume; a
+  global offline indicator; Settings shows the app version. Worker
+  handlers unit-tested in a vm sandbox; one e2e group runs the real
+  worker. Suite 4118 green. `CACHE` → `daily-v39`. Device check of the
+  update path next.

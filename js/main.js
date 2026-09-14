@@ -11,6 +11,7 @@ import { createCompareView } from './views/compare.js';
 import { createSignInView } from './views/signin.js';
 import { createSettingsView } from './views/settings.js';
 import { createOutboxSync, renderOutboxStatus } from './outbox-sync.js';
+import { startNetStatus } from './net-status.js';
 import { getStore } from './store.js';
 import { getAuth } from './auth.js';
 
@@ -194,6 +195,46 @@ export function getOutboxSync() {
   return outboxSync;
 }
 
+// Step 5.1 (CONTRACT-5.1 §3). Registers sw.js and handles the update path.
+//
+// §0.5 — one relaunch is enough after a deploy. `controllerchange` fires
+// whenever a new worker takes over — including on the VERY FIRST install,
+// when there was no previous controller and nothing on screen needs
+// refreshing. `hadController` distinguishes "a new version just replaced
+// the one that was serving this page" (reload once) from "this tab just
+// got a controller for the first time" (do nothing). `reloaded` caps it at
+// once per page life so a flaky worker can't loop-reload the page.
+//
+// §0.2 — an installed iOS PWA is resumed (brought to the foreground) far
+// more often than it is actually reloaded, so relying on a fresh page load
+// to discover a new deploy would leave it stale for days. Calling
+// reg.update() whenever the page becomes visible re-checks for a new
+// worker (itself fetched with cache-busting inside sw.js's own network
+// requests) on every foreground.
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    } catch {
+      // Registration failure must never break the app — it just means no
+      // offline support this session, not a broken UI.
+    }
+  });
+}
+
 function bootstrap() {
   // render() is async now (it awaits the home view's mount()); the
   // listener does not need to await it — a stray unhandled rejection can't
@@ -227,11 +268,13 @@ function bootstrap() {
 
   startOutboxSync();
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js');
-    });
-  }
+  // Step 5.1 (CONTRACT-5.1 §3/§0.6). Guarded for a missing element the same
+  // way updateNav() is above — a shell without #net-status must not break
+  // bootstrap().
+  const netStatusEl = document.getElementById('net-status');
+  if (netStatusEl) startNetStatus({ el: netStatusEl });
+
+  registerServiceWorker();
 }
 
 // Guard so importing this module in a non-DOM environment (e.g. a Node

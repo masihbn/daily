@@ -108,6 +108,23 @@ header h1 {
   }
 }
 
+/* Step 5.1 — offline indicator, same placement/shape rules as
+   .outbox-status above (it sits directly below it in the shell). Muted
+   rather than alarming: it states a fact ("showing last saved data"), not
+   an error — nothing is broken and nothing is lost. Uses the existing
+   --fg-muted token (already flips for the light-scheme override above),
+   so no new custom property or dark-mode block is needed. */
+.net-status {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.net-status[hidden] {
+  display: none;
+}
+
 #app {
   flex: 1;
   padding: 16px;

@@ -28,9 +28,9 @@ with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
 create/edit forms, per-trackable charts, and a sign-in screen, all
 wired to `js/api.js` / `js/store.js`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 5.1
-as of 2026-09-14). Nothing in Phase D changed what 3.4 onward need to
-do.
+**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (Step 5.2
+as of 2026-09-14, after 5.1's device check). Nothing in Phase D changed
+what 3.4 onward need to do.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -57,7 +57,7 @@ do.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4079 tests as of the Phase 4 gate** (3828 unit, 54 integration, 197 e2e). See
+**4118 tests as of Step 5.1** (3865 unit, 54 integration, 199 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s
@@ -125,7 +125,11 @@ no subagent may weaken or delete a test to make it pass.
 index.html          entry point (stays at root — GitHub Pages/PWA convention)
 manifest.json        PWA manifest (stays at root)
 sw.js                 service worker (stays at root — its cache scope covers
-                       everything at or below wherever it's served from)
+                       everything at or below wherever it's served from).
+                       Since 5.1: intercepts ONLY same-origin GETs and the two
+                       CDN scripts (never Supabase), bypasses the HTTP cache,
+                       caches only OK responses; classic worker, unit-tested
+                       in a vm sandbox (tests/unit/sw-handlers.test.mjs).
 css/styles.css       all styles
 js/main.js           entry point: router wiring, view render, SW registration.
                       The only file index.html loads as type="module".
@@ -161,6 +165,9 @@ js/outbox-sync.js    Replays the outbox on reconnect / visibility /
 js/icons.js          Icon set for trackables (Step 2.5).
 js/export-csv.js     CSV export (4.2): pure row/CSV builders plus the
                       share → download → textarea delivery chain.
+js/net-status.js     5.1: the global offline indicator (navigator.onLine +
+                      online/offline events) and requestAppVersion(), which
+                      asks the controlling worker for its cache name.
 js/views/            home.js (+ home-model.js), trackable.js (create/
                       edit form), detail.js (calendar + charts + range),
                       compare.js (3.5: #/compare, normalised multi-series),
@@ -272,7 +279,9 @@ production password is the user's alone: never ask for it.
   an isolated network namespace on this machine.
 - If you touch `sw.js` or any cached asset, **bump the `CACHE` constant**
   in `sw.js` — otherwise phones that already installed the app may keep
-  serving stale cached files.
+  serving stale cached files. Since 5.1 a bump reaches the phone after
+  one relaunch (the page reloads itself when the new worker takes
+  control); before 5.1 there was a 10-minute HTTP-cache lag on top.
 - `.mcp.json` is intentionally gitignored (local machine's Supabase MCP
   connector config, not app code) — don't try to force-add it.
 - Schema changes go in `supabase/migrations/` as a new numbered `.sql`

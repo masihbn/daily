@@ -26,6 +26,11 @@ import { visibleTrackables } from './home-model.js';
 // all, and deliverCsv() is the one function in this whole screen that
 // touches navigator/Blob/File/URL.
 import { exportRows, buildCsv, exportFilename, deliverCsv } from '../export-csv.js';
+// Step 5.1 addition: the account block shows the active service worker's
+// CACHE name, sourced through requestAppVersion() — a human-checkable
+// confirmation that a deploy's new worker actually took over. See that
+// function's own comment in net-status.js for why it lives there.
+import { requestAppVersion } from '../net-status.js';
 
 // =============================================================================
 // PURE EXPORTS — no DOM, no fetch, no localStorage. Keep it that way; a
@@ -141,6 +146,14 @@ export function createSettingsView({ store, auth, today } = {}) {
   let settingsError = null; // last move/unarchive failure, or null
 
   let signoutWarningText = '';
+
+  // Step 5.1 addition. `appVersionKnown` starts false so the paragraph is
+  // simply absent until requestAppVersion() settles (mount() fires it after
+  // the first render, without awaiting it — see mount() below); `null` in
+  // appVersionCache after that means "settled but unknown" (no controller,
+  // or the worker never answered), distinct from "hasn't settled yet".
+  let appVersionKnown = false;
+  let appVersionCache = null;
 
   // Step 4.2 (CONTRACT-4.2.md §2). Shares `busy` above with reorder/
   // unarchive (both kinds of action are mutually exclusive on this
@@ -484,6 +497,17 @@ export function createSettingsView({ store, auth, today } = {}) {
     btn.id = 'signout-btn';
     btn.textContent = 'Sign out';
     block.appendChild(btn);
+
+    // Step 5.1 addition: absent until requestAppVersion() settles (see
+    // `appVersionKnown`'s comment above), then either the running cache
+    // name or an explicit "unknown" — never left blank, since a blank
+    // paragraph reads as a loading state that never resolves.
+    if (appVersionKnown) {
+      const versionP = document.createElement('p');
+      versionP.className = 'settings-version';
+      versionP.textContent = appVersionCache ? `App version ${appVersionCache}` : 'App version unknown';
+      block.appendChild(versionP);
+    }
 
     return block;
   }
@@ -868,6 +892,19 @@ export function createSettingsView({ store, auth, today } = {}) {
     // cached — must happen before any await.
     render();
 
+    // Step 5.1 addition: deliberately NOT awaited here — it must never
+    // delay the trackables/settings loads below (Steps 2-3), and it has its
+    // own bounded timeout (net-status.js's requestAppVersion() never
+    // rejects). It settles independently and re-renders the account block
+    // whenever it does, checking `disposed` the same as every other
+    // post-await continuation in this file.
+    requestAppVersion().then((cache) => {
+      if (disposed) return;
+      appVersionKnown = true;
+      appVersionCache = cache;
+      render();
+    });
+
     // Step 2: the Settings screen always loads trackables (including
     // archived rows) on mount, per CONTRACT-4.1.md §0 rule 1 — it is the
     // one screen that must show the truth about order/archived state, not
@@ -922,6 +959,8 @@ export function createSettingsView({ store, auth, today } = {}) {
     exportStatus = '';
     exportError = null;
     exportFallbackText = null;
+    appVersionKnown = false;
+    appVersionCache = null;
   }
 
   return { mount, unmount };
