@@ -312,6 +312,35 @@ removed at Step D.8 (2026-09-13); it is in git history if ever needed.
 
 ## Test log
 
+### Attempt 14 — 2026-09-13, Step 3.4 → 3.4b: the overlay, twice, on the phone
+
+**Context**: the user ended the park the moment the Phase D gate
+passed, so Step 3.4 (correlation overlay) shipped the same afternoon
+as `daily-v30`, and its redesign 3.4b as `daily-v31`.
+
+**3.4 on the device — mechanics right, meaning wrong.** The markers
+appeared, the chips worked, Weekly regrouped them, the selection
+survived a relaunch. But: "I am seeing workout triangles on every
+single week … it doesn't make any sense." A marker for "at least one
+gym day this week" is true of every week for a habit you keep. The
+user's own redesign, on the spot: both series are numbers on the same
+x — the metric on the left axis with its band, the overlay on a right
+axis with its own count and target — so you can see "was I within the
+balance of what I wanted" for both at once. One overlay at a time.
+
+**3.4b on the device — thumbs up.** Weekly: bars per week under the
+calorie line, right axis "days / week", dashed line at 3, green when
+met and red when missed; Monthly scales the target to ~13; tooltips
+"Workout · 4 of 3" and "1916 kcal"; tapping Smoking swaps. Verdict:
+"Nice. I like that. You got the thumbs up to move forward."
+
+**Lesson worth keeping**: for a habit-vs-metric chart the unit of
+information is the *count per period against the target*, never the
+presence of an event. The plan's own suggestion ("pinned to a fixed y
+position") produced a technically correct chart that said nothing —
+the first cut should have started from "what number does the user
+compare", which is what Step 3.5's design already does.
+
 ### Attempt 13 — 2026-09-13, Phase D gate: the park is formal
 
 **Verdict: passed** (user: "it seems like we're good to move forward").

@@ -4620,7 +4620,8 @@ the build parked.**
 ## Step 3.4 — Correlation marker overlay
 
 **Status:** DONE (2026-09-13), **redesigned the same day as 3.4b after
-the device check** — suite-verified, awaiting the second device check.
+the first device check; 3.4b device-verified 2026-09-13** ("Nice. I like
+that."). `PROJECT_NOTES.md` Test log, Attempt 14.
 Started the day the Phase D gate passed, because the user ended the
 park: "there's no reason for us to stop things". Executed under the
 ORCHESTRATION.md loop twice: 3.4 (`CONTRACT-3.4.md`, markers) then 3.4b
@@ -4790,7 +4791,8 @@ range change; tooltip callbacks for both datasets.
 *Not verifiable from this machine:* whether the bars behind the line
 read as "the other thing" at a glance, whether green/red bars under a
 green/red-dotted line is too much colour, and whether the right-axis
-title fits at 390px.
+title fits at 390px. **Device verdict 2026-09-13: thumbs up — "Nice. I
+like that."** All three read fine.
 
 ---
 
