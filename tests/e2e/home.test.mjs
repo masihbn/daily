@@ -210,16 +210,21 @@ async function routeTrackables(page, trackables) {
 
 // post/del configs: { status, body, delayMs } (all optional). `getFixture`
 // is the array returned for GET. Returns arrays this test can assert on:
-// { postRequests, deleteRequests } — each entry { url, headers, body }.
+// { postRequests, deleteRequests, getRequests } — each entry { url, ... }.
+// getRequests is additive (Step U.2 hardening, see U2-2/U2-3/U2-4 below):
+// existing callers that only destructure postRequests/deleteRequests are
+// unaffected.
 async function routeEntries(page, { getFixture = [], post = {}, del = {} } = {}) {
   const postRequests = [];
   const deleteRequests = [];
+  const getRequests = [];
 
   await page.route('**/rest/v1/entries*', async (route) => {
     const req = route.request();
     const method = req.method();
 
     if (method === 'GET') {
+      getRequests.push({ url: req.url() });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -260,7 +265,7 @@ async function routeEntries(page, { getFixture = [], post = {}, del = {} } = {})
     await route.abort();
   });
 
-  return { postRequests, deleteRequests };
+  return { postRequests, deleteRequests, getRequests };
 }
 
 // ===========================================================================
@@ -330,7 +335,8 @@ test('E3 — a boolean row with no entry today renders unlogged', async ({ page 
   // 'Done' / 'Clean' / 'Logged'), not formatValue's '—' / 'Done'. T_BOOL is
   // direction:'build', so unlogged -> 'Not yet'.
   await expect(row.locator('.trow-value')).toHaveText('Not yet');
-  await expect(row.locator('.trow-hint')).toHaveText('Tap to log today');
+  // CONTRACT-U.4b.md §3: 'Tap to log today' -> 'Tap to log'.
+  await expect(row.locator('.trow-hint')).toHaveText('Tap to log');
   const btn = row.locator('.trow-log');
   await expect(btn).toHaveAttribute('aria-pressed', 'false');
   await expect(btn).toHaveAttribute('aria-label', 'Log Workout for today');
@@ -465,7 +471,8 @@ test('E6 — a numeric trackable whose DATA still says relog_semantic:"cumulativ
   await expect(row.locator('.trow-value')).toHaveText('320 kcal');
   // CONTRACT-2.1b.md §3.5: relogHint's wording no longer varies by
   // relog_semantic at all — was 'Today: 320 kcal · new value is added'.
-  await expect(row.locator('.trow-hint')).toHaveText('Today: 320 kcal · tap to change');
+  // CONTRACT-U.4b.md §3: 'Today: 320 kcal · tap to change' -> 'Tap to change'.
+  await expect(row.locator('.trow-hint')).toHaveText('Tap to change');
 
   await row.locator('.trow-log').click();
 
@@ -1475,9 +1482,21 @@ test('U2-2 — every .trow-log has visible text "Log", an icon svg, aria-label "
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_CUM]);
-  await routeEntries(page, { getFixture: [] });
+  const { getRequests: entriesGets } = await routeEntries(page, { getFixture: [] });
 
   await page.goto('/index.html#/');
+
+  // Home paints more than once (cache, then trackables, then entries — see
+  // js/views/home.js's mount()/refresh sequence), and each paint rebuilds
+  // the li.trow elements from scratch. Wait for the FINAL paint before
+  // measuring anything: data-home-state="ready" plus the entries GET having
+  // actually landed, then one more animation frame so layout has settled on
+  // the rebuilt DOM. Without this, boundingBox() below can race a rebuild
+  // and return null (Orchestrator ruling, confirmed 4/5 runs on the
+  // untouched baseline).
+  await expect(page.locator('section.home')).toHaveAttribute('data-home-state', 'ready');
+  await expect.poll(() => entriesGets.length).toBeGreaterThan(0);
+  await page.evaluate(() => new Promise(requestAnimationFrame));
 
   const cases = [
     { id: '1', name: 'Workout' },
@@ -1495,13 +1514,35 @@ test('U2-2 — every .trow-log has visible text "Log", an icon svg, aria-label "
     await expect(log.locator('.trow-log__icon svg')).toHaveCount(1);
     await expect(log).toHaveAttribute('aria-label', `Log ${name} for today`);
 
-    const trowBox = await row.boundingBox();
-    const logBox = await log.boundingBox();
-    expect(logBox.width).toBeGreaterThanOrEqual(44);
-    expect(logBox.height).toBeGreaterThanOrEqual(44);
+    // Each geometry check re-reads boundingBox() inside the poll callback
+    // (not just once beforehand) so a still-in-flight rebuild yields a
+    // transient null that the poll retries, rather than throwing.
+    await expect
+      .poll(async () => {
+        const box = await log.boundingBox();
+        return box ? box.width : null;
+      })
+      .toBeGreaterThanOrEqual(44);
+
+    await expect
+      .poll(async () => {
+        const box = await log.boundingBox();
+        return box ? box.height : null;
+      })
+      .toBeGreaterThanOrEqual(44);
+
     // Contract formula: the log button's right edge must be within 24px of
-    // the card's right padding edge (card padding assumed 16px).
-    expect(trowBox.x + trowBox.width - 16 - 24).toBeLessThanOrEqual(logBox.x + logBox.width);
+    // the card's right padding edge (card padding assumed 16px). Recast as
+    // (left side - right side) <= 0 so the poll has a single numeric value
+    // to compare.
+    await expect
+      .poll(async () => {
+        const trowBox = await row.boundingBox();
+        const logBox = await log.boundingBox();
+        if (!trowBox || !logBox) return null;
+        return trowBox.x + trowBox.width - 16 - 24 - (logBox.x + logBox.width);
+      })
+      .toBeLessThanOrEqual(0);
   }
 
   expect(unexpected).toEqual([]);
@@ -1514,19 +1555,49 @@ test('U2-3 — .trow-value sits above .trow-log and is right-aligned with it (wi
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL, T_CUM]);
-  await routeEntries(page, { getFixture: [] });
+  const { getRequests: entriesGets } = await routeEntries(page, { getFixture: [] });
 
   await page.goto('/index.html#/');
 
+  // See U2-2's comment: wait for the FINAL render (data-home-state="ready"
+  // + the entries GET having landed + one animation frame) before measuring
+  // — Home rebuilds its li.trow elements across its cache/trackables/entries
+  // paint sequence, and measuring mid-rebuild is what made this test flaky
+  // (Orchestrator ruling: confirmed 4/5 runs failing on the untouched
+  // baseline with boundingBox() returning null).
+  await expect(page.locator('section.home')).toHaveAttribute('data-home-state', 'ready');
+  await expect.poll(() => entriesGets.length).toBeGreaterThan(0);
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+
   for (const id of ['1', '2']) {
     const row = page.locator(`li.trow[data-trackable-id="${id}"]`);
-    const valueBox = await row.locator('.trow-value').boundingBox();
-    const logBox = await row.locator('.trow-log').boundingBox();
+    const value = row.locator('.trow-value');
+    const log = row.locator('.trow-log');
 
-    expect(valueBox.y + valueBox.height).toBeLessThanOrEqual(logBox.y + 1);
-    const valueRight = valueBox.x + valueBox.width;
-    const logRight = logBox.x + logBox.width;
-    expect(Math.abs(valueRight - logRight)).toBeLessThanOrEqual(2);
+    // Each poll re-reads both boxes fresh on every attempt (not just once
+    // beforehand), so a transient null from an in-flight rebuild is
+    // retried instead of throwing. Recast as (left side - right side) so
+    // there is a single numeric value to compare against the same
+    // threshold the original assertion used.
+    await expect
+      .poll(async () => {
+        const valueBox = await value.boundingBox();
+        const logBox = await log.boundingBox();
+        if (!valueBox || !logBox) return null;
+        return valueBox.y + valueBox.height - (logBox.y + 1);
+      })
+      .toBeLessThanOrEqual(0);
+
+    await expect
+      .poll(async () => {
+        const valueBox = await value.boundingBox();
+        const logBox = await log.boundingBox();
+        if (!valueBox || !logBox) return null;
+        const valueRight = valueBox.x + valueBox.width;
+        const logRight = logBox.x + logBox.width;
+        return Math.abs(valueRight - logRight);
+      })
+      .toBeLessThanOrEqual(2);
   }
 
   expect(unexpected).toEqual([]);
@@ -1539,24 +1610,69 @@ test('U2-4 — boolean row logged today: .trow-value text "Done", and the .trow-
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
   await routeTrackables(page, [T_BOOL]);
-  await routeEntries(page, {
+  const { getRequests: entriesGets } = await routeEntries(page, {
     getFixture: [{ id: 960, trackable_id: 1, entry_date: TODAY, value: 1, note: null }],
   });
 
   await page.goto('/index.html#/');
 
+  // See U2-2/U2-3's comment: wait for the FINAL render before measuring —
+  // Home rebuilds its li.trow elements across its cache/trackables/entries
+  // paint sequence, and measuring mid-rebuild is what made this shape of
+  // test flaky (Orchestrator ruling).
+  await expect(page.locator('section.home')).toHaveAttribute('data-home-state', 'ready');
+  await expect.poll(() => entriesGets.length).toBeGreaterThan(0);
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+
   const row = page.locator('li.trow[data-trackable-id="1"]');
   await expect(row.locator('.trow-value')).toHaveText('Done');
 
-  const iconBox = await row.locator('.trow-icon').boundingBox();
-  const symbolBox = await row.locator('.trow-symbol').boundingBox();
-  const cx = symbolBox.x + symbolBox.width / 2;
-  const cy = symbolBox.y + symbolBox.height / 2;
+  const icon = row.locator('.trow-icon');
+  const symbol = row.locator('.trow-symbol');
 
-  expect(cx).toBeGreaterThanOrEqual(iconBox.x - 6);
-  expect(cx).toBeLessThanOrEqual(iconBox.x + iconBox.width + 6);
-  expect(cy).toBeGreaterThanOrEqual(iconBox.y - 6);
-  expect(cy).toBeLessThanOrEqual(iconBox.y + iconBox.height + 6);
+  // Each poll re-reads both boxes fresh on every attempt (not just once
+  // beforehand), so a transient null from an in-flight rebuild is retried
+  // instead of throwing. Recast as (value - threshold) so there is a single
+  // numeric value to compare, same threshold as the original assertion.
+  await expect
+    .poll(async () => {
+      const iconBox = await icon.boundingBox();
+      const symbolBox = await symbol.boundingBox();
+      if (!iconBox || !symbolBox) return null;
+      const cx = symbolBox.x + symbolBox.width / 2;
+      return cx - (iconBox.x - 6);
+    })
+    .toBeGreaterThanOrEqual(0);
+
+  await expect
+    .poll(async () => {
+      const iconBox = await icon.boundingBox();
+      const symbolBox = await symbol.boundingBox();
+      if (!iconBox || !symbolBox) return null;
+      const cx = symbolBox.x + symbolBox.width / 2;
+      return cx - (iconBox.x + iconBox.width + 6);
+    })
+    .toBeLessThanOrEqual(0);
+
+  await expect
+    .poll(async () => {
+      const iconBox = await icon.boundingBox();
+      const symbolBox = await symbol.boundingBox();
+      if (!iconBox || !symbolBox) return null;
+      const cy = symbolBox.y + symbolBox.height / 2;
+      return cy - (iconBox.y - 6);
+    })
+    .toBeGreaterThanOrEqual(0);
+
+  await expect
+    .poll(async () => {
+      const iconBox = await icon.boundingBox();
+      const symbolBox = await symbol.boundingBox();
+      if (!iconBox || !symbolBox) return null;
+      const cy = symbolBox.y + symbolBox.height / 2;
+      return cy - (iconBox.y + iconBox.height + 6);
+    })
+    .toBeLessThanOrEqual(0);
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
@@ -1615,6 +1731,107 @@ test('U2-6 — .home-new: text "New trackable", contains an svg, and is a large 
   const box = await link.boundingBox();
   expect(box.height).toBeGreaterThanOrEqual(44);
   expect(box.width).toBeGreaterThanOrEqual(300);
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// ===========================================================================
+// CONTRACT-U.4b.md §7 — G1 through G3 (centred glyphs, route-transition
+// attribute, reduced-motion support)
+// ===========================================================================
+
+// G1 — CONTRACT-U.4b.md §2: every icon-button's svg must be centred inside
+// its button, not just visually close. T_BOOL/T_CUM/T_STATE (boolean and
+// two numeric shapes) give three .trow-log buttons to check, reusing the
+// same fixture set as E15's tap-target sweep.
+test('G1 — every .trow-log button has its icon svg centred within 1.5px of the button centre, on both axes', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL, T_CUM, T_STATE]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const buttons = page.locator('.trow-log');
+  const count = await buttons.count();
+  expect(count).toBe(3);
+
+  for (let i = 0; i < count; i++) {
+    const btn = buttons.nth(i);
+    const svg = btn.locator('svg');
+    await expect(svg).toHaveCount(1);
+    const btnBox = await btn.boundingBox();
+    const svgBox = await svg.boundingBox();
+    const btnCx = btnBox.x + btnBox.width / 2;
+    const btnCy = btnBox.y + btnBox.height / 2;
+    const svgCx = svgBox.x + svgBox.width / 2;
+    const svgCy = svgBox.y + svgBox.height / 2;
+    expect(Math.abs(btnCx - svgCx)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(btnCy - svgCy)).toBeLessThanOrEqual(1.5);
+  }
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// G2 — CONTRACT-U.4b.md §4: js/main.js's render() must call
+// restartTransition(app) right after painting any route, marking
+// #app[data-transition="in"]. Checked after Home's initial paint, again
+// after navigating to Settings, and again after navigating back to Home —
+// every route render must (re-)apply the attribute, not just the first one.
+test('G2 — #app carries data-transition="in" after Home renders, after Settings renders, and after Home renders again', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, { getFixture: [] });
+  // #/settings mounts and GETs app_settings in addition to trackables —
+  // route it so the navigation below doesn't fall through to installGuard's
+  // catch-all abort (same fixture shape as U2-5 above).
+  await page.route('**/rest/v1/app_settings*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 1, rolling_window_days: 90, updated_at: '2026-01-01T00:00:00Z' }]),
+    });
+  });
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('#app')).toHaveAttribute('data-transition', 'in');
+
+  await page.goto('/index.html#/settings');
+  await expect(page.locator('#app')).toHaveAttribute('data-transition', 'in');
+
+  await page.goto('/index.html#/');
+  await expect(page.locator('#app')).toHaveAttribute('data-transition', 'in');
+
+  expect(unexpected).toEqual([]);
+  expect(unexpectedAuth).toEqual([]);
+});
+
+// G3 — CONTRACT-U.4b.md §4: the view-in keyframe animation is scoped inside
+// `@media (prefers-reduced-motion: no-preference)`, so with
+// prefers-reduced-motion: reduce the browser must never apply it at all —
+// #view's computed animation-name must be 'none'.
+test('G3 — with prefers-reduced-motion: reduce, #view has no animation applied (computed animation-name is "none")', async ({
+  page,
+}) => {
+  const unexpected = await installGuard(page);
+  const unexpectedAuth = await installAuthGuard(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await routeTrackables(page, [T_BOOL]);
+  await routeEntries(page, { getFixture: [] });
+
+  await page.goto('/index.html#/');
+
+  const view = page.locator('#view');
+  await expect(view).toHaveCount(1);
+  const animationName = await view.evaluate((el) => getComputedStyle(el).animationName);
+  expect(animationName).toBe('none');
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);

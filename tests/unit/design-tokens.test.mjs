@@ -329,3 +329,28 @@ describe('T9 — sw.js updated for the new module (CONTRACT-U.0.md §5, §7)', (
     assert.ok(Number(match[1]) >= 45, `expected CACHE number >= 45, got daily-v${match[1]}`);
   });
 });
+
+// ===========================================================================
+// T10 — the dark :root's smaller type scale (CONTRACT-U.4b.md §1, §7):
+// --t-body drops from 16px to 15px and --t-lg-title drops from 32px to 30px.
+// ===========================================================================
+
+describe('T10 — dark :root defines the CONTRACT-U.4b.md §1 smaller type scale', () => {
+  const darkRoot = findRootBlockContent(css);
+
+  it('a :root {} block exists at all', () => {
+    assert.ok(darkRoot !== null, 'expected a :root {...} block in css/styles.css');
+  });
+
+  it('--t-body contains 15px', () => {
+    const match = darkRoot && darkRoot.match(/--t-body\s*:\s*([^;]+);/);
+    assert.ok(match, 'expected the dark :root {} block to define --t-body');
+    assert.match(match[1], /15px/, `expected --t-body to contain 15px, got: ${match[1]}`);
+  });
+
+  it('--t-lg-title contains 30px', () => {
+    const match = darkRoot && darkRoot.match(/--t-lg-title\s*:\s*([^;]+);/);
+    assert.ok(match, 'expected the dark :root {} block to define --t-lg-title');
+    assert.match(match[1], /30px/, `expected --t-lg-title to contain 30px, got: ${match[1]}`);
+  });
+});

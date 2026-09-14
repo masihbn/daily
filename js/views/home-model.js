@@ -96,14 +96,16 @@ export function relogHint(trackable, entry) {
   const has = hasEntryValue(trackable, entry);
   const shape = trackable.value_shape;
 
+  // Step U.4b (CONTRACT-U.4b.md §3, contract change): the value is already
+  // shown in .trow-value, so the old "Today: 320 kcal ·"/"Logged today ·"
+  // prefix was a duplicate that wrapped awkwardly on a 390px phone. Down to
+  // the bare action.
   if (shape === 'boolean') {
-    return has ? `Logged today${DOT}tap to clear` : 'Tap to log today';
+    return has ? 'Tap to clear' : 'Tap to log';
   }
 
   if (shape === 'numeric') {
-    return has
-      ? `Today: ${formatValue(trackable, entry.value)}${DOT}tap to change`
-      : "Tap to log today's value";
+    return has ? 'Tap to change' : 'Tap to log';
   }
 
   return '';

@@ -223,51 +223,60 @@ describe('formatValue — additional documented rules', () => {
 // relogHint (contract §2.3)
 // ===========================================================================
 
-describe('relogHint — worked examples (contract §2.3, assert exactly; wording updated by CONTRACT-2.1b.md §3.5)', () => {
+describe('relogHint — worked examples (contract §2.3, assert exactly; wording updated by CONTRACT-2.1b.md §3.5, then again by CONTRACT-U.4b.md §3)', () => {
   // 2.1b: additive logging is removed from the product. relog_semantic no
   // longer affects relogHint's output AT ALL — the numeric branch is keyed
-  // purely on value_shape/logged now. Two consequences visible below vs.
-  // the original Step 2.1 fixture table:
-  //   - the "new value is added" / "new value replaces it" wording is gone,
-  //     replaced by neutral "tap to change" / "Tap to log today's value"
-  //     text that says nothing about semantics.
+  // purely on value_shape/logged now.
   //   - a numeric trackable with NO relog_semantic at all (case 9) used to
   //     fall through to '' (the old code only recognized 'cumulative' and
   //     'state'); now the numeric branch doesn't look at relog_semantic to
   //     decide whether to apply at all, so it produces real hint text.
+  //
+  // U.4b (CONTRACT-U.4b.md §3, a further contract change to the hint text):
+  // the wording is shortened again and the two shapes converge to the same
+  // four strings regardless of unit/value — 'Tap to clear' / 'Tap to log' /
+  // 'Tap to change' / 'Tap to log'. The old "Today: <value> <unit> · tap to
+  // change", "Logged today · tap to clear" and "Tap to log today('s value)"
+  // phrasing (with its middle-dot separator and apostrophe) is gone
+  // entirely — see the §3 table:
+  //   boolean, logged    -> 'Tap to clear'
+  //   boolean, unlogged  -> 'Tap to log'
+  //   numeric, logged    -> 'Tap to change'
+  //   numeric, unlogged  -> 'Tap to log'
+  //   other/invalid      -> '' (unchanged)
   const cases = [
-    [{ value_shape: 'boolean' }, null, 'Tap to log today'],
-    [{ value_shape: 'boolean' }, { value: 1 }, 'Logged today · tap to clear'],
-    [{ value_shape: 'boolean' }, { value: 0 }, 'Tap to log today'],
+    [{ value_shape: 'boolean' }, null, 'Tap to log'],
+    [{ value_shape: 'boolean' }, { value: 1 }, 'Tap to clear'],
+    [{ value_shape: 'boolean' }, { value: 0 }, 'Tap to log'],
     [
       { value_shape: 'numeric', relog_semantic: 'cumulative', unit: 'kcal' },
       null,
-      "Tap to log today's value",
+      'Tap to log',
     ],
     [
       { value_shape: 'numeric', relog_semantic: 'cumulative', unit: 'kcal' },
       { value: 320 },
-      'Today: 320 kcal · tap to change',
+      'Tap to change',
     ],
     [
       { value_shape: 'numeric', relog_semantic: 'state', unit: 'kg' },
       null,
-      "Tap to log today's value",
+      'Tap to log',
     ],
     [
       { value_shape: 'numeric', relog_semantic: 'state', unit: 'kg' },
       { value: 78.4 },
-      'Today: 78.4 kg · tap to change',
+      'Tap to change',
     ],
     [
       { value_shape: 'numeric', relog_semantic: 'cumulative', unit: 'kcal' },
       { value: 0 },
-      'Today: 0 kcal · tap to change',
+      'Tap to change',
     ],
     // case 9: no relog_semantic at all — 2.1b: numeric hint no longer
     // depends on relog_semantic, so this is NOT '' any more (see comment
     // above). This is a changed expectation, not a new case.
-    [{ value_shape: 'numeric' }, null, "Tap to log today's value"],
+    [{ value_shape: 'numeric' }, null, 'Tap to log'],
     [{}, null, ''],
     [null, null, ''],
   ];
@@ -281,30 +290,43 @@ describe('relogHint — worked examples (contract §2.3, assert exactly; wording
   }
 });
 
+describe('relogHint — CONTRACT-U.4b.md §3: numeric + entry value 0 is logged, not "no entry" (new case added per §7)', () => {
+  // 0 is a real numeric value (falsy in JS but a genuine logged amount, e.g.
+  // "0 kcal" or "0 cigarettes") — relogHint's "has an entry" predicate must
+  // treat it as logged, same as the boolean case 3 above treats {value: 0}
+  // as unlogged for a *different* reason (0 isn't a truthy boolean flag).
+  it('numeric, entry with value 0 -> "Tap to change" (0 counts as a real logged value)', () => {
+    assert.equal(
+      relogHint({ value_shape: 'numeric', unit: 'kcal' }, { value: 0 }),
+      'Tap to change'
+    );
+  });
+});
+
 describe('relogHint — CONTRACT-2.1b.md §3.5 worked examples (assert exactly)', () => {
   const cases = [
     [
       { value_shape: 'boolean', direction: 'build' },
       { value: 1 },
-      'Logged today · tap to clear',
+      'Tap to clear',
     ],
     [
       { value_shape: 'boolean', direction: 'break' },
       { value: 1 },
-      'Logged today · tap to clear',
+      'Tap to clear',
     ],
-    [{ value_shape: 'boolean', direction: 'break' }, null, 'Tap to log today'],
+    [{ value_shape: 'boolean', direction: 'break' }, null, 'Tap to log'],
     [
       { value_shape: 'numeric', unit: 'kcal', relog_semantic: 'state' },
       { value: 2000 },
-      'Today: 2000 kcal · tap to change',
+      'Tap to change',
     ],
     [
       { value_shape: 'numeric', unit: 'kcal', relog_semantic: 'cumulative' },
       { value: 2000 },
-      'Today: 2000 kcal · tap to change',
+      'Tap to change',
     ],
-    [{ value_shape: 'numeric', unit: 'kg' }, null, "Tap to log today's value"],
+    [{ value_shape: 'numeric', unit: 'kg' }, null, 'Tap to log'],
     [{}, null, ''],
   ];
 
@@ -337,7 +359,9 @@ describe('relogHint — REGRESSION GUARD: additive wording is gone, not merely d
       { value: 2000 }
     );
     assert.equal(stateHint, cumulativeHint);
-    assert.equal(stateHint, 'Today: 2000 kcal · tap to change');
+    // CONTRACT-U.4b.md §3: wording shortened again, "Today: 2000 kcal · tap
+    // to change" -> 'Tap to change'.
+    assert.equal(stateHint, 'Tap to change');
   });
 
   it('not logged: state vs cumulative produce identical hint text', () => {
@@ -350,7 +374,8 @@ describe('relogHint — REGRESSION GUARD: additive wording is gone, not merely d
       null
     );
     assert.equal(stateHint, cumulativeHint);
-    assert.equal(stateHint, "Tap to log today's value");
+    // CONTRACT-U.4b.md §3: "Tap to log today's value" -> 'Tap to log'.
+    assert.equal(stateHint, 'Tap to log');
   });
 
   it('boolean hint text is identical for build vs break direction (meaning is carried by verdict/statusWord/statusSymbol, not preachy hint text)', () => {
@@ -365,18 +390,19 @@ describe('relogHint — REGRESSION GUARD: additive wording is gone, not merely d
 });
 
 describe('relogHint — additional documented rules', () => {
-  it('the separator is exactly space + U+00B7 MIDDLE DOT + space', () => {
+  it('CONTRACT-U.4b.md §3: the boolean logged hint is the exact short string "Tap to clear" — the old " · " middle-dot separator format is gone', () => {
     const hint = relogHint({ value_shape: 'boolean' }, { value: 1 });
-    assert.ok(hint.includes(' · '), `expected " \\u00B7 " inside: ${JSON.stringify(hint)}`);
+    assert.equal(hint, 'Tap to clear');
+    assert.doesNotMatch(hint, /·/, `expected no middle dot in the new short hint: ${JSON.stringify(hint)}`);
   });
 
-  it('apostrophes in the "no entry" numeric hint are ASCII U+0027, not a curly quote (both relog_semantic values converge on the same string per 2.1b)', () => {
+  it('CONTRACT-U.4b.md §3: the "no entry" numeric hint is the exact short string "Tap to log" (the old apostrophe-bearing "...today\'s value" wording is gone); both relog_semantic values still converge on the same string per 2.1b', () => {
     const cumHint = relogHint({ value_shape: 'numeric', relog_semantic: 'cumulative' }, null);
     const stateHint = relogHint({ value_shape: 'numeric', relog_semantic: 'state' }, null);
-    assert.ok(cumHint.includes("'"));
-    assert.ok(stateHint.includes("'"));
-    assert.doesNotMatch(cumHint, /[‘’]/);
-    assert.doesNotMatch(stateHint, /[‘’]/);
+    assert.equal(cumHint, 'Tap to log');
+    assert.equal(stateHint, 'Tap to log');
+    assert.doesNotMatch(cumHint, /'/);
+    assert.doesNotMatch(stateHint, /'/);
   });
 
   // 2.1b: relogHint's numeric branch no longer keys on relog_semantic at
@@ -385,10 +411,10 @@ describe('relogHint — additional documented rules', () => {
   // it still produces real hint text, not ''. (Previously the numeric
   // branch only recognized 'cumulative'/'state' and anything else fell
   // through to the empty-string default; that fallthrough is gone.)
-  it('an unrecognized relog_semantic on a numeric trackable no longer falls back to empty string (2.1b: relog_semantic is ignored by relogHint)', () => {
+  it('an unrecognized relog_semantic on a numeric trackable no longer falls back to empty string (2.1b: relog_semantic is ignored by relogHint; wording per CONTRACT-U.4b.md §3)', () => {
     assert.equal(
       relogHint({ value_shape: 'numeric', relog_semantic: 'weird' }, null),
-      "Tap to log today's value"
+      'Tap to log'
     );
   });
 
@@ -397,11 +423,12 @@ describe('relogHint — additional documented rules', () => {
   });
 
   it('entry with a non-finite value counts as "no entry" (has = false)', () => {
-    assert.equal(relogHint({ value_shape: 'boolean' }, { value: NaN }), 'Tap to log today');
     // 2.1b: no longer "Adds to today's total" — additive wording is gone.
+    // CONTRACT-U.4b.md §3: wording shortened again to 'Tap to log'.
+    assert.equal(relogHint({ value_shape: 'boolean' }, { value: NaN }), 'Tap to log');
     assert.equal(
       relogHint({ value_shape: 'numeric', relog_semantic: 'cumulative' }, { value: Infinity }),
-      "Tap to log today's value"
+      'Tap to log'
     );
   });
 });
@@ -908,8 +935,10 @@ describe('rowModel — worked examples (contract §2.6, assert exactly; extended
       logged: false,
       // 2.1b: hint wording is unchanged for booleans, but the row now also
       // carries verdict/statusWord/statusSymbol/directionLabel.
+      // CONTRACT-U.4b.md §3: wording shortened again, 'Tap to log today' ->
+      // 'Tap to log'.
       valueText: '—',
-      hint: 'Tap to log today',
+      hint: 'Tap to log',
       state: 'idle',
       color: null,
       // CONTRACT-2.5.md §3.1: rowModel adds icon the same way it already
@@ -943,8 +972,9 @@ describe('rowModel — worked examples (contract §2.6, assert exactly; extended
       logged: true,
       valueText: '320 kcal',
       // 2.1b: was 'Today: 320 kcal · new value is added'; additive wording
-      // is gone regardless of relog_semantic.
-      hint: 'Today: 320 kcal · tap to change',
+      // is gone regardless of relog_semantic. CONTRACT-U.4b.md §3: wording
+      // shortened again, 'Today: 320 kcal · tap to change' -> 'Tap to change'.
+      hint: 'Tap to change',
       state: 'pending',
       color: '#ff0',
       // CONTRACT-2.5.md §3.1: no icon on this fixture -> null.

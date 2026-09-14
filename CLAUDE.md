@@ -60,7 +60,7 @@ full-screen sideways-scrolling charts; no data-flow changes.
 
 There is a cumulative regression suite: `npm test` runs unit →
 integration → e2e and must be green before any step is marked DONE.
-**4703 tests as of Step U.4** (4409 unit, 54 integration, 240 e2e). See
+**4710 tests as of Step U.4b** (4413 unit, 54 integration, 243 e2e). See
 `docs/ORCHESTRATION.md`.
 
 **User decisions on record (2026-08-25), all in `BUILD_PLAN.md`'s

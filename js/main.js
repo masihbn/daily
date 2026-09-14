@@ -155,6 +155,21 @@ function updateNav(routeName) {
   });
 }
 
+// Step U.4b (CONTRACT-U.4b.md §4). Re-applies #app's data-transition
+// attribute on every render() (including a same-route re-render) so the
+// CSS `view-in` animation on #view always replays: removing the attribute,
+// forcing a synchronous reflow (`el.offsetWidth`), then re-adding it is
+// what stops the browser from coalescing a same-value attribute write into
+// a no-op that skips the animation. CSS gates the animation itself behind
+// `prefers-reduced-motion: no-preference` (styles.css), so this is a no-op
+// under reduced motion regardless.
+function restartTransition(el) {
+  if (!el) return;
+  el.removeAttribute('data-transition');
+  void el.offsetWidth; // force reflow so the animation restarts
+  el.setAttribute('data-transition', 'in');
+}
+
 async function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -186,6 +201,7 @@ async function render() {
   if (!signedIn) {
     setTitle(VIEW_TITLES.signin, { size: 'compact' });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createSignInView({
       auth,
       onSignedIn: () => {
@@ -222,6 +238,7 @@ async function render() {
     nav.hidden = true;
     setTitle(VIEW_TITLES.locked, { size: 'compact' });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createLockView({ auth, store: getStore(), onUnlocked: () => render() });
     currentView.mount(document.getElementById('view'));
     return;
@@ -250,11 +267,13 @@ async function render() {
 
   if (route.name === 'chart') {
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createFullscreenView({ id: route.params.id, kind: route.params.kind });
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'home') {
     setTitle(VIEW_TITLES.home, { size: 'large', sub: longDateLabel(todayLocal()) });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createHomeView();
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'new' || route.name === 'edit') {
@@ -262,6 +281,7 @@ async function render() {
     const back = route.name === 'edit' ? `#/t/${encodeURIComponent(route.params.id)}` : '#/';
     setTitle(title, { size: 'compact', back });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView =
       route.name === 'edit'
         ? createTrackableView({ mode: 'edit', id: route.params.id })
@@ -275,6 +295,7 @@ async function render() {
     // trackable's name (or 'Not found') — see js/views/detail.js.
     setTitle(VIEW_TITLES.detail, { size: 'compact', back: '#/' });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createDetailView({
       id: route.params.id,
       onTitle: (text) => setTitle(text, { size: 'compact', back: '#/' }),
@@ -285,6 +306,7 @@ async function render() {
     // to be a `case 'compare'` branch inside renderView() below.
     setTitle(VIEW_TITLES.compare, { size: 'large' });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createCompareView();
     await currentView.mount(document.getElementById('view'));
   } else if (route.name === 'settings') {
@@ -293,12 +315,14 @@ async function render() {
     // js/views/settings.js — see that file's handleSignOutClick()).
     setTitle(VIEW_TITLES.settings, { size: 'large' });
     app.innerHTML = '<div id="view"></div>';
+    restartTransition(app);
     currentView = createSettingsView();
     await currentView.mount(document.getElementById('view'));
   } else {
     const { title, body } = renderView(route);
     setTitle(title, { size: 'compact', back: '#/' });
     app.innerHTML = body;
+    restartTransition(app);
   }
 }
 

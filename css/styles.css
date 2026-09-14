@@ -41,12 +41,15 @@
   --danger: var(--bad);
   /* type */
   --font: -apple-system, system-ui, "SF Pro Text", "Segoe UI", sans-serif;
-  --t-lg-title: 700 34px/1.15 var(--font);
-  --t-title: 700 22px/1.2 var(--font);
-  --t-head: 600 17px/1.3 var(--font);
-  --t-body: 400 17px/1.4 var(--font);
-  --t-sub: 400 15px/1.4 var(--font);
-  --t-cap: 500 13px/1.35 var(--font);
+  /* Step U.4b (CONTRACT-U.4b.md §1): one step down — device feedback said
+     "all the text is weirdly big" (-apple-system renders larger on the
+     phone than the Windows screenshots suggested). */
+  --t-lg-title: 700 30px/1.15 var(--font);
+  --t-title: 700 20px/1.2 var(--font);
+  --t-head: 600 16px/1.3 var(--font);
+  --t-body: 400 15px/1.4 var(--font);
+  --t-sub: 400 14px/1.4 var(--font);
+  --t-cap: 500 12px/1.35 var(--font);
   --t-micro: 600 11px/1.2 var(--font);
   /* space, radius */
   --s1: 4px;
@@ -361,6 +364,130 @@ button {
   }
 }
 
+/* Step U.4b (CONTRACT-U.4b.md §4) — first motion. #app[data-transition="in"]
+   is re-applied (remove -> reflow -> add, see main.js's restartTransition())
+   on every render(), including a same-route re-render, so #view always
+   replays the fade/slide-in. Press states and the loading shimmer live in
+   the same guard so a reduced-motion preference kills all three at once —
+   the existing global `prefers-reduced-motion: reduce` block above already
+   kills any transition/animation this block starts. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Fix cycle (CONTRACT-U.4b.md §4): excludes the full-screen chart routes.
+     A `transform` on #view (the animation below sets one) makes #view the
+     containing block for any `position: fixed` descendant — including
+     .fullscreen (js/views/fullscreen.js) — so for the animation's 180ms the
+     fullscreen section would be positioned against #view's box instead of
+     the viewport, landing ~16px in from the true edges. compare-chart is
+     U.5's future route (not wired yet); listed now so nobody has to
+     remember to add it later. */
+  #app:not([data-route="chart"]):not([data-route="compare-chart"])[data-transition="in"] > #view {
+    animation: view-in 180ms ease-out both;
+  }
+
+  /* Opacity ONLY (fix cycle 3, CONTRACT-U.4b.md §4): besides the
+     containing-block trap above, a transform on #view also perturbs
+     descendant getBoundingClientRect() geometry while it animates (float
+     compositor math read 43.99998px for a 44px control once in 234 runs).
+     A fade reads the same at this size; the slide is not worth the noise. */
+  @keyframes view-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .btn,
+  .seg__item,
+  .chip,
+  .overlay-chip,
+  .compare-chip,
+  .trow-log,
+  .trow,
+  .hm-cell,
+  .list__row,
+  .detail-range,
+  .trend-period,
+  .bounds-period,
+  .settings-move,
+  .home-new {
+    transition: transform 120ms ease, opacity 120ms ease, background-color 160ms ease;
+  }
+
+  /* .btn already has its own :active (transform + opacity) above; the rest
+     of the family gets the same press feedback here. */
+  .seg__item:active,
+  .chip:active,
+  .overlay-chip:active,
+  .compare-chip:active,
+  .trow-log:active,
+  .trow:active,
+  .hm-cell:active,
+  .list__row:active,
+  .detail-range:active,
+  .trend-period:active,
+  .bounds-period:active,
+  .settings-move:active,
+  .home-new:active {
+    transform: scale(0.97);
+  }
+
+  /* Shared shimmer look: a class of its own (.skeleton, unused by markup
+     yet — CONTRACT-U.4b.md §4 reserves it for U.7) plus the two existing
+     loading placeholders, composed onto the same declarations rather than
+     duplicated. The "Loading…" text nodes stay in the DOM for the tests;
+     `color: transparent` just hides them visually. */
+  .skeleton,
+  .chart-slot-loading,
+  .compare-loading {
+    position: relative;
+    overflow: hidden;
+    color: transparent !important;
+    background: var(--surface-2);
+    border-radius: var(--r-ctl);
+    min-height: 140px;
+  }
+
+  .skeleton::after,
+  .chart-slot-loading::after,
+  .compare-loading::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--surface-3), transparent);
+    animation: shimmer 1.2s linear infinite;
+  }
+
+  @keyframes shimmer {
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Home's loading state (js/views/home.js: data-home-state="loading" is
+     an EMPTY section — no row skeletons, no text node) gets its own
+     shimmer: a fixed height plus three rounded bands drawn by a repeating
+     gradient, with the same moving highlight sweeping over them. */
+  section.home[data-home-state="loading"] {
+    position: relative;
+    overflow: hidden;
+    min-height: 260px;
+    border-radius: var(--r-card);
+    background: repeating-linear-gradient(180deg, var(--surface-2) 0 96px, transparent 96px 108px);
+  }
+
+  section.home[data-home-state="loading"]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--surface-3), transparent);
+    animation: shimmer 1.2s linear infinite;
+  }
+}
+
 /* Component kit (Step U.0, docs/DESIGN_PLAN.md §3). Additive: nothing in
    js/ carries these class names yet — later U.1+ steps add them alongside
    each element's existing class (never in place of it, see
@@ -423,9 +550,13 @@ button {
 }
 
 .btn--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 44px;
   min-width: 44px;
   padding: 0;
+  line-height: 0;
   border-radius: var(--r-pill);
 }
 
@@ -435,6 +566,7 @@ button {
 }
 
 .btn svg {
+  display: block;
   width: 20px;
   height: 20px;
 }
@@ -573,7 +705,7 @@ button {
   color: var(--fg);
   border: 1px solid var(--hairline);
   font: var(--t-body);
-  font-size: 17px;
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
 }
 
 .input:focus {
@@ -796,7 +928,9 @@ button {
   grid-area: value;
   justify-self: end;
   color: var(--fg);
-  font: 700 22px/1.2 var(--font);
+  /* Step U.4b (CONTRACT-U.4b.md §1): 22px -> 20px, one step down with the
+     rest of the type scale. */
+  font: 700 20px/1.2 var(--font);
   font-variant-numeric: tabular-nums;
 }
 
@@ -915,6 +1049,7 @@ button {
   min-width: 44px;
   min-height: 44px;
   padding: 0;
+  line-height: 0;
   border-radius: var(--r-pill);
   background: var(--surface-2);
   color: var(--fg);
@@ -923,7 +1058,21 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Step U.4b (CONTRACT-U.4b.md §2): the icon wrapper span fills the
+   button's box exactly so its centre is the button's centre; the svg
+   itself is a block box (an inline default svg leaves a few px of
+   baseline/descender gap below it, which was the device-reported "the
+   check/plus glyph isn't centred" defect). */
+.trow-log__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
 .trow-log svg {
+  display: block;
   width: 20px;
   height: 20px;
 }
@@ -947,7 +1096,7 @@ button {
   min-height: 48px;
   padding: 0 var(--s3);
   font: var(--t-body);
-  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface-2);
@@ -1079,7 +1228,7 @@ button {
   min-height: 48px;
   padding: 0 var(--s3);
   font: var(--t-body);
-  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface-2);
@@ -1478,7 +1627,8 @@ button {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
-  font: 700 28px/1.15 var(--font);
+  /* Step U.4b (CONTRACT-U.4b.md §1): 28px -> 26px, one step down. */
+  font: 700 26px/1.15 var(--font);
 }
 
 .detail-unit {
@@ -1541,6 +1691,7 @@ button {
   min-width: 44px;
   min-height: 44px;
   padding: 0;
+  line-height: 0;
   border-radius: var(--r-pill);
   background: var(--surface-2);
   color: var(--fg);
@@ -1550,11 +1701,18 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Step U.4b (CONTRACT-U.4b.md §2): see .trow-log__icon's comment above —
+   same fix, same reason. */
 .detail-edit__icon {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 .detail-edit svg {
+  display: block;
   width: 20px;
   height: 20px;
 }
@@ -1641,6 +1799,7 @@ button {
   min-width: 44px;
   min-height: 44px;
   padding: 0;
+  line-height: 0;
   border-radius: var(--r-pill);
   color: var(--fg-2);
   touch-action: manipulation;
@@ -1648,6 +1807,7 @@ button {
 }
 
 .chart-expand svg {
+  display: block;
   width: 20px;
   height: 20px;
 }
@@ -1911,7 +2071,7 @@ button.hm-cell {
   min-height: 48px;
   padding: 0 var(--s3);
   font: var(--t-body);
-  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface);
@@ -2334,7 +2494,7 @@ button.hm-cell {
   min-height: 48px;
   padding: 0 var(--s3);
   font: var(--t-body);
-  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface-2);
@@ -2553,7 +2713,7 @@ button.hm-cell {
   min-height: 48px;
   padding: 0 var(--s3);
   font: var(--t-body);
-  font-size: 17px; /* keeps iOS Safari from auto-zooming on focus */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface-2);
@@ -2638,6 +2798,7 @@ button.hm-cell {
   min-width: 44px;
   min-height: 44px;
   padding: 0;
+  line-height: 0;
   border-radius: var(--r-pill);
   background: var(--surface-2);
   color: var(--fg);
@@ -2758,7 +2919,10 @@ button.hm-cell {
   margin: 8px 0;
   padding: 10px var(--s3);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  /* Step U.4b (CONTRACT-U.4b.md §1): bumped from 12px — this textarea is
+     focused()+select()ed for the user to copy (settings.js), so it needs
+     the same >=16px iOS-zoom floor as every other text input. */
+  font-size: 16px; /* keeps iOS Safari from auto-zooming on focus */
   border-radius: var(--r-ctl);
   border: 1px solid var(--hairline);
   background: var(--surface-2);
