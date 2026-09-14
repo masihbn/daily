@@ -447,6 +447,6 @@ Within a phase, keep moving without pausing between steps.
 | Fix cycles before escalating | 5 |
 | Phase gate | Hard stop, wait for user |
 | Within a phase | Keep moving |
-| Test data | `__test__*` prefix, swept and torn down. Moving to a second Supabase project at Step D.4 |
-| Never touch during v1 | RLS policies (**Step D.7**, moved from 5.3), the `counter` table |
-| Current step | **Phase D** — see `BUILD_PLAN.md`. Feature work parked at 3.3b; resume at 3.4 |
+| Test data | `__test__*` prefix, swept and torn down, on the second Supabase project (`.env.test`, since D.4) — never production |
+| Never touch opportunistically | RLS policies (owner-scoped since D.7 — change only in a step that says so), the `counter` table, production migrations (the user pastes them) |
+| Current step | **None open — v1 built 2026-09-14.** New scope = a new numbered step in `BUILD_PLAN.md` |

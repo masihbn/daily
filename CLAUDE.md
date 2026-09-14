@@ -6,30 +6,31 @@ user logs skills/habits they don't necessarily do every day (e.g.
 - a **monthly calendar view** — days marked (e.g. green) when logged
 - a **weekly chart** — count/amount per week over time, to see trends
 
-**The app is in daily use AND the build continues — read this before
-touching anything.** Feature work paused at Step 3.3b on 2026-08-25 so
-the user could start using the app for real; Phase D (daily-use
-readiness) ran 2026-08-25 → 2026-09-13 and is complete; the Phase D
-gate passed 2026-09-13 and the user chose to keep building the same
-day, so feature work resumed at Step 3.4 (done 2026-09-13). **The
-database holds real, irreplaceable data**: three years of history
-imported from CSV on 2026-09-04 (about 2,000 rows) plus everything
-logged on the phone since 2026-08-25. Every step from here on ships
-into an app the user opens every day.
+**v1 is built and in daily use — read this before touching anything.**
+Every step of `docs/BUILD_PLAN.md` through 5.4 is `DONE` as of
+2026-09-14 (Phases 0–5 plus the inserted Phase D). **The database holds
+real, irreplaceable data**: three years of history imported from CSV on
+2026-09-04 (about 2,000 rows) plus everything logged on the phone since
+2026-08-25. Anything you change ships into an app the user opens every
+day; a deploy reaches the phone after one relaunch (Step 5.1).
 
-What is built and device-verified: Phases 0, 1 and 2; Phase 3 through
-Step 3.3b (calendar heatmap, weekly trend chart with target line,
-selectable Daily/Weekly/Monthly granularity, two-bars threshold chart);
-all of Phase D — daily off-site backups with a verified restore, the
-test suite on a second Supabase project, entry provenance, the CSV
-import, outbox durability, paged history, and single-user Supabase Auth
-with owner-scoped RLS. The app is a hash router (`#/`, `#/t/:id`,
-`#/new`, `#/compare`, `#/settings`), a trackable list with quick-log,
-create/edit forms, per-trackable charts, and a sign-in screen, all
-wired to `js/api.js` / `js/store.js`.
+What is built and device-verified: the calendar heatmap, weekly trend
+chart with target line, Daily/Weekly/Monthly granularity, the two-bars
+Range chart with an overlay (another trackable's bars vs its target or
+line vs its band), the normalised Compare screen, Settings (rolling
+window that drives the auto bands, reorder, archived, CSV export via the
+share sheet, Face ID lock, sign out), daily off-site backups with a
+verified restore, the test suite on a second Supabase project, entry
+provenance, the one-off CSV import, outbox durability, paged history,
+single-user Supabase Auth with owner-scoped RLS, a service worker that
+caches only app assets and updates after one relaunch, and an offline
+indicator. Routes: `#/`, `#/t/:id`, `#/t/:id/edit`, `#/new`, `#/compare`,
+`#/settings`.
 
-**Next work: the first step not `DONE` in `BUILD_PLAN.md`** (5.3 is
-satisfied by D.7; Step 5.4 as of 2026-09-14, after 5.2's device check).
+**Next work: there is no open step.** New scope goes into
+`BUILD_PLAN.md` as a new numbered step with the same contract, executed
+under `docs/ORCHESTRATION.md`. The user decides what, if anything, is
+next.
 
 **Three things that will bite an unwary session during the park:**
 
@@ -75,13 +76,12 @@ gate. Kept here because it shows the standing preference — when a step is
 the first time something runs on the device, stop and let the user check
 it before stacking more on top.
 
-**The concept was reframed and the design is now resolved.** It went from
+**The concept was reframed and the design is resolved.** It went from
 a narrow "skill/habit tracker" to a more general personal logging +
 charts platform (generic bounded-metric "two bars" tracking, flexible
 aggregation, etc.), and the product is named **"Daily."** See
-**docs/APP_CONCEPT.md** for the design decisions. The live schema has
-since been migrated to match (migration `0003`, applied 2026-08-22) —
-`docs/DATA_MODEL.md` describes what is actually live.
+**docs/APP_CONCEPT.md** for the design decisions; `docs/DATA_MODEL.md`
+describes what is actually live.
 
 **→ If you are here to build something, read `docs/ORCHESTRATION.md`
 first, then `docs/BUILD_PLAN.md`.**
@@ -223,8 +223,8 @@ docs/                 all notes/reference docs live here (see below)
   APP_CONCEPT.md       resolved design decisions — the *what*. Supersedes
                         the data model below in spirit even though the
                         schema hasn't caught up yet
-  DATA_MODEL.md        schema reference for what's actually live (pre-dates
-                        the reframing in APP_CONCEPT.md)
+  DATA_MODEL.md        schema reference for what's actually live, migration
+                        by migration (0001–0010), incl. security status
   PROJECT_NOTES.md      deployment/ops history and the GitHub blueprint
                         (gh auth mechanics, Pages setup, keepalive workflow,
                         security posture) — read before touching CI/deploy/git

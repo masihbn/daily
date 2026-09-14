@@ -20,6 +20,11 @@ know what to build, how to build it, and how to prove it works.
 
 **Status legend:** `TODO` · `IN PROGRESS` · `DONE` · `BLOCKED`
 
+> **v1 is built (2026-09-14).** Every step through 5.4 is `DONE` (5.3
+> was executed as D.7). The app is in daily use on the phone. Anything
+> after this is new scope: add it as a new numbered step with the same
+> contract, and run it under `docs/ORCHESTRATION.md` like the rest.
+
 ---
 
 ## Ground rules that apply to every step
@@ -5486,7 +5491,9 @@ _(To be filled in by the executing session.)_
 
 ## Step 5.4 — Real-device verification & docs close-out
 
-**Status:** TODO
+**Status:** IN PROGRESS — 2026-09-14. Docs sweep done (below); the two
+device items no earlier check covered (charts offline from the worker
+cache; a log over cellular) are with the user.
 
 **Goal.** The whole thing is confirmed working on the actual iPhone, and
 the docs describe reality.
@@ -5519,7 +5526,37 @@ the docs describe reality.
 
 **Test Subjects.**
 
-_(To be filled in by the executing session.)_
+*What was already verified on the real iPhone before this step, with
+the Test log attempt that records it* (`docs/PROJECT_NOTES.md`):
+
+- Live HTTPS URL, Add to Home Screen, icon, standalone launch, kill and
+  relaunch persistence — Attempt 5 (plumbing) and again with the real
+  app at every gate since (Attempts 6–9 for Phases 0–2).
+- Charts on a 390px viewport, both CDN scripts loading — Attempts 10
+  and 13–15 (Phase 3 gate).
+- Sign-in, session survival across relaunch, RLS flip — Attempt 12.
+- Settings, rolling window moving the auto band, CSV export from the
+  installed app via the share sheet — Attempt 16 (Phase 4 gate).
+- Service-worker update after ONE relaunch, airplane mode showing the
+  cached shell and data, an offline log sending on reconnect —
+  Attempt 17.
+- Face ID lock: enable, lock on cold launch, auto-prompt, background
+  without re-prompt, "Sign out instead" — Step 5.2's device check.
+
+*Left for this step's own phone pass:* charts rendering while offline
+(the CDN scripts served from the worker cache, never exercised before —
+Attempt 17 checked Home only) and a log over cellular rather than
+Wi-Fi. Result recorded in Attempt 18.
+
+*Docs close-out (2026-09-14):* `CLAUDE.md` status rewritten to "v1
+built, in daily use"; `docs/DATA_MODEL.md` heading "How the planned
+views read from this" → "How the views read from this" and the intro
+note that it pre-dates the reframing removed from `CLAUDE.md`'s folder
+map; `docs/APP_CONCEPT.md`'s Face ID scope note gains a pointer to D.7
+(the "backend stays as-is" sentence is history); `docs/ORCHESTRATION.md`
+quick reference rows for test data, "never touch" and "current step"
+updated; `docs/PROJECT_NOTES.md` "Next steps" rewritten for a shipped
+v1. Nothing in the plan was renumbered or deleted.
 
 ---
 
@@ -5721,3 +5758,7 @@ unwind than to ask about.
   "Sign out instead" as the escape hatch (no URL bypass). Suite 4166
   green first run. `CACHE` → `daily-v41`. Device check pending; 5.3 is
   already satisfied by D.7, 5.4 next.
+- **2026-09-14** — **Step 5.4: v1 built.** Docs swept to describe
+  reality; the only device items never exercised before (charts offline,
+  a cellular log) handed to the user. From here, new work is new
+  numbered steps under the same contract.

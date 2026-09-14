@@ -187,7 +187,7 @@ window used by default aggregations/views (Step 4.1).
 Seeded with its one row (`id = 1`) by the migration that created it, so
 the client never has to handle a missing-settings case.
 
-## How the planned views read from this
+## How the views read from this
 
 Nothing materialized — both views are a single date-range `SELECT`
 against `entries`, aggregated client-side. At personal-app scale (one

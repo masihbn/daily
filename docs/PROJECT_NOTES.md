@@ -985,20 +985,22 @@ the thing tested here is the placeholder tap-counter, which Step 0.3 of
 
 ## Next steps (in order)
 
-Rewritten at Step D.8 (2026-09-13); the Phase 0 version is in git
-history.
+Rewritten at Step 5.4 (2026-09-14). Earlier versions are in git history.
 
-- [x] **Phase D gate verdict from the user.** **PASSED 2026-09-13** —
-      see Test log, Attempt 13. Reason it mattered: `ORCHESTRATION.md`
-      §7 — a gate is a hard stop, and the app was not formally "in use"
-      until the user said so.
-- [ ] **~4 weeks (2026-10-11) and ~8 weeks (2026-11-08): the user checks
-      the backup repo's newest commit is from that day and its run is
-      green, and the Supabase dashboard shows the project active.**
-      Reason: the only symptom of a paused project is the app failing
-      one morning; see "The silence problem" under the keepalive section.
-- [ ] **When the user ends the park (~December 2026): resume at Step
-      3.4.** Reason: it is the first step not `DONE` in `BUILD_PLAN.md`,
-      and nothing in Phase D changed what 3.4 onward need to do. First
-      re-enable this repo's keepalive workflow from the Actions tab, then
-      run `npm test` (it targets the test project, never production).
+- [x] **Build v1** — every step of `docs/BUILD_PLAN.md` through 5.4 is
+      `DONE` as of 2026-09-14. Reason it is listed: so a cold session
+      does not go looking for an open step.
+- [ ] **Keep the two quiet-period checks** (~2026-10-11 and
+      ~2026-11-08): the backup repo's newest commit is from that day and
+      its run is green; the Supabase dashboard shows the project active.
+      Reason: the only symptom of a paused project is the app failing one
+      morning; see "The silence problem" under the keepalive section.
+- [ ] **When the public repo's keepalive gets auto-disabled (~60 days
+      after the last push)**, re-enable it from the Actions tab whenever
+      work resumes. Reason: harmless while the backup repo's own
+      keepalive runs, but it is the documented primary.
+- [ ] **New features** go in as new numbered steps in `BUILD_PLAN.md`,
+      with a contract, under `docs/ORCHESTRATION.md`. Reason: the loop
+      (Implementer + Test Author from a contract, Runner, orchestrator
+      judges) is what kept 4,166 tests green through fourteen steps in
+      two days.

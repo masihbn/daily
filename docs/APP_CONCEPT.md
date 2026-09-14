@@ -248,6 +248,11 @@ weblogtrips.com](https://weblogtrips.com/technology/biometric-login-pwa-facial-r
 
 ## Face ID / auth scope (resolved)
 
+> **2026-09-14 status:** the local lock shipped as Step 5.2 (opt-in,
+> WebAuthn platform credential, locks on cold launch). The "backend
+> stays as-is" sentence below is history: the backend has been behind
+> Supabase Auth with owner-scoped RLS since Step D.7 (2026-09-13).
+
 Local app-lock only, confirmed. Backend stays as-is (anon key + open
 RLS) for now — explicitly not treated as a substitute for the still-open
 RLS-hardening item below.
