@@ -116,11 +116,19 @@ async function seedUnlockedSession(page) {
 }
 
 // Installs a fake navigator.credentials AFTER seedSession (per
-// CONTRACT-5.2.md §0.7 / this file's task brief). `create`/`get` are plain,
-// JSON-serializable specs: { ok: true, rawIdBytes?: number[] } or
-// { ok: false, errorName?: string, message?: string }. Every call (to
-// either method) is pushed onto window.__fakeWebAuthn.calls as
-// { method, opts } with BufferSource fields already converted to plain
+// CONTRACT-5.2.md §0.7 / this file's task brief). `create`/`get` are each
+// either a single plain, JSON-serializable spec — { ok: true, rawIdBytes?:
+// number[] } or { ok: false, errorName?: string, message?: string } — or
+// an ARRAY of such specs consumed one per call (the last one repeats once
+// exhausted), for a test that needs the Nth call to behave differently
+// (e.g. K4: the automatic attempt right after a fresh reload must behave
+// differently from the one right after the first page load). The call
+// index is kept in localStorage rather than a module-level counter,
+// because addInitScript re-runs — and would otherwise reset an in-memory
+// counter — on every navigation/reload within the same test.
+//
+// Every call (to either method) is pushed onto window.__fakeWebAuthn.calls
+// as { method, opts } with BufferSource fields already converted to plain
 // arrays, so a later page.evaluate(() => window.__fakeWebAuthn.calls)
 // round-trips through JSON cleanly.
 async function installFakeWebAuthn(page, { create = { ok: true }, get = { ok: true } } = {}) {
@@ -136,8 +144,16 @@ async function installFakeWebAuthn(page, { create = { ok: true }, get = { ok: tr
         }
         return { publicKey: snap };
       }
-      function outcomeFn(method, spec) {
+      function nextSpec(method, specOrList) {
+        const list = Array.isArray(specOrList) ? specOrList : [specOrList];
+        const key = `__e2e_fakeWebAuthn_${method}_i`;
+        const i = Number(localStorage.getItem(key) || '0');
+        localStorage.setItem(key, String(i + 1));
+        return list[Math.min(i, list.length - 1)];
+      }
+      function outcomeFn(method, specOrList) {
         return async (opts) => {
+          const spec = nextSpec(method, specOrList);
           window.__fakeWebAuthn.calls.push({ method, opts: toPlainOptions(opts) });
           if (!spec || spec.ok === false) {
             const err = new Error((spec && spec.message) || 'failed');
@@ -148,6 +164,11 @@ async function installFakeWebAuthn(page, { create = { ok: true }, get = { ok: tr
           return { rawId: Uint8Array.from(rawIdBytes).buffer };
         };
       }
+      // window.__fakeWebAuthn.calls itself IS reset on every reload (a
+      // fresh document has a fresh `window`) — that's intended: every test
+      // below reads it back only after the reload it cares about, never
+      // needing calls to accumulate across reloads. Only the call-index
+      // counters above need to survive a reload, hence localStorage.
       window.__fakeWebAuthn = { calls: [] };
       const credentials = { create: outcomeFn('create', create), get: outcomeFn('get', get) };
       Object.defineProperty(navigator, 'credentials', { value: credentials, configurable: true });
@@ -209,10 +230,11 @@ test('K1 — a seeded lock + signed-in session renders the lock screen, hides na
 });
 
 // ===========================================================================
-// K2 — successful unlock: exact get() options, then unlocked + route mounts
+// K2 — automatic unlock on mount (no tap): exact get() options, then
+// unlocked + route mounts
 // ===========================================================================
 
-test('K2 — Unlock succeeds: get() is called once with the seeded credential id bytes and userVerification required; unlocks, mounts the route, shows nav, marks the session', async ({
+test('K2 — the lock screen unlocks automatically on mount, with no tap: get() is called once with the seeded credential id bytes and userVerification required; unlocks, mounts the route, shows nav, marks the session', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -223,10 +245,9 @@ test('K2 — Unlock succeeds: get() is called once with the seeded credential id
   await routeEmptyRest(page);
 
   await page.goto('/index.html#/');
-  await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
 
-  await page.locator('button.lock-unlock').click();
-
+  // No tap anywhere in this test: the lock screen attempts unlock()
+  // automatically on mount (CONTRACT-5.2.md §2 amendment).
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'unlocked');
   await expect(page.locator('#nav')).toBeVisible();
   await expect(page.locator('section.home')).toBeVisible();
@@ -246,10 +267,13 @@ test('K2 — Unlock succeeds: get() is called once with the seeded credential id
 });
 
 // ===========================================================================
-// K3 — cancelled unlock: error text, still locked
+// K3 — the automatic attempt is cancelled SILENTLY (idle, error hidden,
+// Unlock enabled); a manual tap afterwards behaves exactly as before
 // ===========================================================================
 
-test('K3 — a NotAllowedError from get() shows the cancelled message and stays locked', async ({ page }) => {
+test('K3 — a NotAllowedError from the automatic attempt leaves it idle with the error hidden and Unlock enabled; a manual tap afterwards shows "Unlock was cancelled."; get() called twice in total', async ({
+  page,
+}) => {
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
   await seedSession(page);
@@ -259,13 +283,29 @@ test('K3 — a NotAllowedError from get() shows the cancelled message and stays 
   await routeEmptyRest(page, { events });
 
   await page.goto('/index.html#/');
+
+  // After the automatic attempt resolves 'cancelled': idle, error hidden,
+  // Unlock enabled, still locked — no tap has happened yet.
+  await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
+  await expect(page.locator('section.lock')).toHaveAttribute('data-state', 'idle');
+  await expect(page.locator('p.lock-error')).toBeHidden();
+  await expect(page.locator('button.lock-unlock')).toBeEnabled();
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__fakeWebAuthn.calls)).filter((c) => c.method === 'get').length)
+    .toBe(1);
+
+  // A manual tap afterwards behaves exactly as before the amendment: the
+  // fake is still rejecting, so this second attempt shows the error.
   await page.locator('button.lock-unlock').click();
 
   await expect(page.locator('p.lock-error')).toBeVisible();
   await expect(page.locator('p.lock-error')).toHaveText('Unlock was cancelled.');
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
-  expect(events).toEqual([]);
 
+  const getCalls = (await page.evaluate(() => window.__fakeWebAuthn.calls)).filter((c) => c.method === 'get');
+  expect(getCalls.length).toBe(2);
+
+  expect(events).toEqual([]);
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
 });
@@ -274,28 +314,40 @@ test('K3 — a NotAllowedError from get() shows the cancelled message and stays 
 // K4 — sessionStorage persists across reload; clearing it re-locks
 // ===========================================================================
 
-test('K4 — sessionStorage persists across reload (stays unlocked); clearing it locks again on reload', async ({
+test('K4 — sessionStorage persists across reload (stays unlocked, no re-attempt); clearing it triggers a fresh automatic attempt on reload', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
   const unexpectedAuth = await installAuthGuard(page);
   await seedSession(page);
   await seedLock(page);
-  await installFakeWebAuthn(page, { get: { ok: true } });
+  // Two-call sequence: the first automatic attempt (right after the
+  // initial load) succeeds; the second (the automatic attempt that fires
+  // on the reload AFTER sessionStorage.clear()) is rejected, so "locked
+  // again on reload" is a stable, assertable state rather than a race
+  // against another instantly-successful auto-unlock.
+  await installFakeWebAuthn(page, { get: [{ ok: true }, { ok: false, errorName: 'NotAllowedError' }] });
   await routeEmptyRest(page);
 
   await page.goto('/index.html#/');
-  await page.locator('button.lock-unlock').click();
+  // No tap: the first automatic attempt unlocks on its own.
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'unlocked');
 
   await page.reload();
+  // Already unlocked this session (sessionStorage survives a reload), so
+  // the lock view never mounts and no second get() call happens here.
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'unlocked');
   await expect(page.locator('section.lock')).toHaveCount(0);
 
   await page.evaluate(() => sessionStorage.clear());
   await page.reload();
+  // The lock view mounts again and attempts unlock() automatically; this
+  // is the sequence's second, rejecting outcome.
   await expect(page.locator('#app')).toHaveAttribute('data-lock', 'locked');
   await expect(page.locator('section.lock')).toBeVisible();
+
+  const getCalls = (await page.evaluate(() => window.__fakeWebAuthn.calls)).filter((c) => c.method === 'get');
+  expect(getCalls.length).toBe(1); // only this reload's attempt — calls resets per document
 
   expect(unexpected).toEqual([]);
   expect(unexpectedAuth).toEqual([]);
@@ -310,7 +362,9 @@ test('K5 — "Sign out instead" clears the lock and cache, signs out, and shows 
   const unexpectedAuth = await installAuthGuard(page);
   await seedSession(page);
   await seedLock(page);
-  await installFakeWebAuthn(page);
+  // The automatic attempt must NOT succeed here, or it would unlock before
+  // this test gets to exercise the "Sign out instead" hatch.
+  await installFakeWebAuthn(page, { get: { ok: false, errorName: 'NotAllowedError' } });
   const logoutRequests = [];
   await routeLogout(page, { requests: logoutRequests });
   await routeEmptyRest(page);
@@ -334,11 +388,11 @@ test('K5 — "Sign out instead" clears the lock and cache, signs out, and shows 
 });
 
 // ===========================================================================
-// K6 — no WebAuthn API at all: unavailable text after tapping Unlock,
-// Unlock disabled, but Sign out still works
+// K6 — no WebAuthn API at all: the AUTOMATIC attempt itself resolves
+// 'unsupported' (no tap needed); Unlock disabled; Sign out still works
 // ===========================================================================
 
-test('K6 — no navigator.credentials at all: tapping Unlock shows the unavailable text and disables Unlock; Sign out still works', async ({
+test('K6 — no navigator.credentials at all: the automatic attempt alone shows the unavailable text and disables Unlock; Sign out still works', async ({
   page,
 }) => {
   const unexpected = await installGuard(page);
@@ -353,8 +407,7 @@ test('K6 — no navigator.credentials at all: tapping Unlock shows the unavailab
   await page.goto('/index.html#/');
   await expect(page.locator('section.lock')).toBeVisible();
 
-  await page.locator('button.lock-unlock').click();
-
+  // No tap: the automatic attempt on mount already finds no WebAuthn API.
   await expect(page.locator('p.lock-error')).toBeVisible();
   await expect(page.locator('p.lock-error')).toHaveText('Face ID is not available in this browser. Sign out to continue.');
   await expect(page.locator('button.lock-unlock')).toBeDisabled();

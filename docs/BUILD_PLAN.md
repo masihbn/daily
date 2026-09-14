@@ -5426,6 +5426,17 @@ lock screen.
 itself, passcode fallback, and whether iOS keeps the credential across
 app kills.
 
+*Device check 2026-09-14 (`daily-v41`): "It works, but…"* — enable,
+kill/reopen → lock, Face ID, background/foreground without a prompt,
+"Sign out instead" — all as designed. The complaint: two taps before
+Face ID — Unlock, then Apple's "Use passkey" sheet. Folded in the same
+hour (`daily-v42`): **the lock screen now attempts the unlock on mount,
+with no tap**; an auto attempt that is refused or dismissed drops
+silently back to the idle Unlock button (a browser that demands a user
+gesture rejects with NotAllowedError, which must not read as an
+error). Apple's consent sheet cannot be removed by a web app — that is
+iOS's own passkey UX — so the best flow is open → sheet → Face ID.
+
 ---
 
 ## Step 5.3 — RLS hardening + Supabase Auth
